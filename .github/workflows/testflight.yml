@@ -1,0 +1,120 @@
+name: testflight
+
+# Manual only, deliberately.
+#
+# This spends macOS runner minutes (billed at 10x on a private repo) and pushes a
+# build to real testers, neither of which should happen just because someone
+# pushed a commit. Run it from the Actions tab when you want a build to go out.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: testflight
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    name: archive and upload
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    env:
+      KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+      ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: xcodebuild -version
+
+      - name: Authentication key
+        env:
+          KEY_P8: ${{ secrets.APP_STORE_CONNECT_KEY_P8 }}
+        run: |
+          for v in KEY_P8 KEY_ID ISSUER_ID TEAM_ID; do
+            if [ -z "${!v}" ]; then
+              echo "::error::Secret $v is not set. See 'Shipping a build' in the README."
+              exit 1
+            fi
+          done
+          mkdir -p ~/private_keys
+          printf '%s\n' "$KEY_P8" > ~/private_keys/AuthKey_$KEY_ID.p8
+          # A .p8 pasted with mangled newlines fails much later, with an error
+          # that says nothing about the key. Catch it here instead.
+          grep -q "BEGIN PRIVATE KEY" ~/private_keys/AuthKey_$KEY_ID.p8 \
+            || { echo "::error::APP_STORE_CONNECT_KEY_P8 is not a PEM private key."; exit 1; }
+
+      - name: Archive
+        run: |
+          set -o pipefail
+          # -allowProvisioningUpdates lets Xcode mint the distribution certificate
+          # and the provisioning profile from the API key, so no .p12 ever has to
+          # be exported from a Mac and kept here.
+          #
+          # CURRENT_PROJECT_VERSION is overridden rather than committed: every
+          # upload needs a build number App Store Connect has not seen, and a
+          # duplicate is only rejected after the whole archive has been built.
+          # The run number is monotonic, so it cannot collide with itself.
+          xcodebuild archive \
+            -project Meow.xcodeproj \
+            -scheme Meow \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath "$RUNNER_TEMP/Meow.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_$KEY_ID.p8 \
+            -authenticationKeyID "$KEY_ID" \
+            -authenticationKeyIssuerID "$ISSUER_ID" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            > "$RUNNER_TEMP/archive.log" 2>&1 || {
+              echo "::group::archive errors"
+              grep -E "error:" "$RUNNER_TEMP/archive.log" | sort -u | head -40
+              echo "::endgroup::"
+              exit 1; }
+          echo "archived build ${{ github.run_number }}"
+
+      - name: Export and upload
+        run: |
+          set -o pipefail
+          {
+            echo '<?xml version="1.0" encoding="UTF-8"?>'
+            echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+            echo '<plist version="1.0"><dict>'
+            echo "<key>method</key><string>app-store-connect</string>"
+            echo "<key>destination</key><string>upload</string>"
+            echo "<key>teamID</key><string>$TEAM_ID</string>"
+            echo "<key>uploadSymbols</key><true/>"
+            echo '</dict></plist>'
+          } > "$RUNNER_TEMP/ExportOptions.plist"
+
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/Meow.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_$KEY_ID.p8 \
+            -authenticationKeyID "$KEY_ID" \
+            -authenticationKeyIssuerID "$ISSUER_ID" \
+            > "$RUNNER_TEMP/export.log" 2>&1 || {
+              echo "::group::export errors"
+              grep -E "error:|Error Domain" "$RUNNER_TEMP/export.log" | sort -u | head -40
+              echo "::endgroup::"
+              exit 1; }
+          echo "uploaded to App Store Connect; processing takes 5-15 minutes"
+
+      - name: Clean up the key
+        if: always()
+        run: rm -rf ~/private_keys
+
+      - name: Keep the logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: testflight-logs
+          path: |
+            ${{ runner.temp }}/archive.log
+            ${{ runner.temp }}/export.log
+          if-no-files-found: ignore

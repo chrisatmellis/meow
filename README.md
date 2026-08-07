@@ -38,6 +38,37 @@ permission prompt but background delivery is unreliable there.
 Debug builds have a time-of-day slider in Settings, so you can see dawn, noon,
 golden hour and night without waiting for them.
 
+## Shipping a build
+
+From a Mac, `Product → Archive` then `Distribute App → App Store Connect` needs
+nothing set up beyond a team — that is the shortest path to a first TestFlight
+build, and it is worth doing once by hand to prove the account side works.
+
+To have CI do it instead, run the `testflight` workflow from the Actions tab. It
+is manual-only on purpose: it spends macOS minutes and pushes to real testers,
+neither of which should follow from an ordinary commit. It needs four repository
+secrets (Settings → Secrets and variables → Actions):
+
+| Secret | Where it comes from |
+| --- | --- |
+| `APP_STORE_CONNECT_KEY_P8` | The `.p8` file's contents, pasted whole, `BEGIN`/`END` lines included |
+| `APP_STORE_CONNECT_KEY_ID` | The 10-character Key ID shown beside the key |
+| `APP_STORE_CONNECT_ISSUER_ID` | The UUID at the top of the Integrations page — one per account, not per key |
+| `APPLE_TEAM_ID` | The 10-character Team ID from developer.apple.com → Membership |
+
+Generate the key at App Store Connect → Users and Access → Integrations →
+App Store Connect API, with the **App Manager** role. **The `.p8` downloads
+exactly once and cannot be retrieved again** — if it is lost, revoke it and
+generate another.
+
+The key is enough on its own: `-allowProvisioningUpdates` lets Xcode mint the
+distribution certificate and provisioning profile from it, so no `.p12` ever has
+to be exported from a Mac and stored in CI.
+
+The build number comes from the workflow run number rather than the committed
+`CURRENT_PROJECT_VERSION`. App Store Connect rejects a build number it has seen
+before, and it does so only after the entire archive has been built.
+
 ## What's in the box
 
 ```
