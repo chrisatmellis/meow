@@ -73,7 +73,7 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
         camera.bloomIntensity = 0.16
         camera.bloomThreshold = 0.95
         camera.bloomBlurRadius = 10
-        camera.exposureOffset = -0.35
+        camera.exposureOffset = LightingRig.exposureOffset(for: sky)
         camera.motionBlurIntensity = 0.0
         camera.wantsDepthOfField = RenderQuality.wantsDepthOfField
         camera.focusDistance = 2.6
@@ -453,6 +453,7 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
             let lanternOn = brain.room.lanternAuto ? sky.wantsLampLight : brain.room.lanternOn
             if brain.room.lanternAuto { brain.room.lanternOn = lanternOn }
             lighting.apply(sky: sky, scene: scene, room: room, lanternOn: lanternOn)
+            cameraNode.camera?.exposureOffset = LightingRig.exposureOffset(for: sky)
         }
 
         brain.update(dt: dt, sky: sky)

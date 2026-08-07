@@ -67,6 +67,21 @@ final class LightingRig {
         root.addChildNode(windowGlowNode)
     }
 
+    /// How far to stop the camera down for a given sky.
+    ///
+    /// The room spans a huge range of real brightness — a moonlit night and noon
+    /// sun through paper are nowhere near each other — and one fixed exposure
+    /// cannot serve both. At a setting dark enough to hold midday, night is
+    /// unreadable; at one bright enough for night, midday clips the tatami, the
+    /// walls and the shoji all to flat white and the cat washes out with them.
+    /// So the camera stops down as the sun climbs, the way an eye or an
+    /// auto-exposing camera does. SceneKit's own `wantsExposureAdaptation` would
+    /// ramp visibly after launch; the sky is already known, so this is computed
+    /// straight from it instead.
+    static func exposureOffset(for sky: SkyState) -> CGFloat {
+        CGFloat(-0.35 - 0.90 * sky.daylight)
+    }
+
     func apply(sky: SkyState, scene: SCNScene, room: RoomNode, lanternOn: Bool) {
         // --- Sun placement.
         let d = sky.sunDirection
@@ -115,7 +130,7 @@ final class LightingRig {
 
         // --- Paper lantern.
         if let light = room.lanternLight, let paper = room.lanternPaper {
-            let target: CGFloat = lanternOn ? CGFloat(155 - 60 * sky.daylight) : 0
+            let target: CGFloat = lanternOn ? CGFloat(95 - 40 * sky.daylight) : 0
             light.intensity = target
             paper.emission.intensity = lanternOn ? 0.85 : 0.0
         }

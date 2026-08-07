@@ -632,12 +632,33 @@ section("room builder") {
 
     let lighting = LightingRig()
     let scene = SCNScene()
+    var brightestExposure = -CGFloat.infinity
+    var darkestExposure = CGFloat.infinity
+    var previousExposure = CGFloat.infinity
+    var previousDaylight = -Float.infinity
     for hour in 0..<24 {
         var comps = DateComponents(); comps.year = 2026; comps.month = 9; comps.day = 21; comps.hour = hour
         var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "UTC")!
         let s = WorldClock.sky(at: cal.date(from: comps)!, timeZone: TimeZone(identifier: "UTC")!)
         lighting.apply(sky: s, scene: scene, room: room, lanternOn: s.wantsLampLight)
+
+        // The camera stops down as the sun climbs. Midday and night are far
+        // enough apart in real brightness that one fixed exposure blows the
+        // tatami and the shoji out to flat white at noon, which is what this
+        // guards against.
+        let e = LightingRig.exposureOffset(for: s)
+        expect(e <= 0.01 && e >= -2.0, "exposure at \(hour):00 is in range (\(e))")
+        if s.daylight >= previousDaylight {
+            expect(e <= previousExposure + 1e-5,
+                   "exposure does not brighten as daylight rises (\(hour):00)")
+        }
+        previousExposure = e
+        previousDaylight = s.daylight
+        brightestExposure = max(brightestExposure, e)
+        darkestExposure = min(darkestExposure, e)
     }
+    expect(brightestExposure - darkestExposure > 0.5,
+           "exposure actually varies across the day (\(brightestExposure - darkestExposure) EV)")
     expect(true, "lighting applied across a whole day")
 }
 

@@ -466,7 +466,10 @@ enum RoomBuilder {
         light.color = UIColor(red: 1.0, green: 0.82, blue: 0.56, alpha: 1)
         light.intensity = 0
         light.attenuationStartDistance = 0.3
-        light.attenuationEndDistance = 5.0
+        // The room's diagonal is about 5.6 m, so a 5 m reach was effectively no
+        // falloff at all and the lantern lit the whole room like a ceiling light.
+        // A paper andon throws a pool of warm light near its corner, not a flood.
+        light.attenuationEndDistance = 2.8
         light.castsShadow = true
         light.shadowMode = .deferred
         light.shadowRadius = 8
