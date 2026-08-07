@@ -8,6 +8,12 @@ if CommandLine.arguments.contains("--profile") {
     exit(0)
 }
 
+if let i = CommandLine.arguments.firstIndex(of: "--render") {
+    let dir = CommandLine.arguments.count > i + 1 ? CommandLine.arguments[i + 1] : "./renders"
+    runRender(outputDirectory: dir)
+    exit(0)
+}
+
 var failures: [String] = []
 var checks = 0
 

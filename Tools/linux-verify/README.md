@@ -48,6 +48,31 @@ Three things it is watched for: a cat asleep 40–55% of the day (not 5%, not 90
 at least ~20 distinct activities in play, and roughly 100–200 vocalisations a day
 — about one every ten minutes, rather than one a second.
 
+## Looking at the cat
+
+```sh
+./verify.sh --render ./renders
+```
+
+`Harness/render.swift` is a small software rasteriser: it walks the node tree,
+applies the transforms, projects the triangles and writes PNGs. It renders the
+cat in six poses from two angles, six breeds side by side for silhouette
+comparison, and the room from exactly where the player sits.
+
+This is how the shim ended up with real 4×4 matrix maths — `convertPosition`
+being an identity function meant the leg IK wasn't actually being exercised.
+Making the transforms real both fixed that and made these pictures possible.
+
+Things it caught: tail rings that bulged out like a caterpillar's segments,
+16 cm whiskers, legs sized to be exactly straight when standing (so they could
+not reach the floor when the cat sat up), a tail that curled far enough to loop
+over the cat's own back, a single `tuck` value that folded the front legs of a
+sitting cat, and a head welded to the shoulders with no neck to lift it.
+
+The images are flat-shaded and untextured — no fur, no lighting, no materials.
+They are for checking proportion, pose and framing, not for judging how the game
+will actually look.
+
 ## What it does not prove
 
 The stand-ins in `Shims/` are written from the documented Apple API surface. They

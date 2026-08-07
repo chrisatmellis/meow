@@ -13,13 +13,18 @@ struct PoseState {
     var headRoll: Float = 0
     var frontFoot = SCNVector3.zero  // offset from the rest stance, in body space
     var hindFoot = SCNVector3.zero
-    var tuck: Float = 0              // legs folding under the body
+    var tuckFront: Float = 0         // front legs folding under the chest
+    var tuckHind: Float = 0          // hind legs folding under the haunches
     var tailBasePitch: Float = 0
     var tailCurl: Float = 0
     var tailSide: Float = 0
     var earPitch: Float = 0
     var jawOpen: Float = 0
     var frontPawLift: Float = 0      // for kneading / batting
+    /// The torso is one rigid mesh, so squashing it along the spine is how a loaf
+    /// gets its compact silhouette and a stretch gets its long one.
+    var torsoLength: Float = 1
+    var torsoHeight: Float = 1
 
     mutating func blend(toward t: PoseState, rate: Float, dt: Float) {
         bodyHeight = approach(bodyHeight, t.bodyHeight, rate: rate, dt: dt)
@@ -31,13 +36,16 @@ struct PoseState {
         headRoll = approach(headRoll, t.headRoll, rate: rate, dt: dt)
         frontFoot = frontFoot.lerped(to: t.frontFoot, 1 - expf(-rate * dt))
         hindFoot = hindFoot.lerped(to: t.hindFoot, 1 - expf(-rate * dt))
-        tuck = approach(tuck, t.tuck, rate: rate, dt: dt)
+        tuckFront = approach(tuckFront, t.tuckFront, rate: rate, dt: dt)
+        tuckHind = approach(tuckHind, t.tuckHind, rate: rate, dt: dt)
         tailBasePitch = approach(tailBasePitch, t.tailBasePitch, rate: rate, dt: dt)
         tailCurl = approach(tailCurl, t.tailCurl, rate: rate, dt: dt)
         tailSide = approach(tailSide, t.tailSide, rate: rate, dt: dt)
         earPitch = approach(earPitch, t.earPitch, rate: rate, dt: dt)
         jawOpen = approach(jawOpen, t.jawOpen, rate: rate * 2, dt: dt)
         frontPawLift = approach(frontPawLift, t.frontPawLift, rate: rate, dt: dt)
+        torsoLength = approach(torsoLength, t.torsoLength, rate: rate, dt: dt)
+        torsoHeight = approach(torsoHeight, t.torsoHeight, rate: rate, dt: dt)
     }
 }
 
@@ -103,6 +111,10 @@ final class CatAnimator {
                                            y: sway * 0.35,
                                            z: pose.bodyRoll + sway)
 
+        rig.chestNode.scale = SCNVector3(x: pose.torsoHeight * 0.5 + 0.5,
+                                         y: pose.torsoHeight,
+                                         z: pose.torsoLength)
+
         // ---- Legs -------------------------------------------------------
         solveLegs(dt: dt, motion: motion, bodyY: bodyY, strideLength: strideLength)
 
@@ -146,11 +158,14 @@ final class CatAnimator {
             var footY = -bodyY + baseOffset.y
             var footZ = hipInBody.z + baseOffset.z + (leg.isFront ? 0.012 : -0.008)
 
-            // Folding the legs under the body for loafing / curling / sitting.
-            if pose.tuck > 0.01 {
-                let tuckY = mix(footY, -bodyY * 0.28, pose.tuck)
-                let tuckZ = mix(footZ, hipInBody.z + (leg.isFront ? 0.030 : -0.018), pose.tuck)
-                let tuckX = mix(footX, hipInBody.x * 0.72, pose.tuck)
+            // Folding the legs under the body for loafing, curling and sitting. Front
+            // and hind fold independently: a sitting cat has its haunches down and its
+            // forelegs straight.
+            let tuck = leg.isFront ? pose.tuckFront : pose.tuckHind
+            if tuck > 0.01 {
+                let tuckY = mix(footY, -bodyY * 0.30, tuck)
+                let tuckZ = mix(footZ, hipInBody.z + (leg.isFront ? 0.032 : -0.020), tuck)
+                let tuckX = mix(footX, hipInBody.x * 0.70, tuck)
                 footX = tuckX; footY = tuckY; footZ = tuckZ
             }
 
@@ -288,10 +303,11 @@ final class CatAnimator {
             let t = Float(i) / n
             let phase = clock * swaySpeed - t * 2.4
             let side = sinf(phase) * swayAmp * (0.35 + t)
-            let curlUp = pose.tailCurl * (0.30 + 0.75 * t)
+            // Applied per segment, so keep it small: nine segments compound quickly.
+            let curlUp = pose.tailCurl * (0.10 + 0.26 * t)
             let droop = (1 - pose.tailCurl) * 0.06 * t
             let wave = noise.value(clock * 0.5 + Float(i), 3.3) * 0.05
-            seg.eulerAngles = SCNVector3(x: curlUp * 0.42 - droop + wave * 0.4,
+            seg.eulerAngles = SCNVector3(x: curlUp * 0.40 - droop + wave * 0.4,
                                          y: side,
                                          z: 0)
         }
@@ -353,6 +369,8 @@ final class CatAnimator {
         switch pose {
         case .standing:
             p.bodyHeight = 1.0
+            p.neckPitch = deg(-18)
+            p.headPitch = deg(16)
             p.tailBasePitch = deg(10)
 
         case .walking:
@@ -368,43 +386,57 @@ final class CatAnimator {
 
         case .running:
             p.bodyHeight = 0.92
+            p.torsoLength = 1.06
             p.bodyPitch = deg(-7)
             p.neckPitch = deg(-8)
             p.tailBasePitch = deg(6)
 
         case .sitting:
-            p.bodyHeight = 0.74
-            p.bodyPitch = deg(-22)
-            p.neckPitch = deg(16)
-            p.hindFoot = SCNVector3(x: 0.008, y: 0.030, z: 0.040)
-            p.frontFoot = SCNVector3(x: 0, y: 0, z: 0.020)
+            p.bodyHeight = 0.72
+            p.torsoLength = 0.92
+            p.torsoHeight = 1.05
+            p.bodyPitch = deg(-26)
+            p.neckPitch = deg(-16)
+            p.tuckHind = 0.80
+            p.hindFoot = SCNVector3(x: 0.006, y: 0.018, z: 0.048)
+            p.frontFoot = SCNVector3(x: 0, y: 0, z: -0.012)
             p.tailBasePitch = deg(-24)
             p.tailCurl = 0.55
             p.tailSide = 0.5
 
         case .sittingTall:
-            p.bodyHeight = 0.80
-            p.bodyPitch = deg(-30)
-            p.neckPitch = deg(22)
-            p.headPitch = deg(-6)
-            p.hindFoot = SCNVector3(x: 0.008, y: 0.032, z: 0.044)
-            p.frontFoot = SCNVector3(x: 0, y: 0, z: 0.026)
-            p.tailBasePitch = deg(-28)
-            p.tailCurl = 0.65
+            p.bodyHeight = 0.76
+            p.torsoLength = 0.90
+            p.torsoHeight = 1.06
+            p.bodyPitch = deg(-33)
+            p.neckPitch = deg(-24)
+            p.headPitch = deg(14)
+            p.tuckHind = 0.85
+            p.hindFoot = SCNVector3(x: 0.006, y: 0.020, z: 0.054)
+            p.frontFoot = SCNVector3(x: 0, y: 0, z: -0.016)
+            p.tailBasePitch = deg(-34)
+            p.tailCurl = 0.5
             p.tailSide = 0.6
 
         case .loaf:
-            p.bodyHeight = 0.34
-            p.tuck = 1.0
-            p.neckPitch = deg(6)
+            p.bodyHeight = 0.46
+            p.torsoLength = 0.80
+            p.torsoHeight = 1.14
+            p.tuckFront = 1.0
+            p.tuckHind = 1.0
+            p.neckPitch = deg(-46)
+            p.headPitch = deg(32)
             p.tailCurl = 0.9
             p.tailSide = 0.8
             p.tailBasePitch = deg(-38)
 
         case .lyingSide:
-            p.bodyHeight = 0.30
+            p.bodyHeight = 0.34
+            p.torsoLength = 1.06
+            p.torsoHeight = 0.92
             p.bodyRoll = deg(38)
-            p.tuck = 0.35
+            p.tuckFront = 0.30
+            p.tuckHind = 0.35
             p.frontFoot = SCNVector3(x: 0.045, y: 0.010, z: 0.055)
             p.hindFoot = SCNVector3(x: 0.050, y: 0.008, z: -0.035)
             p.neckPitch = deg(14)
@@ -414,10 +446,13 @@ final class CatAnimator {
             p.earPitch = deg(8)
 
         case .curled:
-            p.bodyHeight = 0.30
+            p.bodyHeight = 0.40
+            p.torsoLength = 0.72
+            p.torsoHeight = 1.18
             p.bodyRoll = deg(22)
-            p.tuck = 1.0
-            p.neckPitch = deg(42)
+            p.tuckFront = 1.0
+            p.tuckHind = 1.0
+            p.neckPitch = deg(52)
             p.headPitch = deg(26)
             p.headYaw = deg(-46)
             p.headRoll = deg(-18)
@@ -428,13 +463,16 @@ final class CatAnimator {
 
         case .crouch:
             p.bodyHeight = 0.55
-            p.tuck = 0.35
+            p.tuckFront = 0.30
+            p.tuckHind = 0.40
             p.neckPitch = deg(6)
             p.tailBasePitch = deg(-30)
             p.tailCurl = 0.2
 
         case .stretching:
             p.bodyHeight = 0.86
+            p.torsoLength = 1.14
+            p.torsoHeight = 0.92
             p.bodyPitch = deg(22)
             p.frontFoot = SCNVector3(x: 0, y: -0.004, z: 0.075)
             p.hindFoot = SCNVector3(x: 0, y: 0, z: -0.045)
@@ -445,9 +483,10 @@ final class CatAnimator {
             p.earPitch = deg(-4)
 
         case .grooming:
-            p.bodyHeight = 0.62
-            p.bodyPitch = deg(-14)
-            p.tuck = 0.55
+            p.bodyHeight = 0.66
+            p.bodyPitch = deg(-16)
+            p.tuckFront = 0.25
+            p.tuckHind = 0.75
             p.neckPitch = deg(48)
             p.headPitch = deg(30)
             p.headYaw = deg(28)
@@ -470,8 +509,9 @@ final class CatAnimator {
             p.tailBasePitch = deg(-10)
 
         case .litterCrouch:
-            p.bodyHeight = 0.50
-            p.tuck = 0.55
+            p.bodyHeight = 0.52
+            p.tuckFront = 0.30
+            p.tuckHind = 0.65
             p.bodyPitch = deg(-8)
             p.neckPitch = deg(10)
             p.tailBasePitch = deg(58)
@@ -480,7 +520,8 @@ final class CatAnimator {
         case .playCrouch:
             p.bodyHeight = 0.48
             p.bodyPitch = deg(6)
-            p.tuck = 0.30
+            p.tuckFront = 0.35
+            p.tuckHind = 0.25
             p.neckPitch = deg(-10)
             p.headPitch = deg(-4)
             p.tailBasePitch = deg(-16)
@@ -506,8 +547,9 @@ final class CatAnimator {
             p.tailBasePitch = deg(-6)
 
         case .kneading:
-            p.bodyHeight = 0.42
-            p.tuck = 0.65
+            p.bodyHeight = 0.46
+            p.tuckFront = 0.10
+            p.tuckHind = 0.80
             p.neckPitch = deg(12)
             p.frontPawLift = 1.0
             p.tailCurl = 0.6

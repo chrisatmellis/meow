@@ -121,7 +121,9 @@ enum CatBuilder {
         rig.neck.position = SCNVector3(x: 0, y: R * 0.30, z: L * 0.48)
         rig.spine.addChildNode(rig.neck)
 
-        let neckLen = (0.030 + 0.030 * (1 - a.headWidth)) * scale
+        // Long enough that the head can genuinely lift clear of the shoulders when the
+        // cat loafs or sits, rather than being welded to the chest.
+        let neckLen = (0.046 + 0.030 * (1 - a.headWidth)) * scale
         let neckR = R * (0.52 + 0.22 * a.neckThickness)
         let neckGeo = MeshBuilder.tube(length: neckLen * 1.6, count: 4, segments: 14, radius: { t in
             neckR * (1 - 0.10 * t)
@@ -158,19 +160,24 @@ enum CatBuilder {
             rig.spine.addChildNode(leg.hip)
 
             let reach = hipPos.y - groundY               // vertical distance to the floor
-            let upper = reach * (isFront ? 0.46 : 0.50)
-            let lower = reach * (isFront ? 0.40 : 0.38)
+            // Segments are longer than the straight-line drop so the joints sit bent, the
+            // way a real cat's do — and so the legs can still reach the floor when the
+            // body lifts into a sit or a rear-up.
+            let upper = reach * (isFront ? 0.56 : 0.60)
+            let lower = reach * (isFront ? 0.50 : 0.47)
             let pawLen = reach * 0.16
             leg.upperLength = upper
             leg.lowerLength = lower
             leg.pawLength = pawLen
             leg.restFoot = SCNVector3(x: hipPos.x, y: groundY, z: hipPos.z + (isFront ? 0.012 : -0.006))
 
-            let thickTop = R * (0.30 + 0.20 * a.legThickness) * (isFront ? 0.92 : 1.05)
-            let thickBottom = R * (0.16 + 0.12 * a.legThickness)
+            // The upper segment is deliberately fat so it merges into the torso the way
+            // a real cat's shoulder and haunch do; only the lower leg reads as a limb.
+            let thickTop = R * (0.52 + 0.26 * a.legThickness) * (isFront ? 0.90 : 1.10)
+            let thickBottom = R * (0.15 + 0.11 * a.legThickness)
 
             let upperGeo = MeshBuilder.tube(length: upper * 1.06, count: 5, segments: 10, radius: { t in
-                mix(thickTop, thickTop * 0.72, t)
+                mix(thickTop, thickTop * 0.52, t)
             })
             let un = SCNNode.make(upperGeo, furMat)
             un.eulerAngles = SCNVector3(x: deg(90), y: 0, z: 0)
@@ -180,7 +187,7 @@ enum CatBuilder {
             leg.hip.addChildNode(leg.knee)
 
             let lowerGeo = MeshBuilder.tube(length: lower * 1.06, count: 5, segments: 9, radius: { t in
-                mix(thickTop * 0.70, thickBottom, t)
+                mix(thickTop * 0.50, thickBottom, t)
             })
             let ln = SCNNode.make(lowerGeo, furMat)
             ln.eulerAngles = SCNVector3(x: deg(90), y: 0, z: 0)
@@ -387,7 +394,7 @@ enum CatBuilder {
                 rig.whiskerRoots.append(pad)
                 for k in 0..<5 {
                     let t = Float(k) / 4
-                    let len = hr * (1.4 + 3.4 * a.whiskerLength) * (0.7 + 0.5 * sinf(t * .pi))
+                    let len = hr * (0.9 + 1.9 * a.whiskerLength) * (0.7 + 0.5 * sinf(t * .pi))
                     let geo = MeshBuilder.strand(length: len,
                                                  thickness: 0.0006 + 0.0009 * a.whiskerThickness,
                                                  droop: 0.35)
@@ -402,7 +409,7 @@ enum CatBuilder {
             if a.eyebrowWhiskers > 0.1 {
                 for side in [-1, 1] as [Float] {
                     for k in 0..<2 {
-                        let geo = MeshBuilder.strand(length: hr * (1.0 + 1.8 * a.eyebrowWhiskers),
+                        let geo = MeshBuilder.strand(length: hr * (0.7 + 1.0 * a.eyebrowWhiskers),
                                                      thickness: 0.0006, droop: 0.1)
                         let wn = SCNNode.make(geo, Materials.whisker(a))
                         wn.position = SCNVector3(x: side * hr * 0.34, y: hr * 0.42, z: hr * 0.44)
@@ -494,7 +501,7 @@ enum CatBuilder {
 
             // Tail rings for tabby cats.
             if a.tailRingCount > 0.15 && (i % 2 == 0) && a.pattern != .solid {
-                let ring = SCNTorus(ringRadius: CGFloat(a.tailRadius * 1.02), pipeRadius: CGFloat(a.tailRadius * 0.30))
+                let ring = SCNTorus(ringRadius: CGFloat(a.tailRadius * 0.86), pipeRadius: CGFloat(a.tailRadius * 0.20))
                 let rn = SCNNode.make(ring, Materials.skin(a.markingColor, gloss: 0.2))
                 rn.position = SCNVector3(x: 0, y: 0, z: segLen * 0.5)
                 rn.eulerAngles = SCNVector3(x: deg(90), y: 0, z: 0)

@@ -20,11 +20,87 @@ public struct SCNVector4 {
     public init(_ x: Float, _ y: Float, _ z: Float, _ w: Float) { self.x = x; self.y = y; self.z = z; self.w = w }
 }
 
+/// Column-major 4x4, stored row by row as m[row][col] for readability.
 public struct SCNMatrix4 {
-    public init() {}
+    public var m: [Float]
+    public init() { m = [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1] }
+    public init(_ values: [Float]) { m = values }
+
+    public subscript(r: Int, c: Int) -> Float {
+        get { m[r * 4 + c] }
+        set { m[r * 4 + c] = newValue }
+    }
+
+    public static func * (a: SCNMatrix4, b: SCNMatrix4) -> SCNMatrix4 {
+        var out = SCNMatrix4()
+        for r in 0..<4 {
+            for c in 0..<4 {
+                var sum: Float = 0
+                for k in 0..<4 { sum += a[r, k] * b[k, c] }
+                out[r, c] = sum
+            }
+        }
+        return out
+    }
+
+    /// Transforms a point (w = 1).
+    public func apply(_ p: SCNVector3) -> SCNVector3 {
+        SCNVector3(x: self[0,0]*p.x + self[0,1]*p.y + self[0,2]*p.z + self[0,3],
+                   y: self[1,0]*p.x + self[1,1]*p.y + self[1,2]*p.z + self[1,3],
+                   z: self[2,0]*p.x + self[2,1]*p.y + self[2,2]*p.z + self[2,3])
+    }
+
+    /// Transforms a direction (w = 0).
+    public func applyVector(_ p: SCNVector3) -> SCNVector3 {
+        SCNVector3(x: self[0,0]*p.x + self[0,1]*p.y + self[0,2]*p.z,
+                   y: self[1,0]*p.x + self[1,1]*p.y + self[1,2]*p.z,
+                   z: self[2,0]*p.x + self[2,1]*p.y + self[2,2]*p.z)
+    }
+
+    /// General inverse via Gauss-Jordan; the transforms here are always invertible.
+    public var inverted: SCNMatrix4 {
+        var a = m
+        var inv = SCNMatrix4().m
+        for col in 0..<4 {
+            var pivot = col
+            for r in (col + 1)..<4 where abs(a[r * 4 + col]) > abs(a[pivot * 4 + col]) { pivot = r }
+            if abs(a[pivot * 4 + col]) < 1e-12 { return SCNMatrix4() }
+            if pivot != col {
+                for k in 0..<4 {
+                    a.swapAt(col * 4 + k, pivot * 4 + k)
+                    inv.swapAt(col * 4 + k, pivot * 4 + k)
+                }
+            }
+            let d = a[col * 4 + col]
+            for k in 0..<4 { a[col * 4 + k] /= d; inv[col * 4 + k] /= d }
+            for r in 0..<4 where r != col {
+                let f = a[r * 4 + col]
+                if f == 0 { continue }
+                for k in 0..<4 {
+                    a[r * 4 + k] -= f * a[col * 4 + k]
+                    inv[r * 4 + k] -= f * inv[col * 4 + k]
+                }
+            }
+        }
+        return SCNMatrix4(inv)
+    }
 }
-public func SCNMatrix4MakeScale(_ sx: Float, _ sy: Float, _ sz: Float) -> SCNMatrix4 { SCNMatrix4() }
-public func SCNMatrix4MakeTranslation(_ tx: Float, _ ty: Float, _ tz: Float) -> SCNMatrix4 { SCNMatrix4() }
+
+public func SCNMatrix4MakeScale(_ sx: Float, _ sy: Float, _ sz: Float) -> SCNMatrix4 {
+    var m = SCNMatrix4(); m[0,0] = sx; m[1,1] = sy; m[2,2] = sz; return m
+}
+public func SCNMatrix4MakeTranslation(_ tx: Float, _ ty: Float, _ tz: Float) -> SCNMatrix4 {
+    var m = SCNMatrix4(); m[0,3] = tx; m[1,3] = ty; m[2,3] = tz; return m
+}
+public func SCNMatrix4MakeRotationX(_ a: Float) -> SCNMatrix4 {
+    var m = SCNMatrix4(); m[1,1] = cosf(a); m[1,2] = -sinf(a); m[2,1] = sinf(a); m[2,2] = cosf(a); return m
+}
+public func SCNMatrix4MakeRotationY(_ a: Float) -> SCNMatrix4 {
+    var m = SCNMatrix4(); m[0,0] = cosf(a); m[0,2] = sinf(a); m[2,0] = -sinf(a); m[2,2] = cosf(a); return m
+}
+public func SCNMatrix4MakeRotationZ(_ a: Float) -> SCNMatrix4 {
+    var m = SCNMatrix4(); m[0,0] = cosf(a); m[0,1] = -sinf(a); m[1,0] = sinf(a); m[1,1] = cosf(a); return m
+}
 public let SCNMatrix4Identity = SCNMatrix4()
 
 // MARK: - Materials
@@ -85,26 +161,42 @@ public enum SCNGeometryPrimitiveType: Int {
 }
 
 open class SCNGeometrySource: NSObject {
-    public convenience init(vertices: [SCNVector3]) { self.init() }
-    public convenience init(normals: [SCNVector3]) { self.init() }
-    public convenience init(textureCoordinates: [CGPoint]) { self.init() }
+    public var vertices: [SCNVector3] = []
+    public var normals: [SCNVector3] = []
+    public var uvs: [CGPoint] = []
+    public convenience init(vertices: [SCNVector3]) { self.init(); self.vertices = vertices }
+    public convenience init(normals: [SCNVector3]) { self.init(); self.normals = normals }
+    public convenience init(textureCoordinates: [CGPoint]) { self.init(); self.uvs = textureCoordinates }
     public override init() { super.init() }
 }
 
 open class SCNGeometryElement: NSObject {
-    public convenience init(indices: [Int32], primitiveType: SCNGeometryPrimitiveType) { self.init() }
-    public convenience init(indices: [UInt16], primitiveType: SCNGeometryPrimitiveType) { self.init() }
+    public var indices: [Int32] = []
+    public convenience init(indices: [Int32], primitiveType: SCNGeometryPrimitiveType) {
+        self.init(); self.indices = indices
+    }
+    public convenience init(indices: [UInt16], primitiveType: SCNGeometryPrimitiveType) {
+        self.init(); self.indices = indices.map(Int32.init)
+    }
     public override init() { super.init() }
 }
 
 open class SCNGeometry: NSObject {
     public override init() { super.init() }
-    public convenience init(sources: [SCNGeometrySource], elements: [SCNGeometryElement]?) { self.init() }
+    public var sources: [SCNGeometrySource] = []
+    public var elements: [SCNGeometryElement] = []
+    public convenience init(sources: [SCNGeometrySource], elements: [SCNGeometryElement]?) {
+        self.init(); self.sources = sources; self.elements = elements ?? []
+    }
     open var name: String?
     open var materials: [SCNMaterial] = []
     open var firstMaterial: SCNMaterial? { materials.first }
     open var levelsOfDetail: [SCNLevelOfDetail]?
-    open override func copy() -> Any { self }
+    open override func copy() -> Any {
+        let g = SCNGeometry()
+        g.sources = sources; g.elements = elements; g.materials = materials; g.name = name
+        return g
+    }
     open func insertMaterial(_ material: SCNMaterial, at index: Int) {}
 }
 
@@ -114,7 +206,7 @@ open class SCNSphere: SCNGeometry {
     open var radius: CGFloat = 1
     open var segmentCount: Int = 24
     open var isGeodesic: Bool = false
-    public convenience init(radius: CGFloat) { self.init() }
+    public convenience init(radius: CGFloat) { self.init(); self.radius = radius }
 }
 
 open class SCNBox: SCNGeometry {
@@ -123,27 +215,31 @@ open class SCNBox: SCNGeometry {
     open var length: CGFloat = 1
     open var chamferRadius: CGFloat = 0
     open var chamferSegmentCount: Int = 5
-    public convenience init(width: CGFloat, height: CGFloat, length: CGFloat, chamferRadius: CGFloat) { self.init() }
+    public convenience init(width: CGFloat, height: CGFloat, length: CGFloat, chamferRadius: CGFloat) {
+        self.init(); self.width = width; self.height = height; self.length = length; self.chamferRadius = chamferRadius
+    }
 }
 
 open class SCNCylinder: SCNGeometry {
     open var radius: CGFloat = 1
     open var height: CGFloat = 1
     open var radialSegmentCount: Int = 48
-    public convenience init(radius: CGFloat, height: CGFloat) { self.init() }
+    public convenience init(radius: CGFloat, height: CGFloat) { self.init(); self.radius = radius; self.height = height }
 }
 
 open class SCNTube: SCNGeometry {
     open var innerRadius: CGFloat = 0.25
     open var outerRadius: CGFloat = 0.5
     open var height: CGFloat = 1
-    public convenience init(innerRadius: CGFloat, outerRadius: CGFloat, height: CGFloat) { self.init() }
+    public convenience init(innerRadius: CGFloat, outerRadius: CGFloat, height: CGFloat) {
+        self.init(); self.innerRadius = innerRadius; self.outerRadius = outerRadius; self.height = height
+    }
 }
 
 open class SCNTorus: SCNGeometry {
     open var ringRadius: CGFloat = 0.5
     open var pipeRadius: CGFloat = 0.25
-    public convenience init(ringRadius: CGFloat, pipeRadius: CGFloat) { self.init() }
+    public convenience init(ringRadius: CGFloat, pipeRadius: CGFloat) { self.init(); self.ringRadius = ringRadius; self.pipeRadius = pipeRadius }
 }
 
 open class SCNCone: SCNGeometry {
@@ -158,7 +254,7 @@ open class SCNPlane: SCNGeometry {
     open var width: CGFloat = 1
     open var height: CGFloat = 1
     open var cornerRadius: CGFloat = 0
-    public convenience init(width: CGFloat, height: CGFloat) { self.init() }
+    public convenience init(width: CGFloat, height: CGFloat) { self.init(); self.width = width; self.height = height }
 }
 
 open class SCNText: SCNGeometry {}
@@ -305,7 +401,7 @@ open class SCNParticleSystem: NSObject {
 
 open class SCNNode: NSObject {
     public override init() { super.init() }
-    public convenience init(geometry: SCNGeometry?) { self.init() }
+    public convenience init(geometry: SCNGeometry?) { self.init(); self.geometry = geometry }
 
     open var name: String?
     open var position: SCNVector3 = SCNVector3()
@@ -313,7 +409,10 @@ open class SCNNode: NSObject {
     open var scale: SCNVector3 = SCNVector3(x: 1, y: 1, z: 1)
     open var pivot: SCNMatrix4 = SCNMatrix4()
     open var transform: SCNMatrix4 = SCNMatrix4()
-    open var worldPosition: SCNVector3 = SCNVector3()
+    open var worldPosition: SCNVector3 {
+        get { worldTransform.apply(SCNVector3()) }
+        set { position = parent.map { $0.worldTransform.inverted.apply(newValue) } ?? newValue }
+    }
     open var opacity: CGFloat = 1
     open var isHidden: Bool = false
     open var castsShadow: Bool = true
@@ -326,20 +425,61 @@ open class SCNNode: NSObject {
     open var morpher: SCNMorpher?
     open var skinner: SCNSkinner?
 
-    open private(set) var parent: SCNNode?
-    open private(set) var childNodes: [SCNNode] = []
+    open internal(set) var parent: SCNNode?
+    open internal(set) var childNodes: [SCNNode] = []
 
-    open func addChildNode(_ child: SCNNode) { childNodes.append(child); child.parent = self }
-    open func removeFromParentNode() {}
+    open func addChildNode(_ child: SCNNode) {
+        child.removeFromParentNode()
+        childNodes.append(child)
+        child.parent = self
+    }
+    open func removeFromParentNode() {
+        guard let parent else { return }
+        parent.childNodes.removeAll { $0 === self }
+        self.parent = nil
+    }
     open func insertChildNode(_ child: SCNNode, at index: Int) {}
-    open func childNode(withName name: String, recursively: Bool) -> SCNNode? { nil }
+    open func childNode(withName name: String, recursively: Bool) -> SCNNode? {
+        for child in childNodes {
+            if child.name == name { return child }
+            if recursively, let hit = child.childNode(withName: name, recursively: true) { return hit }
+        }
+        return nil
+    }
     open func childNodes(passingTest predicate: (SCNNode, UnsafeMutablePointer<ObjCBool>) -> Bool) -> [SCNNode] { [] }
     open func clone() -> SCNNode { SCNNode() }
     open func flattenedClone() -> SCNNode { SCNNode() }
 
-    open func convertPosition(_ position: SCNVector3, from node: SCNNode?) -> SCNVector3 { position }
-    open func convertPosition(_ position: SCNVector3, to node: SCNNode?) -> SCNVector3 { position }
-    open func convertVector(_ vector: SCNVector3, from node: SCNNode?) -> SCNVector3 { vector }
+    /// Local transform: scale, then euler (Rx·Ry·Rz), then translate.
+    public var localTransform: SCNMatrix4 {
+        let t = SCNMatrix4MakeTranslation(position.x, position.y, position.z)
+        let rx = SCNMatrix4MakeRotationX(eulerAngles.x)
+        let ry = SCNMatrix4MakeRotationY(eulerAngles.y)
+        let rz = SCNMatrix4MakeRotationZ(eulerAngles.z)
+        let sc = SCNMatrix4MakeScale(scale.x, scale.y, scale.z)
+        return t * rx * ry * rz * sc
+    }
+
+    public var worldTransform: SCNMatrix4 {
+        if let parent { return parent.worldTransform * localTransform }
+        return localTransform
+    }
+
+    open func convertPosition(_ position: SCNVector3, from node: SCNNode?) -> SCNVector3 {
+        let world = node?.worldTransform.apply(position) ?? position
+        return worldTransform.inverted.apply(world)
+    }
+
+    open func convertPosition(_ position: SCNVector3, to node: SCNNode?) -> SCNVector3 {
+        let world = worldTransform.apply(position)
+        guard let node else { return world }
+        return node.worldTransform.inverted.apply(world)
+    }
+
+    open func convertVector(_ vector: SCNVector3, from node: SCNNode?) -> SCNVector3 {
+        let world = node?.worldTransform.applyVector(vector) ?? vector
+        return worldTransform.inverted.applyVector(world)
+    }
 
     open func look(at worldTarget: SCNVector3) {}
     open func look(at worldTarget: SCNVector3, up worldUp: SCNVector3, localFront: SCNVector3) {}

@@ -43,7 +43,7 @@ done
 echo "==> staging sources"
 rm -rf "$STAGE"; mkdir -p "$STAGE"
 cp -r "$PROJECT/MeowRoom" "$STAGE/"
-cp "$HERE/Harness/main.swift" "$HERE/Harness/profile.swift" "$STAGE/"
+cp "$HERE/Harness/main.swift" "$HERE/Harness/profile.swift" "$HERE/Harness/render.swift" "$STAGE/"
 
 # Objective-C interop does not exist off-Apple, so rewrite the two constructs
 # that need it. Nothing else about the sources is changed.
@@ -85,7 +85,7 @@ if ! swiftc -swift-version 5 -O -I "$MODULES" -L "$MODULES" \
      -lCoreGraphics -lQuartzCore -lUIKit -lSceneKit \
      -lAVFoundation -lUserNotifications -lSwiftUI \
      -Xlinker -rpath -Xlinker "$MODULES" \
-     -o "$STAGE/meowverify" main.swift profile.swift $FILES 2>&1 \
+     -o "$STAGE/meowverify" main.swift profile.swift render.swift $FILES 2>&1 \
      | sed "s#^MeowRoom/#$PROJECT/MeowRoom/#"; then
   exit 1
 fi
