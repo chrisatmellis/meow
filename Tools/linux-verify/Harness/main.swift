@@ -650,6 +650,23 @@ section("room builder") {
         samples.append((hour, b.key, e, LightingRig.renderedBrightness(for: b)))
     }
 
+    // The light actually put into the scene must stay proportional to the budget
+    // the camera meters off. Nothing checked this, and the gap is what made
+    // midnight brighter than noon: coefficients picked to land on familiar levels
+    // left night 6.5x dimmer than noon while the budget claimed 88x, so night's
+    // +3 EV of compensation had nothing to cancel and lifted the room past midday.
+    var ratios: [Float] = []
+    for hour in 0..<24 {
+        var comps = DateComponents(); comps.year = 2026; comps.month = 9; comps.day = 21; comps.hour = hour
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "UTC")!
+        let s = WorldClock.sky(at: cal.date(from: comps)!, timeZone: TimeZone(identifier: "UTC")!)
+        let b = LightingRig.budget(sky: s, lanternOn: s.wantsLampLight)
+        ratios.append(LightingRig.intensities(for: b).total / b.key)
+    }
+    let spread = ratios.max()! / ratios.min()!
+    expect(spread < 1.001,
+           "scene light tracks the metered budget at every hour (spread \(spread))")
+
     // A brighter room must still render brighter. This is the invariant that was
     // missing: with each light on its own hand-fitted curve nothing related them,
     // so late night drifted until it was brighter on screen than noon and no

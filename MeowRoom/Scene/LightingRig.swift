@@ -113,6 +113,44 @@ final class LightingRig {
                            lantern: lanternOn ? 26 : 0)
     }
 
+    /// How the budget is split across the actual lights.
+    ///
+    /// Every entry is a share of one source's lux, and the shares of each source
+    /// sum to one, so the total light in the room stays strictly proportional to
+    /// `budget.key`. That proportionality is the contract the whole model rests
+    /// on, and it is easy to break by accident: pick each light's coefficient so
+    /// a screenshot looks right at one hour and you have hand-fitted the sources
+    /// again, one layer further down, while exposure carries on metering off a
+    /// budget the lights no longer match.
+    ///
+    /// Doing precisely that made midnight brighter than noon. Coefficients tuned
+    /// to land on the old levels left night only 6.5x dimmer than noon while the
+    /// budget claimed 88x, so night's +3 EV of compensation had nothing to cancel
+    /// against and lifted the room 1.3x above midday instead.
+    struct LightIntensities {
+        var sun: Float
+        var moon: Float
+        var ambient: Float
+        var windowGlow: Float
+        var bounce: Float
+        var lantern: Float
+
+        var total: Float { sun + moon + ambient + windowGlow + bounce + lantern }
+    }
+
+    /// Sets the absolute level only. Ratios — and so the look — are unaffected.
+    private static let luxToIntensity: Float = 0.35
+
+    static func intensities(for b: LightBudget) -> LightIntensities {
+        let k = luxToIntensity
+        return LightIntensities(sun: b.sun * 0.85 * k,
+                                moon: b.moon * 1.00 * k,
+                                ambient: (b.sky * 0.30 + b.lantern * 0.10) * k,
+                                windowGlow: b.sky * 0.45 * k,
+                                bounce: (b.sun * 0.15 + b.sky * 0.25 + b.lantern * 0.15) * k,
+                                lantern: b.lantern * 0.75 * k)
+    }
+
     /// Exposure in EV, metered off the budget the way a real camera would.
     /// SceneKit's own `wantsExposureAdaptation` would ramp visibly after launch;
     /// the sky is already known, so this is computed straight from it instead.
@@ -139,13 +177,10 @@ final class LightingRig {
         sunNode.position = sunPos
         sunNode.look(at: SCNVector3(x: 0, y: 0.6, z: -0.2))
 
-        // Each light takes a share of the budget. The per-light factors differ
-        // because SceneKit measures a directional light's intensity in lux but an
-        // omni's in lumens; they convert between those units and set the overall
-        // level. The ratios are what matter, and they all move together now.
         let budget = LightingRig.budget(sky: sky, lanternOn: lanternOn)
+        let lit = LightingRig.intensities(for: budget)
 
-        sun.intensity = CGFloat(budget.sun * 0.30)
+        sun.intensity = CGFloat(lit.sun)
         sun.color = UIColor(sky.sunColor)
         sun.castsShadow = budget.sun > 30
 
@@ -153,16 +188,16 @@ final class LightingRig {
         let m = sky.moonDirection
         moonNode.position = SCNVector3(x: m.x * 9, y: max(0.2, m.y * 9), z: m.z * 9)
         moonNode.look(at: SCNVector3(x: 0, y: 0.6, z: -0.2))
-        moon.intensity = CGFloat(budget.moon * 3.5)
+        moon.intensity = CGFloat(lit.moon)
 
         // --- Ambient from the sky colour.
         ambient.color = UIColor(sky.ambientColor)
-        ambient.intensity = CGFloat(budget.sky * 0.14 + budget.lantern * 0.60)
+        ambient.intensity = CGFloat(lit.ambient)
 
         // --- Bounce and window glow.
-        bounce.intensity = CGFloat(budget.sun * 0.03 + budget.sky * 0.06 + budget.lantern * 1.20)
+        bounce.intensity = CGFloat(lit.bounce)
         bounce.color = UIColor(sky.sunColor.mixed(with: RGBColor(hex: 0xC9B383), 0.45))
-        windowGlow.intensity = CGFloat(budget.sky * 0.19)
+        windowGlow.intensity = CGFloat(lit.windowGlow)
         windowGlow.color = UIColor(sky.skyHorizonColor.lightened(0.25))
 
         // --- Backlit shoji paper. Its brightness is the sky outside and nothing
@@ -186,11 +221,11 @@ final class LightingRig {
 
         // --- Paper lantern.
         if let light = room.lanternLight, let paper = room.lanternPaper {
-            light.intensity = CGFloat(budget.lantern * 3.4)
+            light.intensity = CGFloat(lit.lantern)
             // A lit lamp has a fixed luminance, so this does not track the sky.
             // At night exposure lifts it and the paper reads as the bright thing
             // in the room, which is what a lamp at night is.
-            paper.emission.intensity = lanternOn ? 0.18 : 0.0
+            paper.emission.intensity = lanternOn ? 0.12 : 0.0
         }
 
         // --- Sun patch on the tatami.
