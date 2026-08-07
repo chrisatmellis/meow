@@ -1,0 +1,47 @@
+name: preflight
+
+# Checks the App Store Connect setup in about ten seconds, on a free runner,
+# before anything slow depends on it. Run this first after adding the secrets:
+# every problem it catches would otherwise appear twenty minutes into an archive
+# on a macOS runner, as a signing or upload error that names none of the pieces.
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: check credentials
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check App Store Connect setup
+        env:
+          KEY_P8: ${{ secrets.APP_STORE_CONNECT_KEY_P8 }}
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          missing=0
+          for v in KEY_P8 KEY_ID ISSUER_ID TEAM_ID; do
+            if [ -z "${!v}" ]; then echo "  ✗ secret $v is not set"; missing=1; fi
+          done
+          if [ "$missing" = "1" ]; then
+            echo
+            echo "Add them at Settings → Secrets and variables → Actions."
+            echo "See 'Shipping a build' in the README for where each one comes from."
+            exit 1
+          fi
+
+          printf '%s\n' "$KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+          python3 Tools/asc-preflight.py \
+            --key "$RUNNER_TEMP/AuthKey.p8" \
+            --key-id "$KEY_ID" \
+            --issuer "$ISSUER_ID" \
+            --team "$TEAM_ID" \
+            --bundle com.drinkmellis.meowroom
+
+      - name: Clean up
+        if: always()
+        run: rm -f "$RUNNER_TEMP/AuthKey.p8"

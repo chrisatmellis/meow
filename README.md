@@ -61,6 +61,17 @@ App Store Connect API, with the **App Manager** role. **The `.p8` downloads
 exactly once and cannot be retrieved again** — if it is lost, revoke it and
 generate another.
 
+Once the secrets are in, run the `preflight` workflow. It checks all four on a
+free runner in about ten seconds and names whatever is wrong — a mangled `.p8`,
+the key's own id pasted where the issuer id belongs, a missing app record. Each
+of those otherwise appears twenty minutes into an archive as an error that
+mentions none of them.
+
+One step cannot be automated: the App Store Connect app record. Apple's API can
+create bundle ids but not app records, so that one has to be made in the UI
+(Apps → ＋ → New App). `preflight` will say so, and list the records that do
+exist, if it is missing.
+
 The key is enough on its own: `-allowProvisioningUpdates` lets Xcode mint the
 distribution certificate and provisioning profile from it, so no `.p12` ever has
 to be exported from a Mac and stored in CI.
