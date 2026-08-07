@@ -6,6 +6,11 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Superseded runs are cancelled — macOS minutes are not free.
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   engine:
     name: engine (headless)
@@ -24,3 +29,30 @@ jobs:
 
       - name: Behavioural profile
         run: ./Tools/linux-verify/verify.sh --profile
+
+  app:
+    name: app (Xcode)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+          xcodebuild -showsdks | grep -i ios || true
+
+      - name: Build for simulator
+        run: ./Tools/xcode-build.sh
+
+      - name: Keep the full log
+        if: always()
+        run: cp "${TMPDIR:-/tmp}/meow-build.log" ./meow-build.log || true
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcode-build-log
+          path: meow-build.log
+          if-no-files-found: ignore
