@@ -87,7 +87,7 @@ enum TextureFactory {
 
             // --- Belly / undercoat. u = 0.25 is the spine, u = 0.75 is the belly.
             let bellyCenter = s * 0.75
-            let bellyWidth = s * (0.16 + 0.16 * a.undercoatLightness)
+            let bellyWidth = s * CGFloat(0.16 + 0.16 * a.undercoatLightness)
             ctx.saveGState()
             let bellyColors = [UIColor(a.bellyColor, alpha: 0.95).cgColor,
                                UIColor(a.bellyColor, alpha: 0.0).cgColor] as CFArray

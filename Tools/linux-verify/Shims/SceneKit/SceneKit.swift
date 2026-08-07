@@ -1,0 +1,434 @@
+// Linux typecheck shim mirroring the SceneKit API surface the game uses.
+@_exported import Foundation
+@_exported import CoreGraphics
+@_exported import UIKit
+
+// MARK: - Types
+
+public struct SCNVector3 {
+    public var x: Float
+    public var y: Float
+    public var z: Float
+    public init(x: Float, y: Float, z: Float) { self.x = x; self.y = y; self.z = z }
+    public init(_ x: Float, _ y: Float, _ z: Float) { self.x = x; self.y = y; self.z = z }
+    public init() { x = 0; y = 0; z = 0 }
+}
+
+public struct SCNVector4 {
+    public var x: Float, y: Float, z: Float, w: Float
+    public init(x: Float, y: Float, z: Float, w: Float) { self.x = x; self.y = y; self.z = z; self.w = w }
+    public init(_ x: Float, _ y: Float, _ z: Float, _ w: Float) { self.x = x; self.y = y; self.z = z; self.w = w }
+}
+
+public struct SCNMatrix4 {
+    public init() {}
+}
+public func SCNMatrix4MakeScale(_ sx: Float, _ sy: Float, _ sz: Float) -> SCNMatrix4 { SCNMatrix4() }
+public func SCNMatrix4MakeTranslation(_ tx: Float, _ ty: Float, _ tz: Float) -> SCNMatrix4 { SCNMatrix4() }
+public let SCNMatrix4Identity = SCNMatrix4()
+
+// MARK: - Materials
+
+public enum SCNLightingModel: String {
+    case blinn, constant, lambert, phong, physicallyBased, shadowOnly
+}
+public enum SCNWrapMode: Int { case clamp, `repeat`, clampToBorder, mirror }
+public enum SCNFilterMode: Int { case none, nearest, linear }
+public enum SCNTransparencyMode: Int { case aOne, rgbZero, singleLayer, dualLayer, `default` }
+public enum SCNBlendMode: Int { case alpha, add, subtract, multiply, screen, replace, max }
+public enum SCNCullMode: Int { case back, front }
+
+open class SCNMaterialProperty: NSObject {
+    open var contents: Any?
+    open var intensity: CGFloat = 1
+    open var wrapS: SCNWrapMode = .clamp
+    open var wrapT: SCNWrapMode = .clamp
+    open var minificationFilter: SCNFilterMode = .linear
+    open var magnificationFilter: SCNFilterMode = .linear
+    open var mipFilter: SCNFilterMode = .nearest
+    open var contentsTransform: SCNMatrix4 = SCNMatrix4()
+    open var maxAnisotropy: CGFloat = 1
+}
+
+open class SCNMaterial: NSObject {
+    public override init() { super.init() }
+    open var name: String?
+    open var lightingModel: SCNLightingModel = .blinn
+    public let diffuse = SCNMaterialProperty()
+    public let ambient = SCNMaterialProperty()
+    public let specular = SCNMaterialProperty()
+    public let emission = SCNMaterialProperty()
+    public let normal = SCNMaterialProperty()
+    public let roughness = SCNMaterialProperty()
+    public let metalness = SCNMaterialProperty()
+    public let transparent = SCNMaterialProperty()
+    public let ambientOcclusion = SCNMaterialProperty()
+    public let selfIllumination = SCNMaterialProperty()
+    public let displacement = SCNMaterialProperty()
+    open var transparency: CGFloat = 1
+    open var transparencyMode: SCNTransparencyMode = .aOne
+    open var blendMode: SCNBlendMode = .alpha
+    open var isDoubleSided: Bool = false
+    open var cullMode: SCNCullMode = .back
+    open var writesToDepthBuffer: Bool = true
+    open var readsFromDepthBuffer: Bool = true
+    open var shininess: CGFloat = 1
+    open var fresnelExponent: CGFloat = 0
+    open var locksAmbientWithDiffuse: Bool = true
+    open var shaderModifiers: [String: String]?
+}
+
+// MARK: - Geometry
+
+public enum SCNGeometryPrimitiveType: Int {
+    case triangles, triangleStrip, line, point, polygon
+}
+
+open class SCNGeometrySource: NSObject {
+    public convenience init(vertices: [SCNVector3]) { self.init() }
+    public convenience init(normals: [SCNVector3]) { self.init() }
+    public convenience init(textureCoordinates: [CGPoint]) { self.init() }
+    public override init() { super.init() }
+}
+
+open class SCNGeometryElement: NSObject {
+    public convenience init(indices: [Int32], primitiveType: SCNGeometryPrimitiveType) { self.init() }
+    public convenience init(indices: [UInt16], primitiveType: SCNGeometryPrimitiveType) { self.init() }
+    public override init() { super.init() }
+}
+
+open class SCNGeometry: NSObject {
+    public override init() { super.init() }
+    public convenience init(sources: [SCNGeometrySource], elements: [SCNGeometryElement]?) { self.init() }
+    open var name: String?
+    open var materials: [SCNMaterial] = []
+    open var firstMaterial: SCNMaterial? { materials.first }
+    open var levelsOfDetail: [SCNLevelOfDetail]?
+    open override func copy() -> Any { self }
+    open func insertMaterial(_ material: SCNMaterial, at index: Int) {}
+}
+
+open class SCNLevelOfDetail: NSObject {}
+
+open class SCNSphere: SCNGeometry {
+    open var radius: CGFloat = 1
+    open var segmentCount: Int = 24
+    open var isGeodesic: Bool = false
+    public convenience init(radius: CGFloat) { self.init() }
+}
+
+open class SCNBox: SCNGeometry {
+    open var width: CGFloat = 1
+    open var height: CGFloat = 1
+    open var length: CGFloat = 1
+    open var chamferRadius: CGFloat = 0
+    open var chamferSegmentCount: Int = 5
+    public convenience init(width: CGFloat, height: CGFloat, length: CGFloat, chamferRadius: CGFloat) { self.init() }
+}
+
+open class SCNCylinder: SCNGeometry {
+    open var radius: CGFloat = 1
+    open var height: CGFloat = 1
+    open var radialSegmentCount: Int = 48
+    public convenience init(radius: CGFloat, height: CGFloat) { self.init() }
+}
+
+open class SCNTube: SCNGeometry {
+    open var innerRadius: CGFloat = 0.25
+    open var outerRadius: CGFloat = 0.5
+    open var height: CGFloat = 1
+    public convenience init(innerRadius: CGFloat, outerRadius: CGFloat, height: CGFloat) { self.init() }
+}
+
+open class SCNTorus: SCNGeometry {
+    open var ringRadius: CGFloat = 0.5
+    open var pipeRadius: CGFloat = 0.25
+    public convenience init(ringRadius: CGFloat, pipeRadius: CGFloat) { self.init() }
+}
+
+open class SCNCone: SCNGeometry {
+    public convenience init(topRadius: CGFloat, bottomRadius: CGFloat, height: CGFloat) { self.init() }
+}
+
+open class SCNCapsule: SCNGeometry {
+    public convenience init(capRadius: CGFloat, height: CGFloat) { self.init() }
+}
+
+open class SCNPlane: SCNGeometry {
+    open var width: CGFloat = 1
+    open var height: CGFloat = 1
+    open var cornerRadius: CGFloat = 0
+    public convenience init(width: CGFloat, height: CGFloat) { self.init() }
+}
+
+open class SCNText: SCNGeometry {}
+
+// MARK: - Lights & cameras
+
+public enum SCNShadowMode: Int { case forward, deferred, modulated }
+
+open class SCNLight: NSObject {
+    public struct LightType: RawRepresentable, Hashable {
+        public let rawValue: String
+        public init(rawValue: String) { self.rawValue = rawValue }
+        public static let ambient = LightType(rawValue: "ambient")
+        public static let omni = LightType(rawValue: "omni")
+        public static let directional = LightType(rawValue: "directional")
+        public static let spot = LightType(rawValue: "spot")
+        public static let IES = LightType(rawValue: "IES")
+        public static let probe = LightType(rawValue: "probe")
+        public static let area = LightType(rawValue: "area")
+    }
+    public override init() { super.init() }
+    open var type: LightType = .omni
+    open var color: Any = UIColor.white
+    open var intensity: CGFloat = 1000
+    open var temperature: CGFloat = 6500
+    open var castsShadow: Bool = false
+    open var shadowMode: SCNShadowMode = .forward
+    open var shadowRadius: CGFloat = 3
+    open var shadowSampleCount: Int = 0
+    open var shadowMapSize: CGSize = .zero
+    open var shadowColor: Any = UIColor.black
+    open var shadowBias: CGFloat = 1
+    open var orthographicScale: CGFloat = 1
+    open var zNear: CGFloat = 1
+    open var zFar: CGFloat = 100
+    open var attenuationStartDistance: CGFloat = 0
+    open var attenuationEndDistance: CGFloat = 0
+    open var spotInnerAngle: CGFloat = 0
+    open var spotOuterAngle: CGFloat = 45
+    open var categoryBitMask: Int = -1
+}
+
+public enum SCNCameraProjectionDirection: Int { case vertical, horizontal }
+
+open class SCNCamera: NSObject {
+    public override init() { super.init() }
+    open var name: String?
+    open var fieldOfView: CGFloat = 60
+    open var projectionDirection: SCNCameraProjectionDirection = .vertical
+    open var zNear: Double = 1
+    open var zFar: Double = 100
+    open var usesOrthographicProjection: Bool = false
+    open var orthographicScale: Double = 1
+    open var wantsHDR: Bool = false
+    open var wantsExposureAdaptation: Bool = true
+    open var exposureOffset: CGFloat = 0
+    open var averageGray: CGFloat = 0.18
+    open var whitePoint: CGFloat = 1
+    open var bloomThreshold: CGFloat = 0.5
+    open var bloomIntensity: CGFloat = 0
+    open var bloomBlurRadius: CGFloat = 4
+    open var motionBlurIntensity: CGFloat = 0
+    open var wantsDepthOfField: Bool = false
+    open var focusDistance: CGFloat = 2.5
+    open var focalBlurSampleCount: Int = 25
+    open var fStop: CGFloat = 5.6
+    open var apertureBladeCount: Int = 6
+    open var screenSpaceAmbientOcclusionIntensity: CGFloat = 0
+    open var screenSpaceAmbientOcclusionRadius: CGFloat = 5
+    open var screenSpaceAmbientOcclusionBias: CGFloat = 0.03
+    open var screenSpaceAmbientOcclusionDepthThreshold: CGFloat = 0.97
+    open var screenSpaceAmbientOcclusionNormalThreshold: CGFloat = 0.3
+    open var colorFringeStrength: CGFloat = 0
+    open var colorFringeIntensity: CGFloat = 0
+    open var vignettingIntensity: CGFloat = 0
+    open var vignettingPower: CGFloat = 0
+    open var saturation: CGFloat = 1
+    open var contrast: CGFloat = 0
+}
+
+// MARK: - Actions
+
+public enum SCNActionTimingMode: Int { case linear, easeIn, easeOut, easeInEaseOut }
+
+open class SCNAction: NSObject {
+    open var duration: TimeInterval = 0
+    open var timingMode: SCNActionTimingMode = .linear
+    open class func move(by delta: SCNVector3, duration: TimeInterval) -> SCNAction { SCNAction() }
+    open class func move(to location: SCNVector3, duration: TimeInterval) -> SCNAction { SCNAction() }
+    open class func rotateBy(x: CGFloat, y: CGFloat, z: CGFloat, duration: TimeInterval) -> SCNAction { SCNAction() }
+    open class func rotateTo(x: CGFloat, y: CGFloat, z: CGFloat, duration: TimeInterval) -> SCNAction { SCNAction() }
+    open class func scale(to scale: CGFloat, duration: TimeInterval) -> SCNAction { SCNAction() }
+    open class func fadeIn(duration: TimeInterval) -> SCNAction { SCNAction() }
+    open class func fadeOut(duration: TimeInterval) -> SCNAction { SCNAction() }
+    open class func fadeOpacity(to opacity: CGFloat, duration: TimeInterval) -> SCNAction { SCNAction() }
+    open class func wait(duration: TimeInterval) -> SCNAction { SCNAction() }
+    open class func group(_ actions: [SCNAction]) -> SCNAction { SCNAction() }
+    open class func sequence(_ actions: [SCNAction]) -> SCNAction { SCNAction() }
+    open class func repeatForever(_ action: SCNAction) -> SCNAction { SCNAction() }
+    open class func run(_ block: @escaping (SCNNode) -> Void) -> SCNAction { SCNAction() }
+    open class func customAction(duration: TimeInterval,
+                                 action: @escaping (SCNNode, CGFloat) -> Void) -> SCNAction { SCNAction() }
+}
+
+// MARK: - Particles
+
+public enum SCNParticleBirthLocation: Int { case surface, volume, vertex }
+public enum SCNParticleBirthDirection: Int { case constant, surfaceNormal, random }
+public enum SCNParticleBlendMode: Int { case additive, subtract, multiply, screen, alpha, replace }
+public enum SCNParticleOrientationMode: Int { case billboardScreenAligned, billboardViewAligned, free, billboardYAligned }
+
+open class SCNParticleSystem: NSObject {
+    public override init() { super.init() }
+    open var birthRate: CGFloat = 1
+    open var birthRateVariation: CGFloat = 0
+    open var emissionDuration: CGFloat = 1
+    open var loops: Bool = true
+    open var warmupDuration: CGFloat = 0
+    open var particleLifeSpan: CGFloat = 1
+    open var particleLifeSpanVariation: CGFloat = 0
+    open var particleSize: CGFloat = 1
+    open var particleSizeVariation: CGFloat = 0
+    open var particleColor: UIColor = .white
+    open var particleColorVariation: SCNVector4 = SCNVector4(x: 0, y: 0, z: 0, w: 0)
+    open var particleVelocity: CGFloat = 0
+    open var particleVelocityVariation: CGFloat = 0
+    open var particleAngularVelocity: CGFloat = 0
+    open var acceleration: SCNVector3 = SCNVector3()
+    open var spreadingAngle: CGFloat = 0
+    open var emitterShape: SCNGeometry?
+    open var birthLocation: SCNParticleBirthLocation = .surface
+    open var birthDirection: SCNParticleBirthDirection = .constant
+    open var blendMode: SCNParticleBlendMode = .additive
+    open var orientationMode: SCNParticleOrientationMode = .billboardScreenAligned
+    open var isLightingEnabled: Bool = false
+    open var isAffectedByGravity: Bool = false
+    open var isAffectedByPhysicsFields: Bool = false
+    open var particleImage: Any?
+    open var particleMass: CGFloat = 1
+    open var dampingFactor: CGFloat = 0
+}
+
+// MARK: - Nodes
+
+open class SCNNode: NSObject {
+    public override init() { super.init() }
+    public convenience init(geometry: SCNGeometry?) { self.init() }
+
+    open var name: String?
+    open var position: SCNVector3 = SCNVector3()
+    open var eulerAngles: SCNVector3 = SCNVector3()
+    open var scale: SCNVector3 = SCNVector3(x: 1, y: 1, z: 1)
+    open var pivot: SCNMatrix4 = SCNMatrix4()
+    open var transform: SCNMatrix4 = SCNMatrix4()
+    open var worldPosition: SCNVector3 = SCNVector3()
+    open var opacity: CGFloat = 1
+    open var isHidden: Bool = false
+    open var castsShadow: Bool = true
+    open var renderingOrder: Int = 0
+    open var categoryBitMask: Int = 1
+
+    open var geometry: SCNGeometry?
+    open var light: SCNLight?
+    open var camera: SCNCamera?
+    open var morpher: SCNMorpher?
+    open var skinner: SCNSkinner?
+
+    open private(set) var parent: SCNNode?
+    open private(set) var childNodes: [SCNNode] = []
+
+    open func addChildNode(_ child: SCNNode) { childNodes.append(child); child.parent = self }
+    open func removeFromParentNode() {}
+    open func insertChildNode(_ child: SCNNode, at index: Int) {}
+    open func childNode(withName name: String, recursively: Bool) -> SCNNode? { nil }
+    open func childNodes(passingTest predicate: (SCNNode, UnsafeMutablePointer<ObjCBool>) -> Bool) -> [SCNNode] { [] }
+    open func clone() -> SCNNode { SCNNode() }
+    open func flattenedClone() -> SCNNode { SCNNode() }
+
+    open func convertPosition(_ position: SCNVector3, from node: SCNNode?) -> SCNVector3 { position }
+    open func convertPosition(_ position: SCNVector3, to node: SCNNode?) -> SCNVector3 { position }
+    open func convertVector(_ vector: SCNVector3, from node: SCNNode?) -> SCNVector3 { vector }
+
+    open func look(at worldTarget: SCNVector3) {}
+    open func look(at worldTarget: SCNVector3, up worldUp: SCNVector3, localFront: SCNVector3) {}
+
+    open func runAction(_ action: SCNAction) {}
+    open func runAction(_ action: SCNAction, completionHandler: (() -> Void)?) {}
+    open func runAction(_ action: SCNAction, forKey key: String?) {}
+    open func removeAllActions() {}
+
+    open func addParticleSystem(_ system: SCNParticleSystem) {}
+    open func removeAllParticleSystems() {}
+}
+
+open class SCNMorpher: NSObject {}
+open class SCNSkinner: NSObject {}
+
+// MARK: - Scene
+
+open class SCNScene: NSObject {
+    public override init() { super.init() }
+    public let rootNode = SCNNode()
+    public let background = SCNMaterialProperty()
+    public let lightingEnvironment = SCNMaterialProperty()
+    open var fogColor: Any = UIColor.white
+    open var fogStartDistance: CGFloat = 0
+    open var fogEndDistance: CGFloat = 0
+    open var fogDensityExponent: CGFloat = 1
+    open var isPaused: Bool = false
+}
+
+// MARK: - Rendering & hit testing
+
+public enum SCNAntialiasingMode: Int {
+    case none, multisampling2X, multisampling4X, multisampling8X, multisampling16X
+}
+
+public struct SCNHitTestOption: RawRepresentable, Hashable {
+    public let rawValue: String
+    public init(rawValue: String) { self.rawValue = rawValue }
+    public static let searchMode = SCNHitTestOption(rawValue: "searchMode")
+    public static let backFaceCulling = SCNHitTestOption(rawValue: "backFaceCulling")
+    public static let boundingBoxOnly = SCNHitTestOption(rawValue: "boundingBoxOnly")
+    public static let ignoreHiddenNodes = SCNHitTestOption(rawValue: "ignoreHiddenNodes")
+    public static let ignoreChildNodes = SCNHitTestOption(rawValue: "ignoreChildNodes")
+    public static let rootNode = SCNHitTestOption(rawValue: "rootNode")
+    public static let categoryBitMask = SCNHitTestOption(rawValue: "categoryBitMask")
+}
+
+public enum SCNHitTestSearchMode: Int { case closest, all, any }
+
+open class SCNHitTestResult: NSObject {
+    open var node: SCNNode { SCNNode() }
+    open var geometryIndex: Int { 0 }
+    open var faceIndex: Int { 0 }
+    open var worldCoordinates: SCNVector3 { SCNVector3() }
+    open var localCoordinates: SCNVector3 { SCNVector3() }
+    open var worldNormal: SCNVector3 { SCNVector3() }
+}
+
+public protocol SCNSceneRenderer: AnyObject {
+    var scene: SCNScene? { get set }
+    var isPlaying: Bool { get set }
+    var sceneTime: TimeInterval { get set }
+}
+
+public protocol SCNSceneRendererDelegate: AnyObject {
+    func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval)
+    func renderer(_ renderer: SCNSceneRenderer, didRenderScene scene: SCNScene, atTime time: TimeInterval)
+}
+
+public extension SCNSceneRendererDelegate {
+    func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {}
+    func renderer(_ renderer: SCNSceneRenderer, didRenderScene scene: SCNScene, atTime time: TimeInterval) {}
+}
+
+open class SCNView: UIView, SCNSceneRenderer {
+    public var scene: SCNScene?
+    public var isPlaying: Bool = false
+    public var sceneTime: TimeInterval = 0
+    open weak var delegate: SCNSceneRendererDelegate?
+    open var rendersContinuously: Bool = false
+    open var allowsCameraControl: Bool = false
+    open var antialiasingMode: SCNAntialiasingMode = .none
+    open var preferredFramesPerSecond: Int = 60
+    open var autoenablesDefaultLighting: Bool = false
+    open var isJitteringEnabled: Bool = false
+    open var showsStatistics: Bool = false
+    open var pointOfView: SCNNode?
+    open func hitTest(_ point: CGPoint, options: [SCNHitTestOption: Any]?) -> [SCNHitTestResult] { [] }
+    open func prepare(_ object: Any, shouldAbortBlock block: (() -> Bool)?) -> Bool { true }
+    open func snapshot() -> UIImage { UIImage() }
+}

@@ -116,6 +116,12 @@ final class CatBrain {
     private var blinkPhase: Float = -1
     private var elapsedTotal: Float = 0
     private var sky: SkyState = WorldClock.sky()
+    /// How long the current activity has been running (including travel).
+    private var activityElapsed: Float = 0
+    /// Per-activity preference jitter. Held steady for a while so the cat commits
+    /// to a choice instead of dithering between two near-equal options every tick.
+    private var scoreJitter: [CatActivity: Float] = [:]
+    private var jitterAge: Float = 99
 
     /// Player-visible caption for the HUD.
     var statusCaption: String {
@@ -267,17 +273,19 @@ final class CatBrain {
     }
 
     private func updateConsumables(dt: Float) {
+        // Rates are tuned so a full hopper lasts about a week and the fountain
+        // about five days — the care loop should be a habit, not a chore.
         if activity == .eat && !isTraveling {
-            room.feederFood = clamp(room.feederFood - 0.010 * dt)
+            room.feederFood = clamp(room.feederFood - 0.0010 * dt)
         }
         if activity == .drink && !isTraveling {
-            room.fountainWater = clamp(room.fountainWater - 0.006 * dt)
+            room.fountainWater = clamp(room.fountainWater - 0.0011 * dt)
         }
         if activity == .litter && !isTraveling {
-            room.litterCleanliness = clamp(room.litterCleanliness - 0.010 * dt)
+            room.litterCleanliness = clamp(room.litterCleanliness - 0.0075 * dt)
         }
         if room.fountainOn {
-            room.fountainWater = clamp(room.fountainWater - 0.0000045 * dt)
+            room.fountainWater = clamp(room.fountainWater - 0.0000008 * dt)
         }
     }
 
@@ -528,7 +536,7 @@ final class CatBrain {
         case .scratchPost:
             if rng.float() < dt * 1.1 { onEvent?(.scratchSound) }
         case .windowWatch:
-            if rng.float() < dt * 0.05 { onEvent?(.chirp) }
+            if rng.float() < dt * 0.012 { onEvent?(.chirp) }
         case .batTeacup:
             if rng.float() < dt * 0.08 {
                 onEvent?(.teacupKnocked)
@@ -547,9 +555,12 @@ final class CatBrain {
             motion.purr = approach(motion.purr, personality.cuddliness > 0.6 ? 0.15 : 0, rate: 0.3, dt: dt)
         }
 
+        // A genuinely urgent need overrides the slow re-evaluation cadence.
+        if needs.lowest.value < 0.18 { reevaluateIn = min(reevaluateIn, 1.5) }
+
         reevaluateIn -= dt
         if performRemaining <= 0 || reevaluateIn <= 0 {
-            reevaluateIn = 2.5
+            reevaluateIn = reevaluationInterval(for: activity)
             chooseActivity(force: performRemaining <= 0)
         }
     }
@@ -560,6 +571,15 @@ final class CatBrain {
         attentionTimer = max(0, attentionTimer - dt)
         recallTimer += dt
         vocalCooldown -= dt
+        activityElapsed += dt
+
+        jitterAge += dt
+        if jitterAge > 45 {
+            jitterAge = 0
+            for candidate in CatActivity.allCases {
+                scoreJitter[candidate] = rng.float(-0.45, 0.45)
+            }
+        }
         for (k, v) in recentActivities {
             let nv = v - dt
             if nv <= 0 { recentActivities.removeValue(forKey: k) } else { recentActivities[k] = nv }
@@ -571,9 +591,9 @@ final class CatBrain {
 
         // Spontaneous vocalisation when a need is really low.
         if vocalCooldown <= 0 {
-            vocalCooldown = rng.float(12, 45) / max(0.2, personality.chattiness)
+            vocalCooldown = rng.float(90, 300) / max(0.3, personality.chattiness)
             let worst = needs.lowest
-            if worst.value < 0.3 && !activity.isSleeping && rng.float() < personality.chattiness {
+            if worst.value < 0.22 && !activity.isSleeping && rng.float() < personality.chattiness {
                 onEvent?(.meow(pitch: rng.float(0.85, 1.25)))
             }
         }
@@ -581,7 +601,18 @@ final class CatBrain {
 
     private func begin(_ new: CatActivity, keepPosition: Bool = false) {
         activity = new
-        recentActivities[new] = 40
+        activityElapsed = 0
+        switch new {
+        case .stretch: recentActivities[new] = 240
+        case .zoomies: recentActivities[new] = 1200
+        case .scratchPost, .batTeacup: recentActivities[new] = 300
+        case .chirpAtBirds: recentActivities[new] = 900
+        case .greetPlayer: recentActivities[new] = 900
+        case .sitAndStare, .followPlayer: recentActivities[new] = 240
+        case .loafTable: recentActivities[new] = 260
+        case _ where new.isSleeping: recentActivities[new] = 700
+        default: recentActivities[new] = 40
+        }
         spot = new.spot(sky: sky, rng: &rng)
         if keepPosition {
             spot.position = motion.position
@@ -601,7 +632,7 @@ final class CatBrain {
             performRemaining = rng.float(lo, hi)
             motion.pose = new.pose
             onEvent?(.activityChanged(new))
-            reevaluateIn = 2.5
+            reevaluateIn = reevaluationInterval(for: new)
             return
         }
         if new == .eatTreat, let t = treatPosition {
@@ -611,7 +642,14 @@ final class CatBrain {
         let heightMismatch = abs(motion.position.y - spot.surfaceHeight) > 0.05
         isTraveling = dist > 0.10 || heightMismatch
         if !isTraveling { arrive() }
-        reevaluateIn = 2.5
+        reevaluateIn = reevaluationInterval(for: new)
+    }
+
+    /// Long activities are re-considered rarely; short ones often. Without this a
+    /// sleeping cat gets poked awake every couple of seconds by scoring noise.
+    private func reevaluationInterval(for a: CatActivity) -> Float {
+        let (lo, _) = a.duration
+        return min(20, max(2.5, lo * 0.12))
     }
 
     private func chooseActivity(force: Bool) {
@@ -631,14 +669,18 @@ final class CatBrain {
         }
 
         // Inertia: don't abandon a long activity for a marginal improvement.
+        // The jitter is held steady between re-rolls, so this comparison is stable.
         if !force {
             let current = score(activity)
-            if bestScore < current + 0.25 { return }
+            let threshold: Float = activity.isSleeping ? 0.7 : 0.35
+            if bestScore < current + threshold { return }
         }
         if best == activity && !force { return }
 
-        // Cats stretch when they get up from a nap.
-        if activity.isSleeping && best != activity && rng.float() < 0.7 {
+        // Cats stretch when they get up from a proper nap — but only after a real
+        // one, and never twice in quick succession.
+        if activity.isSleeping && best != activity && activityElapsed > 90
+            && recentActivities[.stretch] == nil && rng.float() < 0.7 {
             begin(.stretch)
             return
         }
@@ -661,27 +703,29 @@ final class CatBrain {
         let crepuscular = clamp(dawnPeak + duskPeak)
         let sleepiness = clamp(1 - crepuscular * 0.9) * (0.5 + personality.sleepiness * 0.8)
 
+        // Sleep pressure is the rest deficit shaped by the circadian curve. A fully
+        // rested cat still naps, but not enough to sleep through the whole game.
+        let restDeficit = 1 - needs.rest
+        let sleepPull = (0.30 + sleepiness * 1.5) * (0.30 + 1.9 * restDeficit)
+
         switch a {
         case .sleepFuton:
-            s += sleepiness * 2.2 + 0.4
-            s += (1 - needs.rest) * 2.0
+            s += sleepPull * 1.15
         case .sleepCatBed:
-            s += sleepiness * 1.9
-            s += (1 - needs.rest) * 1.8
+            s += sleepPull * 1.00
         case .sleepTreeTop:
-            s += sleepiness * 1.5 * personality.confidence
-            s += (1 - needs.rest) * 1.4
+            s += sleepPull * 0.85 * (0.4 + personality.confidence)
         case .sleepSunPatch:
-            s += sleepiness * 2.4 * clamp(sky.daylight * 1.4)
-            if sky.daylight < 0.25 { s -= 5 }
+            if sky.daylight < 0.25 { return -100 }
+            s += sleepPull * 1.25 * clamp(sky.daylight * 1.4)
         case .napWindowSill:
-            s += sleepiness * 1.4 * clamp(sky.daylight + 0.2)
+            s += sleepPull * 0.95 * clamp(sky.daylight + 0.2)
         case .perchTree:
             s += personality.curiosity * 1.1 + crepuscular * 0.7
         case .loafFloor:
-            s += 0.9
+            s += 0.75
         case .loafTable:
-            s += 0.5 + personality.mischief * 1.2
+            s += 0.35 + personality.mischief * 1.0
         case .eat:
             if room.feederFood <= 0.02 { return -100 }
             s += (1 - needs.fullness) * 5.5 * personality.appetite + 0.2
@@ -694,9 +738,10 @@ final class CatBrain {
             s += powf(1 - needs.bladder, 2) * 9
             s -= (1 - room.litterCleanliness) * 2.0
         case .groom:
-            s += (1 - needs.cleanliness) * 3.0 + 0.3
+            s += (1 - needs.cleanliness) * 3.4 + 0.55
+            if activity == .eat || activity == .litter { s += 1.8 }
         case .stretch:
-            s += 0.2
+            return -100          // only reached by waking up from a nap
         case .knead:
             s += personality.cuddliness * 0.9 + (1 - needs.social) * 0.8
         case .scratchPost:
@@ -710,14 +755,16 @@ final class CatBrain {
             s += (1 - needs.curiosity) * 2.6 * personality.curiosity
             s += sky.daylight * 1.0
         case .chirpAtBirds:
-            s += personality.curiosity * 1.4 * sky.daylight * (1 - needs.curiosity)
+            // Punctuation while already at the window, and rare enough to stay special.
+            s += personality.curiosity * 0.7 * sky.daylight
+            if activity == .windowWatch || activity == .napWindowSill { s += 0.9 }
         case .wander:
             s += 0.5 + personality.energy * 0.5
         case .sitAndStare:
-            s += (1 - needs.social) * 1.6 + personality.affection * 0.6
+            s += (1 - needs.social) * 3.0 + personality.affection * 1.1
         case .greetPlayer:
-            s += (1 - needs.social) * 3.2 * (personality.affection + personality.clinginess) * 0.6
-            s += bond * 1.2
+            s += (1 - needs.social) * 4.4 * (0.4 + personality.affection + personality.clinginess) * 0.6
+            s += bond * 1.2 + personality.affection * 0.8
             if attentionTimer > 0 { s += 2.5 }
         case .receivePets:
             return isBeingPet ? 50 : -100
@@ -726,25 +773,24 @@ final class CatBrain {
         case .eatTreat:
             return treatPosition != nil ? (4 + personality.appetite * 3) : -100
         case .zoomies:
-            s += crepuscular * 2.6 * personality.energy * (1 - needs.play)
-            s += needs.rest * 1.2
-            if needs.rest < 0.4 { s -= 3 }
+            if needs.rest < 0.30 { return -100 }
+            s += (0.4 + crepuscular * 2.4) * personality.energy * (1 - needs.play) * 1.6
         case .hide:
-            s += personality.skittishness * 0.6 - 1.0
+            return -100          // only reached by being startled
         case .followPlayer:
-            s += personality.clinginess * 1.8 * (1 - needs.social)
+            s += (1 - needs.social) * 3.0 * (0.3 + personality.clinginess) + personality.cuddliness * 0.6
         }
 
         // Variety: recently performed activities are less attractive.
         if let cooldown = recentActivities[a] {
-            s -= cooldown * 0.06
+            s -= min(1.8, cooldown * 0.06)
         }
         // Sleeping cats resist getting up.
         if activity.isSleeping && !a.isSleeping {
             s -= 1.2 * personality.sleepiness
         }
-        // A little noise so two identical days never happen.
-        s += rng.float(-0.35, 0.35)
+        // Held jitter so two identical days never happen, without causing dithering.
+        s += scoreJitter[a] ?? 0
         return s
     }
 

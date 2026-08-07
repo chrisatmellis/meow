@@ -1,5 +1,6 @@
 import Foundation
 import SceneKit
+import QuartzCore
 import UIKit
 
 /// Owns the SceneKit scene and drives it from the simulation every frame.
@@ -351,7 +352,7 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
         teacupFalling = true
         let fall = SCNAction.group([
             SCNAction.move(by: SCNVector3(x: 0.18, y: -RoomLayout.tableTop, z: 0.10), duration: 0.55),
-            SCNAction.rotateBy(x: deg(120), y: deg(40), z: deg(90), duration: 0.55)
+            SCNAction.rotateBy(x: CGFloat(deg(120)), y: CGFloat(deg(40)), z: CGFloat(deg(90)), duration: 0.55)
         ])
         fall.timingMode = .easeIn
         let restore = SCNAction.sequence([

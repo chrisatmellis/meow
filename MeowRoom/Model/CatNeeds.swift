@@ -15,7 +15,7 @@ struct CatNeeds: Codable, Equatable {
     struct DrainRates {
         static let fullness: Float = 0.115
         static let hydration: Float = 0.135
-        static let rest: Float = 0.085
+        static let rest: Float = 0.135
         static let bladder: Float = 0.095
         static let social: Float = 0.155
         static let play: Float = 0.175
@@ -29,7 +29,7 @@ struct CatNeeds: Codable, Equatable {
         }
         d(&fullness, DrainRates.fullness, p.hungerDrain)
         d(&hydration, DrainRates.hydration, 0.8 + 0.5 * p.appetite)
-        d(&rest, DrainRates.rest, (0.5 + 1.1 * p.energy) * awakeFactor)
+        d(&rest, DrainRates.rest, (0.35 + 0.65 * p.energy + 1.0 * p.sleepiness) * awakeFactor)
         d(&bladder, DrainRates.bladder, 0.7 + 0.7 * p.appetite)
         d(&social, DrainRates.social, p.socialDrain)
         d(&play, DrainRates.play, p.playDrain)

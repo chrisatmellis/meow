@@ -78,8 +78,8 @@ enum CatActivity: String, CaseIterable, Codable {
     /// How long the cat sticks with this, in seconds (min, max).
     var duration: (Float, Float) {
         switch self {
-        case .sleepFuton, .sleepCatBed, .sleepTreeTop, .sleepSunPatch: return (240, 900)
-        case .napWindowSill: return (120, 420)
+        case .sleepFuton, .sleepCatBed, .sleepTreeTop, .sleepSunPatch: return (1500, 5400)
+        case .napWindowSill: return (600, 2400)
         case .loafFloor, .loafTable: return (60, 240)
         case .perchTree: return (40, 150)
         case .eat: return (18, 40)
@@ -108,14 +108,15 @@ enum CatActivity: String, CaseIterable, Codable {
     /// Needs restored per second while performing.
     var restores: [NeedKey: Float] {
         switch self {
+        // Rest is restored slowly: a full night is hours of sleep, not minutes.
         case .sleepFuton, .sleepCatBed, .sleepTreeTop, .sleepSunPatch:
-            return [.rest: 0.0016, .cleanliness: 0.0001]
+            return [.rest: 0.000062, .cleanliness: 0.000004]
         case .napWindowSill:
-            return [.rest: 0.0011, .curiosity: 0.0003]
+            return [.rest: 0.000044, .curiosity: 0.0003]
         case .loafFloor, .loafTable:
-            return [.rest: 0.0006]
+            return [.rest: 0.000020]
         case .perchTree:
-            return [.curiosity: 0.0012, .rest: 0.0002]
+            return [.curiosity: 0.0012, .rest: 0.000008]
         case .eat:
             return [.fullness: 0.030]
         case .drink:
@@ -125,9 +126,9 @@ enum CatActivity: String, CaseIterable, Codable {
         case .groom:
             return [.cleanliness: 0.014]
         case .stretch:
-            return [.rest: 0.003]
+            return [.rest: 0.0002]
         case .knead:
-            return [.social: 0.006, .rest: 0.001]
+            return [.social: 0.006, .rest: 0.00003]
         case .scratchPost:
             return [.play: 0.008, .cleanliness: 0.002]
         case .playMouse, .playBall:
@@ -151,9 +152,9 @@ enum CatActivity: String, CaseIterable, Codable {
         case .eatTreat:
             return [.fullness: 0.020, .social: 0.010]
         case .zoomies:
-            return [.play: 0.014, .rest: -0.004]
+            return [.play: 0.014, .rest: -0.0006]
         case .hide:
-            return [.rest: 0.0004]
+            return [.rest: 0.00002]
         case .followPlayer:
             return [.social: 0.010]
         }

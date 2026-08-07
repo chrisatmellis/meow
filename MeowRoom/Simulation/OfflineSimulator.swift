@@ -42,23 +42,23 @@ enum OfflineSimulator {
             needs.decay(hours: stepHours, personality: p, awakeFactor: asleep ? 0.35 : 1.0)
 
             if asleep {
-                needs.rest = clamp(needs.rest + 0.16 * stepHours * 4)
+                needs.rest = clamp(needs.rest + 0.22 * stepHours)
                 slept += stepHours
             } else {
                 // Autonomous self-care.
                 if needs.fullness < 0.45 && room.feederFood > 0.02 {
                     needs.fullness = clamp(needs.fullness + 0.55)
-                    room.feederFood = clamp(room.feederFood - 0.07)
+                    room.feederFood = clamp(room.feederFood - 0.065)
                     meals += 1
                 }
                 if needs.hydration < 0.5 && room.fountainWater > 0.02 {
                     needs.hydration = clamp(needs.hydration + 0.6)
-                    room.fountainWater = clamp(room.fountainWater - 0.03)
+                    room.fountainWater = clamp(room.fountainWater - 0.02)
                     drinks += 1
                 }
                 if needs.bladder < 0.3 {
                     needs.bladder = 1
-                    room.litterCleanliness = clamp(room.litterCleanliness - 0.09)
+                    room.litterCleanliness = clamp(room.litterCleanliness - 0.14)
                     litterTrips += 1
                 }
                 if needs.cleanliness < 0.6 {
