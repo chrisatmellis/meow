@@ -107,4 +107,22 @@ func runProfile() {
     for key in NeedKey.allCases {
         print(String(format: "    %-12@ %.2f", key.rawValue as NSString, brain.needs[key]))
     }
+
+    print("\n── light across the day ────────────────────────────────")
+    print("  hour      sun     sky    moon lantern  |    key    EV   screen")
+    var dayCal = Calendar(identifier: .gregorian)
+    dayCal.timeZone = TimeZone(identifier: "UTC")!
+    var lo = Float.infinity, hi = -Float.infinity
+    for hour in 0..<24 {
+        var comps = DateComponents()
+        comps.year = 2026; comps.month = 9; comps.day = 21; comps.hour = hour
+        let s = WorldClock.sky(at: dayCal.date(from: comps)!, timeZone: TimeZone(identifier: "UTC")!)
+        let b = LightingRig.budget(sky: s, lanternOn: s.wantsLampLight)
+        let screen = LightingRig.renderedBrightness(for: b)
+        lo = min(lo, screen); hi = max(hi, screen)
+        print(String(format: "  %02d:00 %7.0f %7.0f %7.1f %7.0f  | %6.0f %+5.2f %8.0f",
+                     hour, b.sun, b.sky, b.moon, b.lantern,
+                     b.key, Float(LightingRig.exposureOffset(for: b)), screen))
+    }
+    print(String(format: "  screen brightness spans %.2f stops across the day", log2(hi / lo)))
 }

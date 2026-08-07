@@ -632,33 +632,45 @@ section("room builder") {
 
     let lighting = LightingRig()
     let scene = SCNScene()
-    var brightestExposure = -CGFloat.infinity
-    var darkestExposure = CGFloat.infinity
-    var previousExposure = CGFloat.infinity
-    var previousDaylight = -Float.infinity
+    // Every light, every emissive surface and the camera all come off one light
+    // budget now, so the invariants worth holding are about that budget rather
+    // than about any single curve.
+    var samples: [(hour: Int, key: Float, exposure: CGFloat, rendered: Float)] = []
     for hour in 0..<24 {
         var comps = DateComponents(); comps.year = 2026; comps.month = 9; comps.day = 21; comps.hour = hour
         var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "UTC")!
         let s = WorldClock.sky(at: cal.date(from: comps)!, timeZone: TimeZone(identifier: "UTC")!)
-        lighting.apply(sky: s, scene: scene, room: room, lanternOn: s.wantsLampLight)
+        let lanternOn = s.wantsLampLight
+        lighting.apply(sky: s, scene: scene, room: room, lanternOn: lanternOn)
 
-        // The camera stops down as the sun climbs. Midday and night are far
-        // enough apart in real brightness that one fixed exposure blows the
-        // tatami and the shoji out to flat white at noon, which is what this
-        // guards against.
-        let e = LightingRig.exposureOffset(for: s)
-        expect(e <= 0.01 && e >= -2.0, "exposure at \(hour):00 is in range (\(e))")
-        if s.daylight >= previousDaylight {
-            expect(e <= previousExposure + 1e-5,
-                   "exposure does not brighten as daylight rises (\(hour):00)")
-        }
-        previousExposure = e
-        previousDaylight = s.daylight
-        brightestExposure = max(brightestExposure, e)
-        darkestExposure = min(darkestExposure, e)
+        let b = LightingRig.budget(sky: s, lanternOn: lanternOn)
+        let e = LightingRig.exposureOffset(for: b)
+        expect(b.key > 0, "something is lighting the room at \(hour):00")
+        expect(e >= -2.4 && e <= 4.2, "exposure at \(hour):00 is in range (\(e))")
+        samples.append((hour, b.key, e, LightingRig.renderedBrightness(for: b)))
     }
-    expect(brightestExposure - darkestExposure > 0.5,
-           "exposure actually varies across the day (\(brightestExposure - darkestExposure) EV)")
+
+    // A brighter room must still render brighter. This is the invariant that was
+    // missing: with each light on its own hand-fitted curve nothing related them,
+    // so late night drifted until it was brighter on screen than noon and no
+    // assertion anywhere could tell.
+    let byKey = samples.sorted { $0.key < $1.key }
+    for (a, b) in zip(byKey, byKey.dropFirst()) {
+        expect(b.rendered >= a.rendered - 1e-4,
+               "more light renders brighter (\(a.hour):00 \(a.key)lx vs \(b.hour):00 \(b.key)lx)")
+        expect(b.exposure <= a.exposure + 1e-4,
+               "more light means stopping down (\(a.hour):00 vs \(b.hour):00)")
+    }
+
+    // ...and the day must still have visible contrast in it. Full compensation
+    // would satisfy the ordering above while making every hour look identical,
+    // which is the failure this pairs with.
+    let darkest = byKey.first!, brightest = byKey.last!
+    let stops = log2(brightest.rendered / darkest.rendered)
+    expect(stops > 0.8, "day is not flat: \(stops) stops between \(darkest.hour):00 and \(brightest.hour):00")
+    expect(stops < 3.2, "day is not extreme: \(stops) stops")
+    expect(brightest.key / darkest.key > 20,
+           "the underlying light really does span a wide range (\(brightest.key / darkest.key)x)")
     expect(true, "lighting applied across a whole day")
 }
 

@@ -67,19 +67,69 @@ final class LightingRig {
         root.addChildNode(windowGlowNode)
     }
 
-    /// How far to stop the camera down for a given sky.
+    // MARK: - Light budget
+
+    /// The room's light in absolute terms: lux arriving in the middle of the floor.
     ///
-    /// The room spans a huge range of real brightness — a moonlit night and noon
-    /// sun through paper are nowhere near each other — and one fixed exposure
-    /// cannot serve both. At a setting dark enough to hold midday, night is
-    /// unreadable; at one bright enough for night, midday clips the tatami, the
-    /// walls and the shoji all to flat white and the cat washes out with them.
-    /// So the camera stops down as the sun climbs, the way an eye or an
-    /// auto-exposing camera does. SceneKit's own `wantsExposureAdaptation` would
-    /// ramp visibly after launch; the sky is already known, so this is computed
-    /// straight from it instead.
-    static func exposureOffset(for sky: SkyState) -> CGFloat {
-        CGFloat(-0.35 - 0.90 * sky.daylight)
+    /// Everything else in this file is derived from this one struct, which is the
+    /// whole point of it. Before, the sun, moon, ambient, bounce, window glow,
+    /// lantern, shoji emission, image-based lighting and camera exposure were nine
+    /// separate hand-fitted curves. Nothing anywhere meant "how bright is this
+    /// room", so tuning any one of them to fix a screenshot quietly moved the
+    /// others, and nothing was able to notice that late night had ended up
+    /// brighter than noon.
+    struct LightBudget {
+        var sun: Float
+        var sky: Float
+        var moon: Float
+        var lantern: Float
+
+        /// What the camera meters.
+        var key: Float { max(0.05, sun + sky + moon + lantern) }
+    }
+
+    /// A pleasant, well-lit interior. Exposure is defined relative to this.
+    private static let referenceLux: Float = 500
+
+    /// How much of the real brightness variation survives to the screen.
+    ///
+    /// A camera that compensates fully renders midnight and noon identically,
+    /// which is exactly how every hour in this room ended up the same brightness.
+    /// Compensating only partly keeps night reading as night: the frame lands at
+    /// `reference * (key / reference) ^ retainedContrast`, so the ~6 stops between
+    /// a lantern at midnight and full noon arrive as about 1.5 stops on screen —
+    /// plainly different, still readable.
+    private static let retainedContrast: Float = 0.25
+
+    /// Lux by path, for the current sky. Daylight is overwhelmingly the sun and
+    /// the sky through the opening; at night a paper lantern is worth far more
+    /// than the moon, which is why a room with the lamp off really is dim.
+    static func budget(sky: SkyState, lanternOn: Bool) -> LightBudget {
+        let above = smoothstep(-0.06, 0.12, sky.sunElevation)
+        let moonUp = smoothstep(-0.05, 0.25, sky.moonElevation)
+        return LightBudget(sun: above * powf(max(0, sky.daylight), 1.5) * 1900,
+                           sky: 3 + 660 * sky.daylight,
+                           moon: moonUp * 9 * (1 - sky.daylight),
+                           lantern: lanternOn ? 26 : 0)
+    }
+
+    /// Exposure in EV, metered off the budget the way a real camera would.
+    /// SceneKit's own `wantsExposureAdaptation` would ramp visibly after launch;
+    /// the sky is already known, so this is computed straight from it instead.
+    static func exposureOffset(for budget: LightBudget) -> CGFloat {
+        let ev = log2(budget.key / referenceLux) * (1 - retainedContrast)
+        return CGFloat(min(4.2, max(-2.4, -ev)))
+    }
+
+    static func exposureOffset(sky: SkyState, lanternOn: Bool) -> CGFloat {
+        exposureOffset(for: budget(sky: sky, lanternOn: lanternOn))
+    }
+
+    /// Where the frame should land in brightness once exposure has been applied.
+    /// Only meaningful relative to itself — the tests use it to assert that a
+    /// brighter room really does render brighter.
+    static func renderedBrightness(for budget: LightBudget) -> Float {
+        referenceLux * powf(budget.key / referenceLux, retainedContrast)
     }
 
     func apply(sky: SkyState, scene: SCNScene, room: RoomNode, lanternOn: Bool) {
@@ -89,30 +139,36 @@ final class LightingRig {
         sunNode.position = sunPos
         sunNode.look(at: SCNVector3(x: 0, y: 0.6, z: -0.2))
 
-        let above = smoothstep(-0.06, 0.12, sky.sunElevation)
-        sun.intensity = CGFloat(above * (170 + 540 * sky.daylight))
+        // Each light takes a share of the budget. The per-light factors differ
+        // because SceneKit measures a directional light's intensity in lux but an
+        // omni's in lumens; they convert between those units and set the overall
+        // level. The ratios are what matter, and they all move together now.
+        let budget = LightingRig.budget(sky: sky, lanternOn: lanternOn)
+
+        sun.intensity = CGFloat(budget.sun * 0.30)
         sun.color = UIColor(sky.sunColor)
-        sun.castsShadow = above > 0.05
+        sun.castsShadow = budget.sun > 30
 
         // --- Moon.
         let m = sky.moonDirection
         moonNode.position = SCNVector3(x: m.x * 9, y: max(0.2, m.y * 9), z: m.z * 9)
         moonNode.look(at: SCNVector3(x: 0, y: 0.6, z: -0.2))
-        let moonUp = smoothstep(-0.05, 0.25, sky.moonElevation)
-        moon.intensity = CGFloat(moonUp * 34 * (1 - sky.daylight))
+        moon.intensity = CGFloat(budget.moon * 3.5)
 
         // --- Ambient from the sky colour.
         ambient.color = UIColor(sky.ambientColor)
-        ambient.intensity = CGFloat(16 + 95 * sky.daylight)
+        ambient.intensity = CGFloat(budget.sky * 0.14 + budget.lantern * 0.60)
 
         // --- Bounce and window glow.
-        bounce.intensity = CGFloat(10 + 78 * sky.daylight)
+        bounce.intensity = CGFloat(budget.sun * 0.03 + budget.sky * 0.06 + budget.lantern * 1.20)
         bounce.color = UIColor(sky.sunColor.mixed(with: RGBColor(hex: 0xC9B383), 0.45))
-        windowGlow.intensity = CGFloat(14 + 115 * sky.daylight)
+        windowGlow.intensity = CGFloat(budget.sky * 0.19)
         windowGlow.color = UIColor(sky.skyHorizonColor.lightened(0.25))
 
-        // --- Backlit shoji paper.
-        let glow = CGFloat(0.03 + 0.30 * sky.daylight + 0.10 * sky.horizonWarmth)
+        // --- Backlit shoji paper. Its brightness is the sky outside and nothing
+        // else: the flat floor this used to carry was what left the paper — and
+        // the open half beside it — glowing at ten at night.
+        let glow = CGFloat(min(0.52, budget.sky / LightingRig.referenceLux * 0.36))
         for mat in room.shojiMaterials {
             mat.emission.intensity = glow
             mat.emission.contents = UIColor(sky.skyHorizonColor.lightened(0.35 * sky.daylight))
@@ -125,14 +181,16 @@ final class LightingRig {
 
         // --- Image-based lighting for believable PBR highlights.
         scene.lightingEnvironment.contents = TextureFactory.skyEnvironment(sky: sky)
-        scene.lightingEnvironment.intensity = CGFloat(0.12 + 0.45 * sky.daylight)
+        scene.lightingEnvironment.intensity = CGFloat(budget.sky / LightingRig.referenceLux * 0.43)
         scene.background.contents = UIColor(sky.skyHorizonColor.darkened(0.4))
 
         // --- Paper lantern.
         if let light = room.lanternLight, let paper = room.lanternPaper {
-            let target: CGFloat = lanternOn ? CGFloat(95 - 40 * sky.daylight) : 0
-            light.intensity = target
-            paper.emission.intensity = lanternOn ? 0.85 : 0.0
+            light.intensity = CGFloat(budget.lantern * 3.4)
+            // A lit lamp has a fixed luminance, so this does not track the sky.
+            // At night exposure lifts it and the paper reads as the bright thing
+            // in the room, which is what a lamp at night is.
+            paper.emission.intensity = lanternOn ? 0.18 : 0.0
         }
 
         // --- Sun patch on the tatami.
