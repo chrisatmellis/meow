@@ -197,7 +197,7 @@ final class CatBrain {
 
     /// True when the cat is within arm's reach of the seated player.
     var canBePet: Bool {
-        motion.position.planarDistance(to: RoomLayout.cameraPosition) < 1.30 && !isOverstimulated
+        motion.position.planarDistance(to: RoomLayout.cameraPosition) < 1.60 && !isOverstimulated
     }
 
     func setWand(active: Bool, tip: SCNVector3) {
@@ -860,7 +860,7 @@ final class CatBrain {
 
         // Purring while content and near the player.
         if !isBeingPet && !sleeping {
-            let content = needs.mood > 0.7 && motion.position.planarDistance(to: RoomLayout.cameraPosition) < 1.6
+            let content = needs.mood > 0.7 && motion.position.planarDistance(to: RoomLayout.cameraPosition) < 1.9
             motion.purr = approach(motion.purr, content ? 0.35 * personality.affection : 0, rate: 0.5, dt: dt)
         }
 

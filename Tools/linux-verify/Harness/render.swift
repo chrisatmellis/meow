@@ -280,6 +280,47 @@ private func writePNG(_ pixels: [UInt8], width: Int, height: Int, to path: Strin
     _ = FileManager.default.createFile(atPath: path, contents: Data(png))
 }
 
+// MARK: - Screen-space measurement
+
+/// Where a node lands in the final frame, in points, using the same projection as
+/// the rasteriser. The HUD occupies a fixed band along the bottom of the screen,
+/// so knowing the cat's screen box is the only way to tell — without a Mac —
+/// whether a cat that comes when called ends up hidden behind the status pill.
+private func screenBounds(_ node: SCNNode,
+                          eye: SCNVector3, target: SCNVector3,
+                          fovDegrees: Float, width: Int, height: Int)
+    -> (minX: Float, maxX: Float, minY: Float, maxY: Float)? {
+
+    var tris: [Tri] = []
+    gather(node, into: &tris)
+
+    let forward = (target - eye).normalized
+    var right = cross(SCNVector3(x: 0, y: 1, z: 0), forward).normalized
+    if right.length < 1e-4 { right = SCNVector3(x: 1, y: 0, z: 0) }
+    let up = cross(forward, right).normalized
+
+    let aspect = Float(width) / Float(height)
+    let tanHalf = tanf(fovDegrees * .pi / 180 / 2)
+
+    var minX = Float.infinity, maxX = -Float.infinity
+    var minY = Float.infinity, maxY = -Float.infinity
+    var any = false
+
+    for tri in tris {
+        for p in [tri.a, tri.b, tri.c] {
+            let d = p - eye
+            let z = dot(d, forward)
+            guard z > 0.02 else { continue }
+            let x = (dot(d, right) / (z * tanHalf * aspect) * 0.5 + 0.5) * Float(width)
+            let y = (1 - (dot(d, up) / (z * tanHalf) * 0.5 + 0.5)) * Float(height)
+            minX = min(minX, x); maxX = max(maxX, x)
+            minY = min(minY, y); maxY = max(maxY, y)
+            any = true
+        }
+    }
+    return any ? (minX, maxX, minY, maxY) : nil
+}
+
 // MARK: - Entry point
 
 func runRender(outputDirectory: String) {
@@ -374,4 +415,39 @@ func runRender(outputDirectory: String) {
     shot("room-overhead", world,
          eye: SCNVector3(x: 0.2, y: 3.4, z: 2.6), target: SCNVector3(x: 0, y: 0.3, z: -0.6),
          fov: 60, size: (600, 480), bg: (0.05, 0.06, 0.09))
+
+    // --- The cat where it sits when called over, checked against the HUD.
+    // The bottom bar, status line and home indicator together occupy roughly the
+    // lowest 150 pt of an 844 pt frame; the cat has to stay clear of that.
+    let closeRig = CatBuilder.build(BreedPresets.appearance(for: .domesticShorthair))
+    let closeAnim = CatAnimator(rig: closeRig)
+    var closeMotion = CatMotion()
+    closeMotion.pose = .sittingTall
+    closeMotion.position = RoomLayout.playerLapSpot
+    // Same facing the brain gives a cat that has come over to be petted.
+    closeMotion.yaw = yawTowards(from: RoomLayout.playerLapSpot, to: RoomLayout.cameraPosition)
+    for _ in 0..<200 { closeAnim.update(dt: 1.0 / 60, motion: closeMotion) }
+
+    let closeWorld = SCNNode()
+    closeWorld.addChildNode(RoomBuilder.build(sky: sky).root)
+    closeWorld.addChildNode(closeRig.root)
+    shot("room-cat-called-over", closeWorld, eye: eye, target: aim,
+         fov: vertical, size: (390, 844), bg: (0.05, 0.06, 0.09))
+
+    // The head is what the player actually looks at, and it must be completely
+    // clear. The whole-body box is reported too, but a tail tip that sprawls
+    // toward the camera and slips under the bar is not worth moving the cat for.
+    let hudTop: Float = 844 - 150
+    for (label, node) in [("head", closeRig.head), ("whole cat", closeRig.root)] {
+        guard let b = screenBounds(node, eye: eye, target: aim,
+                                   fovDegrees: vertical, width: 390, height: 844) else {
+            print("  \(label) at lap spot: not on screen")
+            continue
+        }
+        let hidden = max(0, b.maxY - hudTop)
+        let visible = max(0, min(b.maxY, hudTop) - b.minY)
+        let fraction = visible > 0 ? hidden / (hidden + visible) : 1
+        print(String(format: "  %@ at lap spot: y[%.0f %.0f] x[%.0f %.0f]  %.0f%% behind the HUD (top %.0f)",
+                     label as NSString, b.minY, b.maxY, b.minX, b.maxX, fraction * 100, hudTop))
+    }
 }

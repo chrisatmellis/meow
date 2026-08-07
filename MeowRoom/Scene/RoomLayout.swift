@@ -73,9 +73,11 @@ enum RoomLayout {
     static let windowCenter = SCNVector3(x: 0.05, y: 1.20, z: -halfDepth)
     static let sideWindowCenter = SCNVector3(x: halfWidth, y: 1.25, z: -0.70)
 
-    /// Where the cat stands when it comes over for attention.
-    static let playerLapSpot = SCNVector3(x: 0.05, y: 0.0, z: 1.24)
-    static let playerNearSpot = SCNVector3(x: -0.08, y: 0.0, z: 1.05)
+    /// Where the cat stands when it comes over for attention. Far enough back that
+    /// it sits clear of the HUD along the bottom of the screen — at the original
+    /// distance a cat that came when called was half-hidden behind the status pill.
+    static let playerLapSpot = SCNVector3(x: 0.06, y: 0.0, z: 0.72)
+    static let playerNearSpot = SCNVector3(x: -0.10, y: 0.0, z: 0.56)
 
     /// Sunny patch on the tatami — slides across the floor through the day.
     static func sunPatchPosition(sky: SkyState) -> SCNVector3 {
