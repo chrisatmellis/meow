@@ -106,7 +106,17 @@ enum WorldClock {
     /// which is enough to make sunrise land at a believable hour anywhere on Earth.
     static var latitudeDegrees: Double = 35.0
 
+#if DEBUG
+    /// Developer-only offset, in seconds, so the whole day can be scrubbed through
+    /// from the settings sheet instead of waiting for dusk to arrive. Never compiled
+    /// into a release build.
+    static var debugTimeOffset: TimeInterval = 0
+#endif
+
     static func sky(at date: Date = Date(), timeZone: TimeZone = .current) -> SkyState {
+#if DEBUG
+        let date = date.addingTimeInterval(debugTimeOffset)
+#endif
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = timeZone
 
@@ -172,6 +182,9 @@ enum WorldClock {
     }
 
     static func clockString(_ date: Date = Date()) -> String {
+#if DEBUG
+        let date = date.addingTimeInterval(debugTimeOffset)
+#endif
         let f = DateFormatter()
         f.timeStyle = .short
         f.dateStyle = .none

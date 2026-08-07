@@ -81,7 +81,7 @@ PY
 echo "==> compiling"
 cd "$STAGE"
 FILES=$(find MeowRoom -name '*.swift' | sort)
-if ! swiftc -swift-version 5 -O -I "$MODULES" -L "$MODULES" \
+if ! swiftc -swift-version 5 -O -DDEBUG -I "$MODULES" -L "$MODULES" \
      -lCoreGraphics -lQuartzCore -lUIKit -lSceneKit \
      -lAVFoundation -lUserNotifications -lSwiftUI \
      -Xlinker -rpath -Xlinker "$MODULES" \

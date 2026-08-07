@@ -313,6 +313,13 @@ struct SettingsSheet: View {
     @State private var muted = CatVoice.shared.muted
     @State private var haptics = Haptics.enabled
     @State private var confirmReset = false
+    @State private var timeShiftHours: Double = 0
+
+    private var timeShiftLabel: String {
+        if abs(timeShiftHours) < 0.125 { return "now" }
+        let sign = timeShiftHours > 0 ? "+" : "−"
+        return String(format: "%@%.2gh", sign, abs(timeShiftHours))
+    }
 
     var body: some View {
         NavigationStack {
@@ -342,6 +349,21 @@ struct SettingsSheet: View {
                     Toggle("Haptics", isOn: $haptics)
                         .onChange(of: haptics) { _, value in Haptics.enabled = value }
                 }
+#if DEBUG
+                Section("Developer") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Preview time of day: \(timeShiftLabel)")
+                            .font(.subheadline)
+                        Slider(value: $timeShiftHours, in: -12...12, step: 0.25)
+                            .onChange(of: timeShiftHours) { _, value in
+                                WorldClock.debugTimeOffset = TimeInterval(value * 3600)
+                            }
+                        Text("Shifts the sun without waiting for it. Debug builds only.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+#endif
                 Section {
                     Button("Start over with a new cat", role: .destructive) {
                         confirmReset = true
