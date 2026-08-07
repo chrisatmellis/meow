@@ -17,8 +17,25 @@ iOS 17+ device or simulator. There is nothing to install and no package
 dependencies — every mesh, texture and sound in the game is generated at
 runtime in Swift.
 
+Or from the command line:
+
+```sh
+./Tools/xcode-build.sh            # simulator build, no signing needed
+./Tools/xcode-build.sh device     # device build, needs a signing team
+```
+
+It prints a compact diagnostic report rather than the usual wall of xcodebuild
+output, and keeps the full log for when you need it.
+
+For a device build, set your team once: select the Meow target → Signing &
+Capabilities → Team, and change the bundle identifier from `com.meowroom.Meow`
+to something in your own namespace.
+
 Notifications need a real device to be useful. The simulator will show the
 permission prompt but background delivery is unreliable there.
+
+Debug builds have a time-of-day slider in Settings, so you can see dawn, noon,
+golden hour and night without waiting for them.
 
 ## What's in the box
 
