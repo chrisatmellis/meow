@@ -98,6 +98,20 @@ and sleep, then tells you what happened when you come back. This runs both on a
 cold launch and when the app returns from the background, so an afternoon away is
 an afternoon away either way.
 
+## A note on SceneKit
+
+Apple soft-deprecated SceneKit at WWDC25 in favour of RealityKit. It is in
+maintenance mode, not removed — existing apps keep working, and no removal date
+has been announced. Because this project's deployment target is iOS 17.0, well
+below the 26.0 deprecation, the build stays warning-free; you would only start
+seeing deprecation warnings if you raised the target to 26.
+
+SceneKit is still the right choice here: the entire game is procedural geometry
+generated at runtime, which is exactly what `SCNGeometry` from raw vertex sources
+is for. If you ever want to port, `CatAnimator` drives named joints and would
+move across; `CatBuilder` and `RoomBuilder` are where the SceneKit-specific work
+lives.
+
 ## Verifying it
 
 Xcode is the only way to build the real app, but most of what can actually be

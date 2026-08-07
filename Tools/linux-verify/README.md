@@ -93,6 +93,19 @@ no-ops.
 So: a green run means the logic is sound and the code compiles. It does not
 replace building the app in Xcode once.
 
+To narrow that gap, every non-obvious Apple API the game uses was checked against
+Apple's published declarations rather than memory — `SCNCamera`'s post-processing
+properties, `SCNLight`'s shadow and attenuation types (`zNear`/`zFar` are `CGFloat`
+on lights but `Double` on cameras), `SCNMaterial.transparencyMode` and its
+`rgbZero` case, `SCNParticleSystem`'s property names and the `SCNParticleBlendMode`
+/ `SCNParticleBirthLocation` cases, `SCNNode.look(at:up:localFront:)` and
+`convertPosition(_:from:)`, `SCNGeometrySource(textureCoordinates:)` taking
+`[CGPoint]`, `AVAudioPlayerNode.scheduleBuffer(_:at:options:completionHandler:)`,
+`UIImpactFeedbackGenerator.impactOccurred(intensity:)`, and the SwiftUI modifiers
+with tighter availability windows (`statusBarHidden`, `presentationDetents`,
+`PresentationDetent.height(_:)`, `LabeledContent(_:value:)`). The shims match
+those declarations.
+
 ## Layout
 
 ```
