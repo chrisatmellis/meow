@@ -371,6 +371,28 @@ func runRender(outputDirectory: String) {
              fov: 34, size: (420, 320))
     }
 
+    // --- The head, close up. The game is mostly a face at close range, and the
+    // ear/skull junction in particular is easy to get wrong: the ear roots sit
+    // inside the skull, so if they drift out the ears read as floating.
+    for breed in [CatBreed.domesticShorthair, .maineCoon, .persian, .siamese] {
+        let a = BreedPresets.appearance(for: breed)
+        let rig = CatBuilder.build(a)
+        let animator = CatAnimator(rig: rig)
+        var motion = CatMotion()
+        motion.position = .zero
+        motion.pose = .sittingTall
+        for _ in 0..<200 { animator.update(dt: 1.0 / 60, motion: motion) }
+
+        let head = rig.head.convertPosition(.zero, to: nil)
+        let d = a.headRadius * 11
+        shot("head-\(breed.rawValue)-front", rig.root,
+             eye: SCNVector3(x: head.x, y: head.y + d * 0.16, z: head.z + d),
+             target: head, fov: 30, size: (460, 460))
+        shot("head-\(breed.rawValue)-threequarter", rig.root,
+             eye: SCNVector3(x: head.x + d * 0.62, y: head.y + d * 0.30, z: head.z + d * 0.72),
+             target: head, fov: 30, size: (460, 460))
+    }
+
     // --- A few breeds, so the silhouettes can be compared.
     for breed in [CatBreed.maineCoon, .siamese, .persian, .munchkin, .sphynx, .britishShorthair] {
         let rig = CatBuilder.build(BreedPresets.appearance(for: breed))
