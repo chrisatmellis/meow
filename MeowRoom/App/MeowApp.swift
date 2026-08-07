@@ -5,6 +5,12 @@ struct MeowApp: App {
     @StateObject private var model = AppModel()
     @Environment(\.scenePhase) private var scenePhase
 
+    init() {
+#if DEBUG
+        WorldClock.applyDebugEnvironment()
+#endif
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()

@@ -111,6 +111,19 @@ enum WorldClock {
     /// from the settings sheet instead of waiting for dusk to arrive. Never compiled
     /// into a release build.
     static var debugTimeOffset: TimeInterval = 0
+
+    /// Pins the clock to a given local hour, for screenshots and CI. Set with the
+    /// MEOW_FORCE_HOUR environment variable, e.g. MEOW_FORCE_HOUR=6 for dawn.
+    static func applyDebugEnvironment() {
+        guard let raw = ProcessInfo.processInfo.environment["MEOW_FORCE_HOUR"],
+              let target = Double(raw) else { return }
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = .current
+        let now = Date()
+        let c = cal.dateComponents([.hour, .minute, .second], from: now)
+        let current = Double(c.hour ?? 12) + Double(c.minute ?? 0) / 60 + Double(c.second ?? 0) / 3600
+        debugTimeOffset = (target - current) * 3600
+    }
 #endif
 
     static func sky(at date: Date = Date(), timeZone: TimeZone = .current) -> SkyState {

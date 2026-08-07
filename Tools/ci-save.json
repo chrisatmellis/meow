@@ -1,0 +1,178 @@
+{
+  "awayLog" : [
+
+  ],
+  "bond" : 0.5,
+  "lastSeen" : "2026-08-07T08:07:50Z",
+  "needs" : {
+    "bladder" : 0.85,
+    "cleanliness" : 0.8,
+    "curiosity" : 0.6,
+    "fullness" : 0.75,
+    "hydration" : 0.8,
+    "play" : 0.6,
+    "rest" : 0.7,
+    "social" : 0.6
+  },
+  "notificationsEnabled" : false,
+  "profile" : {
+    "adoptedAt" : "2026-08-07T08:07:50Z",
+    "appearance" : {
+      "baseCoat" : {
+        "b" : 0.30588236,
+        "g" : 0.43137255,
+        "r" : 0.54901963
+      },
+      "bellColor" : {
+        "b" : 0.25490198,
+        "g" : 0.7058824,
+        "r" : 0.8784314
+      },
+      "bellyColor" : {
+        "b" : 0.6509804,
+        "g" : 0.7647059,
+        "r" : 0.8392157
+      },
+      "bodyGirth" : 0.5,
+      "bodyLength" : 0.5,
+      "bodyType" : "semiCobby",
+      "breed" : "domesticShorthair",
+      "cheekFluff" : 0.35,
+      "chestDepth" : 0.5,
+      "chinSize" : 0.5,
+      "chonk" : 0.35,
+      "collarColor" : {
+        "b" : 0.28235295,
+        "g" : 0.22745098,
+        "r" : 0.6901961
+      },
+      "collarHasBell" : true,
+      "collarStyle" : "none",
+      "earFold" : 0,
+      "earLength" : 0.5,
+      "earShape" : "standard",
+      "earTilt" : 0.5,
+      "earTufts" : 0.25,
+      "earWidth" : 0.5,
+      "eyeBrightness" : 0.5,
+      "eyeColor" : {
+        "b" : 0.22745098,
+        "g" : 0.627451,
+        "r" : 0.7254902
+      },
+      "eyeColorRight" : {
+        "b" : 0.22745098,
+        "g" : 0.627451,
+        "r" : 0.7254902
+      },
+      "eyeShape" : "almond",
+      "eyeSize" : 0.5,
+      "eyeSpacing" : 0.5,
+      "eyeTilt" : 0.5,
+      "eyebrowWhiskers" : 0.5,
+      "furCoarseness" : 0.4,
+      "furDensity" : 0.6,
+      "furFluff" : 0.22,
+      "furGloss" : 0.4,
+      "furLength" : 0.2,
+      "hairless" : false,
+      "headRoundness" : 0.5,
+      "headWidth" : 0.5,
+      "heterochromia" : false,
+      "innerEarColor" : {
+        "b" : 0.627451,
+        "g" : 0.6627451,
+        "r" : 0.89411765
+      },
+      "legLength" : 0.5,
+      "legThickness" : 0.5,
+      "lifeStage" : "adult",
+      "markingColor" : {
+        "b" : 0.11372549,
+        "g" : 0.16470589,
+        "r" : 0.23137255
+      },
+      "muzzleLength" : 0.5,
+      "muzzleWidth" : 0.5,
+      "neckThickness" : 0.5,
+      "noseColor" : {
+        "b" : 0.5411765,
+        "g" : 0.56078434,
+        "r" : 0.8509804
+      },
+      "noseSize" : 0.5,
+      "pattern" : "mackerelTabby",
+      "patternContrast" : 0.75,
+      "patternCoverage" : 0.7,
+      "patternIrregularity" : 0.4,
+      "patternScale" : 0.5,
+      "pawPadColor" : {
+        "b" : 0.5176471,
+        "g" : 0.5411765,
+        "r" : 0.7882353
+      },
+      "pawSize" : 0.5,
+      "pointColor" : {
+        "b" : 0.15686275,
+        "g" : 0.21176471,
+        "r" : 0.2901961
+      },
+      "pupilShape" : "slit",
+      "scleraTint" : 0.2,
+      "seed" : 20260807,
+      "shoulderHeight" : 0.5,
+      "tailFluff" : 0.35,
+      "tailKink" : 0,
+      "tailLength" : 0.55,
+      "tailRingCount" : 0.4,
+      "tailShape" : "long",
+      "tailThickness" : 0.45,
+      "tickingAmount" : 0.35,
+      "toeTufts" : 0.25,
+      "undercoatLightness" : 0.5,
+      "whiskerColor" : {
+        "b" : 0.8862745,
+        "g" : 0.9254902,
+        "r" : 0.9490196
+      },
+      "whiskerLength" : 0.5,
+      "whiskerThickness" : 0.5,
+      "whitePatchColor" : {
+        "b" : 0.9019608,
+        "g" : 0.9372549,
+        "r" : 0.95686275
+      },
+      "whiteSpotting" : 0.15
+    },
+    "archetype" : "balanced",
+    "name" : "Mochi",
+    "personality" : {
+      "affection" : 0.6,
+      "appetite" : 0.5,
+      "clinginess" : 0.45,
+      "confidence" : 0.55,
+      "cuddliness" : 0.6,
+      "curiosity" : 0.6,
+      "energy" : 0.55,
+      "independence" : 0.45,
+      "mischief" : 0.45,
+      "patience" : 0.55,
+      "playfulness" : 0.6,
+      "skittishness" : 0.35,
+      "sleepiness" : 0.55,
+      "vocality" : 0.45
+    }
+  },
+  "room" : {
+    "feederFood" : 1,
+    "fountainOn" : true,
+    "fountainWater" : 1,
+    "lanternAuto" : true,
+    "lanternOn" : false,
+    "litterCleanliness" : 1,
+    "treatsOnFloor" : 0
+  },
+  "totalPets" : 0,
+  "totalPlaySessions" : 0,
+  "version" : 1
+}

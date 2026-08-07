@@ -56,3 +56,14 @@ jobs:
           name: xcode-build-log
           path: meow-build.log
           if-no-files-found: ignore
+
+      - name: Run in a simulator and screenshot
+        run: ./Tools/xcode-screenshot.sh
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: screenshots/
+          if-no-files-found: warn

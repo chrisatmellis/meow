@@ -8,6 +8,27 @@ if CommandLine.arguments.contains("--profile") {
     exit(0)
 }
 
+if let i = CommandLine.arguments.firstIndex(of: "--emit-save") {
+    let path = CommandLine.arguments.count > i + 1 ? CommandLine.arguments[i + 1] : "./meowroom-save.json"
+    var save = GameSave()
+    save.profile.name = "Mochi"
+    save.profile.appearance = BreedPresets.appearance(for: .domesticShorthair)
+    save.profile.personality = BreedPresets.personality(for: .domesticShorthair)
+    save.profile.adoptedAt = Date()
+    save.lastSeen = Date()
+    save.bond = 0.5
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    if let data = try? encoder.encode(save) {
+        try? data.write(to: URL(fileURLWithPath: path))
+        print("wrote \(data.count) bytes to \(path)")
+        exit(0)
+    }
+    print("failed to encode save")
+    exit(1)
+}
+
 if let i = CommandLine.arguments.firstIndex(of: "--render") {
     let dir = CommandLine.arguments.count > i + 1 ? CommandLine.arguments[i + 1] : "./renders"
     runRender(outputDirectory: dir)
