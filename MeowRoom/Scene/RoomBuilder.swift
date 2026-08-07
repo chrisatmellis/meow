@@ -229,12 +229,20 @@ enum RoomBuilder {
         }
 
         // Right half: slid open. A thin pane of glass and the garden beyond.
+        //
+        // The roughness here has to stay well away from zero. At 0.02 the pane is
+        // effectively a mirror, and the paper lantern a metre away in the corner
+        // reflected across the whole opening — at night the open half of the
+        // window came out brighter than it does at noon, which read as sunlight
+        // outside at 10pm. Transparency does not damp that: a mirrored point
+        // light is bright enough that even a few percent of it blows out.
+        // Real glazing seen head-on reflects only a few percent, so scatter it.
         let glass = SCNMaterial()
         glass.lightingModel = .physicallyBased
         glass.diffuse.contents = UIColor(white: 1, alpha: 1)
-        glass.roughness.contents = NSNumber(value: 0.02)
+        glass.roughness.contents = NSNumber(value: 0.35)
         glass.metalness.contents = NSNumber(value: 0.0)
-        glass.transparency = 0.06
+        glass.transparency = 0.05
         glass.blendMode = .alpha
         glass.writesToDepthBuffer = false
         let pane = SCNPlane(width: CGFloat(openRight - 0.04), height: CGFloat(shojiH - 0.04))
