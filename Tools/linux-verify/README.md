@@ -10,7 +10,7 @@ Apple frameworks and then runs it, so those parts can be exercised on any machin
 with a Swift toolchain — including a Linux CI box with no Apple SDKs at all.
 
 ```sh
-./verify.sh              # ~13M assertions across 14 areas
+./verify.sh              # ~13M assertions across 15 areas
 ./verify.sh --profile    # simulate whole days, print how the cat spends them
 ```
 
@@ -69,9 +69,13 @@ not reach the floor when the cat sat up), a tail that curled far enough to loop
 over the cat's own back, a single `tuck` value that folded the front legs of a
 sitting cat, and a head welded to the shoulders with no neck to lift it.
 
-The images are flat-shaded and untextured — no fur, no lighting, no materials.
-They are for checking proportion, pose and framing, not for judging how the game
-will actually look.
+`reference/` holds two of these renders — the cat standing, and the room from the
+player's seat — to diff against after changing the rig or the layout.
+
+The images are flat-shaded and untextured: no fur, no lighting, no materials, and
+no near-plane clipping (which is why the top of the room shot is black rather than
+ceiling). They are for checking proportion, pose and framing, not for judging how
+the game will look.
 
 ## What it does not prove
 
@@ -94,7 +98,9 @@ replace building the app in Xcode once.
 ```
 Shims/     one Swift file per framework: CoreGraphics, QuartzCore, UIKit,
            SceneKit, AVFoundation, UserNotifications, SwiftUI
-Harness/   main.swift (assertions) and profile.swift (behavioural report)
+Harness/   main.swift (assertions), profile.swift (behavioural report),
+           render.swift (software rasteriser)
+reference/ flat-shaded reference renders to diff against after rig changes
 verify.sh  builds the shims, stages the sources, compiles, runs
 ```
 
