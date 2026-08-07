@@ -139,6 +139,7 @@ on any machine with a Swift toolchain:
 ```sh
 ./Tools/linux-verify/verify.sh              # ~13M assertions across 15 areas
 ./Tools/linux-verify/verify.sh --profile    # simulate whole days, report the results
+./Tools/linux-verify/verify.sh --render ./r # software-rasterise the cat and the room
 ```
 
 The assertions cover the solar clock, mesh winding and normals, every breed and

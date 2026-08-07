@@ -57,7 +57,22 @@ at least ~20 distinct activities in play, and roughly 100–200 vocalisations a 
 `Harness/render.swift` is a small software rasteriser: it walks the node tree,
 applies the transforms, projects the triangles and writes PNGs. It renders the
 cat in six poses from two angles, six breeds side by side for silhouette
-comparison, and the room from exactly where the player sits.
+comparison, the room from exactly where the player sits, and the cat where it
+sits when it comes over to be petted.
+
+That last one is also measured rather than just drawn. The HUD occupies a fixed
+band along the bottom of the screen, so the run prints where the cat's head and
+whole body land in the frame and what fraction of each falls behind it:
+
+```
+head at lap spot: y[562 613] x[137 223]  0% behind the HUD (top 694)
+whole cat at lap spot: y[562 697] x[137 223]  2% behind the HUD (top 694)
+```
+
+The head is the number that matters. A tail sprawling toward the camera and
+dipping under the bar is not worth moving the cat for; a head behind the status
+pill is. This is what caught the lap spot being close enough that a cat which
+came when called sat half-hidden behind the status pill.
 
 This is how the shim ended up with real 4×4 matrix maths — `convertPosition`
 being an identity function meant the leg IK wasn't actually being exercised.
@@ -69,8 +84,9 @@ not reach the floor when the cat sat up), a tail that curled far enough to loop
 over the cat's own back, a single `tuck` value that folded the front legs of a
 sitting cat, and a head welded to the shoulders with no neck to lift it.
 
-`reference/` holds two of these renders — the cat standing, and the room from the
-player's seat — to diff against after changing the rig or the layout.
+`reference/` holds three of these renders — the cat standing, the room from the
+player's seat, and the cat called over — to diff against after changing the rig
+or the layout.
 
 The images are flat-shaded and untextured: no fur, no lighting, no materials, and
 no near-plane clipping (which is why the top of the room shot is black rather than
