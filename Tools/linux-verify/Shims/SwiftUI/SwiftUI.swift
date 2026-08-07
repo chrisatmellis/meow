@@ -725,7 +725,16 @@ extension View {
     public func disabled(_ disabled: Bool) -> some View { self }
     public func id<T: Hashable>(_ id: T) -> some View { self }
     public func accessibilityLabel(_ label: String) -> some View { self }
+    public func accessibilityHint(_ hint: String) -> some View { self }
+    public func accessibilityElement(children: AccessibilityChildBehaviorShim = .ignore) -> some View { self }
+    public func accessibilityAddTraits(_ traits: Int) -> some View { self }
     public func task(_ action: @escaping @Sendable () async -> Void) -> some View { self }
+}
+
+public struct AccessibilityChildBehaviorShim {
+    public static let ignore = AccessibilityChildBehaviorShim()
+    public static let combine = AccessibilityChildBehaviorShim()
+    public static let contain = AccessibilityChildBehaviorShim()
 }
 
 public struct AngleShim {

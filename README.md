@@ -31,8 +31,12 @@ MeowRoom/
   Scene/          Procedural meshes, textures, materials, the room, the cat rig,
                   the animator, lighting, and the SceneKit controller
   Audio/          Runtime synthesis: meow, trill, chirp, purr, hiss, yowl, …
+                  plus the haptics that go with them
   Notifications/  Local notification scheduling
   UI/             SwiftUI character creator, live 3D preview, in-game HUD
+
+Tools/
+  linux-verify/   Framework stand-ins and the headless verification harness
 ```
 
 ### Time of day is real
@@ -74,6 +78,15 @@ oval or round pupil; the legs are solved with two-bone IK so the paws stay
 planted. The room — tatami, shoji, futon, tansu, cat tree, feeder, fountain,
 litter box, paper lantern — is built the same way.
 
+### Petting is a negotiation, and it is felt
+
+Swipe on the cat when it is within reach. Head, cheek and chin are welcome; the
+back is fine; the belly and tail are a gamble. Contentment builds a purr — both a
+synthesised one and a matching haptic pulse under your fingers — while
+overstimulation builds a tail flick, then pinned ears, then a hiss, a yowl, a
+sharp haptic warning, and a cat that leaves. How long that takes depends on the
+Patience and Cuddliness sliders you set when you made it.
+
 ### Notifications
 
 When the app goes to the background it projects each need forward at its current
@@ -87,4 +100,35 @@ apart.
 
 Closing the app doesn't pause the cat. `OfflineSimulator` replays up to 72 hours
 in fifteen-minute slices, letting the cat feed itself, drink, use the litter box
-and sleep, then tells you what happened when you come back.
+and sleep, then tells you what happened when you come back. This runs both on a
+cold launch and when the app returns from the background, so an afternoon away is
+an afternoon away either way.
+
+## Verifying it
+
+Xcode is the only way to build the real app, but most of what can actually be
+wrong in it is plain Swift. `Tools/linux-verify/verify.sh` compiles the whole
+project against hand-written stand-ins for the Apple frameworks and runs it,
+on any machine with a Swift toolchain:
+
+```sh
+./Tools/linux-verify/verify.sh              # ~13M assertions across 15 areas
+./Tools/linux-verify/verify.sh --profile    # simulate whole days, report the results
+```
+
+The assertions cover the solar clock, mesh winding and normals, every breed and
+every slider extreme through the rig builder, twenty poses through the animator
+(including that the look-at solver settles rather than drifts), every personality
+archetype through four simulated hours of the brain, the petting and
+overstimulation cycle, the wand, treats, consumables, offline catch-up, resuming
+from the background, the save file, and the whole room and lighting across a day.
+
+The profile is the tuning tool. A healthy cat spends 40–55% of the day asleep,
+touches around 25 distinct activities, vocalises roughly every ten minutes, and
+gets through most of a week on one hopper of food. That is what the numbers in
+`CatNeeds`, `CatActivity` and `CatBrain.score` were tuned against.
+
+What this does not prove: the stand-ins encode our belief about Apple's APIs
+rather than the APIs themselves, and rendering, audio and touch are all no-ops.
+A green run means the logic is sound and the code compiles; it does not replace
+building in Xcode once. See `Tools/linux-verify/README.md`.

@@ -107,11 +107,33 @@ final class AppModel: ObservableObject {
         if active {
             CatVoice.shared.resume()
             NotificationScheduler.cancelAll()
+            catchUpFromBackground()
         } else {
             persist()
             CatVoice.shared.stop()
             NotificationScheduler.reschedule(save: save)
         }
+    }
+
+    /// A cold launch runs the catch-up in `init`. Coming back from the background
+    /// has to do it too, otherwise an afternoon away leaves the cat exactly as you
+    /// left it.
+    private func catchUpFromBackground() {
+        guard let controller else { return }
+        guard Date().timeIntervalSince(save.lastSeen) > 5 * 60 else {
+            save.lastSeen = Date()
+            return
+        }
+        controller.writeBack(to: &save)
+        let result = OfflineSimulator.catchUp(save: save)
+        save.needs = result.needs
+        save.room = result.room
+        save.awayLog = result.log
+        controller.applyCatchUp(needs: result.needs, room: result.room)
+        save.lastSeen = Date()
+        awayLog = result.log
+        showAwayLog = !result.log.isEmpty
+        persist()
     }
 
     func setNotifications(_ enabled: Bool) {

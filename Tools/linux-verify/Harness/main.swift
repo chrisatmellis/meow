@@ -449,6 +449,34 @@ section("offline") {
     expect(starved.needs.social < 0.5, "a long absence is lonely")
 }
 
+// MARK: - Resuming after a gap
+
+section("resume") {
+    // Backgrounding the app and coming back hours later must advance the cat,
+    // and the running simulation must accept the caught-up state.
+    var save = GameSave()
+    save.profile.personality = CatPersonality.archetype(.balanced)
+    save.lastSeen = Date().addingTimeInterval(-6 * 3600)
+    save.needs.social = 0.9
+    save.needs.play = 0.9
+
+    let brain = CatBrain(save: save)
+    let before = brain.needs.social
+    let result = OfflineSimulator.catchUp(save: save)
+    expect(result.needs.social < before, "six hours away costs the cat company")
+    expect(!result.log.isEmpty, "six hours away produces a log")
+
+    brain.needs = result.needs
+    brain.room = result.room
+    let sky = WorldClock.sky()
+    for _ in 0..<6000 { brain.update(dt: 1.0 / 30, sky: sky) }
+    for key in NeedKey.allCases {
+        expect(brain.needs[key] >= 0 && brain.needs[key] <= 1,
+               "resumed need \(key) stays in range")
+    }
+    expect(finite(brain.motion.position), "resumed cat has a finite position")
+}
+
 // MARK: - Save round-trip
 
 section("save file") {

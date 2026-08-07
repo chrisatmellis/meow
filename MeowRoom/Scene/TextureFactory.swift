@@ -9,12 +9,17 @@ enum TextureFactory {
     private static var cache: [String: UIImage] = [:]
     private static let cacheLock = NSLock()
 
+    /// Editing the cat generates a new coat texture each time, so the cache is
+    /// bounded: past the limit it is dropped wholesale and refilled on demand.
+    private static let cacheLimit = 48
+
     private static func cached(_ key: String, _ make: () -> UIImage) -> UIImage {
         cacheLock.lock()
         if let hit = cache[key] { cacheLock.unlock(); return hit }
         cacheLock.unlock()
         let img = make()
         cacheLock.lock()
+        if cache.count >= cacheLimit { cache.removeAll(keepingCapacity: true) }
         cache[key] = img
         cacheLock.unlock()
         return img

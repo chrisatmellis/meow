@@ -148,7 +148,11 @@ final class CatBrain {
     func call() {
         recallTimer = 0
         let roll = rng.float()
-        let chance = personality.recallChance + bond * 0.25 + (needs.social < 0.4 ? 0.2 : 0)
+        var chance = personality.recallChance + bond * 0.25 + (needs.social < 0.4 ? 0.2 : 0)
+        // A cat that is properly asleep mostly just flicks an ear at you.
+        if activity.isSleeping && !isTraveling {
+            chance *= 0.30 + 0.35 * needs.rest
+        }
         motion.lookTarget = RoomLayout.cameraPosition
         motion.lookWeight = 1
         attentionTimer = 3.5
@@ -160,7 +164,7 @@ final class CatBrain {
             begin(.greetPlayer)
         } else {
             // Acknowledged. Declined.
-            if rng.float() < personality.chattiness * 0.6 {
+            if rng.float() < personality.chattiness * 0.6 && !activity.isSleeping {
                 onEvent?(.meow(pitch: rng.float(0.85, 1.15)))
             }
             motion.earPin = 0.25

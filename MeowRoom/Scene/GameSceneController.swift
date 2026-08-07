@@ -34,6 +34,8 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
     private var pettingActive = false
     private var lastPetPoint = CGPoint.zero
     private var petSpeed: Float = 0
+    private var strokeDistance: Float = 0
+    private var bellTimer: Float = 0
 
     // Props
     private var treatNode: SCNNode?
@@ -91,9 +93,16 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
         scene.rootNode.addChildNode(cameraNode)
 
         buildWand()
+        Haptics.prepare()
 
         // The cat starts wherever the brain decided.
         rig.root.position = brain.motion.position
+    }
+
+    /// A bell on the collar rings whenever the cat lands or bolts.
+    private var wearsBell: Bool {
+        rig.appearance.collarStyle != .none &&
+            (rig.appearance.collarHasBell || rig.appearance.collarStyle == .bell)
     }
 
     private func wireEvents() {
@@ -101,10 +110,21 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
             guard let self else { return }
             CatVoice.shared.play(event, personality: self.brain.personality)
             switch event {
-            case .meow, .trill, .yowl, .chirp:
+            case .meow, .trill, .chirp:
                 self.animator.triggerMeow()
+            case .yowl:
+                self.animator.triggerMeow()
+                Haptics.warning()
             case .teacupKnocked:
                 self.knockTeacup()
+                Haptics.thud()
+            case .thud:
+                Haptics.thud()
+                if self.wearsBell { CatVoice.shared.play(.bell) }
+            case .bell:
+                Haptics.jingle()
+            case .hiss, .overstimulated:
+                Haptics.warning()
             case .activityChanged(let a):
                 DispatchQueue.main.async { self.viewModel?.activityCaption = a.caption }
             default:
@@ -271,6 +291,7 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
     func beginPan(at point: CGPoint, in view: SCNView) {
         lastPetPoint = point
         petSpeed = 0
+        strokeDistance = 0
         guard !wandActive else { return }
         let hits = view.hitTest(point, options: nil)
         if let hit = hits.first(where: { isCatNode($0.node) }), brain.canBePet {
@@ -292,6 +313,11 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
         let hits = view.hitTest(point, options: nil)
         if let hit = hits.first(where: { isCatNode($0.node) }) {
             brain.updatePetting(zone: petZone(for: hit), intensity: min(1, petSpeed))
+            strokeDistance += Float(d)
+            if strokeDistance > 55 {
+                strokeDistance = 0
+                Haptics.petStroke(intensity: petSpeed)
+            }
         } else {
             // Hand slipped off the cat.
             endPan()
@@ -434,6 +460,8 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
         updateRoomProps(dt: dt)
 
         CatVoice.shared.setPurr(level: brain.motion.purr)
+        if pettingActive { Haptics.purr(level: brain.motion.purr) }
+        updateCollarBell(dt: dt)
         CatVoice.shared.setAmbience(fountainOn: brain.room.fountainOn && brain.room.fountainWater > 0.05,
                                     level: 0.7)
 
@@ -441,6 +469,20 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
         if hudRefresh > 0.25 {
             hudRefresh = 0
             pushHUD()
+        }
+    }
+
+    /// The bell keeps time with the cat's stride.
+    private func updateCollarBell(dt: Float) {
+        guard wearsBell else { return }
+        guard brain.motion.speed > 0.35, !brain.motion.pose.isSleep else {
+            bellTimer = 0
+            return
+        }
+        bellTimer -= dt
+        if bellTimer <= 0 {
+            bellTimer = 0.42 - 0.12 * min(1, brain.motion.speed / 2)
+            CatVoice.shared.play(.bell)
         }
     }
 
@@ -463,5 +505,13 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
 
     func writeBack(to save: inout GameSave) {
         brain.writeBack(to: &save)
+    }
+
+    /// Push the results of an offline catch-up into the running simulation, so
+    /// coming back after a few hours away actually shows a few hours having passed.
+    func applyCatchUp(needs: CatNeeds, room: RoomState) {
+        brain.needs = needs
+        brain.room = room
+        skyRefresh = 99          // force a lighting refresh on the next frame
     }
 }

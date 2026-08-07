@@ -85,6 +85,7 @@ struct GameView: View {
                             .frame(width: 38, height: 38)
                             .background(.ultraThinMaterial, in: Circle())
                     }
+                    .accessibilityLabel(vm.showNeeds ? "Hide needs" : "Show needs")
                     Button {
                         showSettings = true
                     } label: {
@@ -93,6 +94,7 @@ struct GameView: View {
                             .frame(width: 38, height: 38)
                             .background(.ultraThinMaterial, in: Circle())
                     }
+                    .accessibilityLabel("Settings")
                 }
             }
             .padding(.horizontal, 14)
@@ -146,19 +148,23 @@ struct GameView: View {
 
     private var bottomBar: some View {
         HStack(spacing: 10) {
-            ActionButton(icon: "hand.wave.fill", label: "Call") {
+            ActionButton(icon: "hand.wave.fill", label: "Call",
+                         hint: "Call \(vm.catName) over") {
                 model.controller?.callCat()
             }
-            ActionButton(icon: "figure.play", label: "Wand", active: vm.wandMode) {
+            ActionButton(icon: "figure.play", label: "Wand", active: vm.wandMode,
+                         hint: vm.wandMode ? "Put the wand toy away" : "Take out the wand toy") {
                 vm.wandMode.toggle()
                 model.controller?.setWand(active: vm.wandMode)
                 vm.flash(vm.wandMode ? "Drag to swing the wand" : "Wand away")
             }
-            ActionButton(icon: "fish.fill", label: "Treat") {
+            ActionButton(icon: "fish.fill", label: "Treat",
+                         hint: "Toss a treat") {
                 model.controller?.dropTreat()
                 vm.flash("You toss a treat onto the tatami")
             }
-            ActionButton(icon: "shippingbox.fill", label: "Care") {
+            ActionButton(icon: "shippingbox.fill", label: "Care",
+                         hint: "Feeder, fountain, litter box and lantern") {
                 vm.showCareSheet = true
             }
         }
@@ -199,6 +205,8 @@ struct NeedBar: View {
             .frame(height: 6)
         }
         .frame(height: 18)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(key.displayName): \(Int(clamp(value) * 100)) percent")
     }
 }
 
@@ -206,10 +214,14 @@ struct ActionButton: View {
     let icon: String
     let label: String
     var active: Bool = false
+    var hint: String? = nil
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            Haptics.tick()
+            action()
+        } label: {
             VStack(spacing: 4) {
                 Image(systemName: icon)
                     .font(.system(size: 18, weight: .semibold))
@@ -225,6 +237,7 @@ struct ActionButton: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(active ? Color.accentColor : Color.primary)
+        .accessibilityLabel(hint ?? label)
     }
 }
 
@@ -297,7 +310,8 @@ struct SettingsSheet: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var vm: GameViewModel
     @Environment(\.dismiss) private var dismiss
-    @State private var muted = false
+    @State private var muted = CatVoice.shared.muted
+    @State private var haptics = Haptics.enabled
     @State private var confirmReset = false
 
     var body: some View {
@@ -322,9 +336,11 @@ struct SettingsSheet: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                Section("Sound") {
+                Section("Sound & touch") {
                     Toggle("Mute", isOn: $muted)
                         .onChange(of: muted) { _, value in CatVoice.shared.muted = value }
+                    Toggle("Haptics", isOn: $haptics)
+                        .onChange(of: haptics) { _, value in Haptics.enabled = value }
                 }
                 Section {
                     Button("Start over with a new cat", role: .destructive) {
