@@ -131,13 +131,17 @@ enum MeshBuilder {
     }
 
     /// A tapered tube from `count` samples of a radius function. Handy for legs and tails.
+    /// `vSpan` is how much of the coat texture this part should cover along its
+    /// length. Without it every part — a 3 cm tail segment as much as the torso —
+    /// maps the whole texture over itself, and the cat comes out looking bandaged.
     static func tube(length: Float,
                      count: Int = 8,
                      segments: Int = 12,
                      radius: (Float) -> Float,
                      offset: ((Float) -> SCNVector3)? = nil,
                      capStart: Bool = true,
-                     capEnd: Bool = true) -> SCNGeometry {
+                     capEnd: Bool = true,
+                     vSpan: Float = 1) -> SCNGeometry {
         var rings: [LoftRing] = []
         for i in 0...max(1, count) {
             let t = Float(i) / Float(max(1, count))
@@ -146,11 +150,12 @@ enum MeshBuilder {
             rings.append(LoftRing(center: SCNVector3(x: o.x, y: o.y, z: t * length + o.z),
                                   radiusX: r, radiusY: r))
         }
-        return loft(rings, segments: segments, capStart: capStart, capEnd: capEnd)
+        return loft(rings, segments: segments, capStart: capStart, capEnd: capEnd, vRepeat: vSpan)
     }
 
     /// Flattened cone used for ears — a triangle with thickness and a rounded base.
-    static func ear(length: Float, width: Float, thickness: Float, curl: Float) -> SCNGeometry {
+    static func ear(length: Float, width: Float, thickness: Float, curl: Float,
+                    vSpan: Float = 1) -> SCNGeometry {
         var rings: [LoftRing] = []
         let steps = 8
         for i in 0...steps {
@@ -161,14 +166,15 @@ enum MeshBuilder {
                                   radiusX: width * 0.5 * taper + 0.0008,
                                   radiusY: thickness * 0.5 * taper + 0.0006))
         }
-        return loft(rings, segments: 10, capStart: true, capEnd: true)
+        return loft(rings, segments: 10, capStart: true, capEnd: true, vRepeat: vSpan)
     }
 
     /// A rounded, slightly squashed sphere. Used for skulls, muzzles, paws and cushions.
     static func blob(radius: Float,
                      scaleX: Float = 1, scaleY: Float = 1, scaleZ: Float = 1,
                      rings ringCount: Int = 14,
-                     segments: Int = 18) -> SCNGeometry {
+                     segments: Int = 18,
+                     vSpan: Float = 1) -> SCNGeometry {
         var rings: [LoftRing] = []
         for i in 0...ringCount {
             let t = Float(i) / Float(ringCount)
@@ -179,7 +185,7 @@ enum MeshBuilder {
                                   radiusX: max(0.0006, r * radius * scaleX),
                                   radiusY: max(0.0006, r * radius * scaleY)))
         }
-        return loft(rings, segments: segments, capStart: false, capEnd: false)
+        return loft(rings, segments: segments, capStart: false, capEnd: false, vRepeat: vSpan)
     }
 
     /// A flat quad in the XZ plane, e.g. a futon top or a rug.
@@ -201,7 +207,7 @@ enum MeshBuilder {
             thickness * (1 - t * 0.85) + 0.00015
         }, offset: { t in
             SCNVector3(x: 0, y: -droop * t * t * length, z: 0)
-        }, capStart: true, capEnd: true)
+        }, capStart: true, capEnd: true, vSpan: 0.05)
     }
 }
 

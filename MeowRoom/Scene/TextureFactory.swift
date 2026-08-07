@@ -138,7 +138,7 @@ enum TextureFactory {
 
     private static func drawPattern(_ a: CatAppearance, ctx: CGContext, s: CGFloat,
                                     noise: ValueNoise, rng: inout SeededGenerator) {
-        let mark = UIColor(a.markingColor, alpha: CGFloat(0.35 + 0.62 * a.patternContrast))
+        let mark = UIColor(a.markingColor, alpha: CGFloat(0.22 + 0.52 * a.patternContrast))
         let bellyX = s * 0.75
 
         switch a.pattern {
@@ -146,7 +146,8 @@ enum TextureFactory {
             break
 
         case .mackerelTabby:
-            let count = Int(mix(16, 40, a.patternScale))
+            // A real mackerel tabby has roughly ten to eighteen stripes along the body.
+            let count = Int(mix(8, 18, a.patternScale))
             ctx.setFillColor(mark.cgColor)
             for i in 0..<count {
                 let t = CGFloat(i) / CGFloat(count)

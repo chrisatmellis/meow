@@ -42,7 +42,7 @@ final class CatPreviewController: NSObject, SCNSceneRendererDelegate, Observable
         // A soft studio: key, fill, rim, plus a warm floor disc.
         let key = SCNLight()
         key.type = .directional
-        key.intensity = 1150
+        key.intensity = 430
         key.color = UIColor(red: 1.0, green: 0.96, blue: 0.90, alpha: 1)
         key.castsShadow = true
         key.shadowMode = .deferred
@@ -58,7 +58,7 @@ final class CatPreviewController: NSObject, SCNSceneRendererDelegate, Observable
 
         let fill = SCNLight()
         fill.type = .omni
-        fill.intensity = 380
+        fill.intensity = 130
         fill.color = UIColor(red: 0.72, green: 0.82, blue: 1.0, alpha: 1)
         let fillNode = SCNNode()
         fillNode.light = fill
@@ -67,7 +67,7 @@ final class CatPreviewController: NSObject, SCNSceneRendererDelegate, Observable
 
         let rim = SCNLight()
         rim.type = .omni
-        rim.intensity = 520
+        rim.intensity = 175
         rim.color = UIColor(red: 1.0, green: 0.86, blue: 0.68, alpha: 1)
         let rimNode = SCNNode()
         rimNode.light = rim
@@ -76,7 +76,7 @@ final class CatPreviewController: NSObject, SCNSceneRendererDelegate, Observable
 
         let ambient = SCNLight()
         ambient.type = .ambient
-        ambient.intensity = 130
+        ambient.intensity = 48
         ambient.color = UIColor(red: 0.55, green: 0.58, blue: 0.70, alpha: 1)
         let ambientNode = SCNNode()
         ambientNode.light = ambient
@@ -92,7 +92,7 @@ final class CatPreviewController: NSObject, SCNSceneRendererDelegate, Observable
         camera.zNear = 0.02
         camera.zFar = 20
         camera.wantsHDR = true
-        camera.bloomIntensity = 0.25
+        camera.bloomIntensity = 0.12
         camera.bloomThreshold = 0.9
         camera.wantsDepthOfField = RenderQuality.wantsDepthOfField
         camera.focusDistance = 0.95
@@ -107,7 +107,7 @@ final class CatPreviewController: NSObject, SCNSceneRendererDelegate, Observable
 
         scene.background.contents = UIColor(red: 0.06, green: 0.06, blue: 0.08, alpha: 1)
         scene.lightingEnvironment.contents = TextureFactory.skyEnvironment(sky: WorldClock.sky())
-        scene.lightingEnvironment.intensity = 0.6
+        scene.lightingEnvironment.intensity = 0.28
     }
 
     /// Coalesced rebuilds — sliders fire far faster than we want to rebuild meshes.

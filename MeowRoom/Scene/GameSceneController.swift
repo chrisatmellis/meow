@@ -70,9 +70,10 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
         camera.zFar = 40
         camera.wantsHDR = true
         camera.wantsExposureAdaptation = false
-        camera.bloomIntensity = 0.35
-        camera.bloomThreshold = 0.85
-        camera.bloomBlurRadius = 12
+        camera.bloomIntensity = 0.16
+        camera.bloomThreshold = 0.95
+        camera.bloomBlurRadius = 10
+        camera.exposureOffset = -0.35
         camera.motionBlurIntensity = 0.0
         camera.wantsDepthOfField = RenderQuality.wantsDepthOfField
         camera.focusDistance = 2.6

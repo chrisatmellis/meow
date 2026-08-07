@@ -75,7 +75,7 @@ final class LightingRig {
         sunNode.look(at: SCNVector3(x: 0, y: 0.6, z: -0.2))
 
         let above = smoothstep(-0.06, 0.12, sky.sunElevation)
-        sun.intensity = CGFloat(above * (620 + 1250 * sky.daylight))
+        sun.intensity = CGFloat(above * (170 + 540 * sky.daylight))
         sun.color = UIColor(sky.sunColor)
         sun.castsShadow = above > 0.05
 
@@ -84,20 +84,20 @@ final class LightingRig {
         moonNode.position = SCNVector3(x: m.x * 9, y: max(0.2, m.y * 9), z: m.z * 9)
         moonNode.look(at: SCNVector3(x: 0, y: 0.6, z: -0.2))
         let moonUp = smoothstep(-0.05, 0.25, sky.moonElevation)
-        moon.intensity = CGFloat(moonUp * 90 * (1 - sky.daylight))
+        moon.intensity = CGFloat(moonUp * 34 * (1 - sky.daylight))
 
         // --- Ambient from the sky colour.
         ambient.color = UIColor(sky.ambientColor)
-        ambient.intensity = CGFloat(38 + 260 * sky.daylight)
+        ambient.intensity = CGFloat(16 + 95 * sky.daylight)
 
         // --- Bounce and window glow.
-        bounce.intensity = CGFloat(30 + 230 * sky.daylight)
+        bounce.intensity = CGFloat(10 + 78 * sky.daylight)
         bounce.color = UIColor(sky.sunColor.mixed(with: RGBColor(hex: 0xC9B383), 0.45))
-        windowGlow.intensity = CGFloat(40 + 320 * sky.daylight)
+        windowGlow.intensity = CGFloat(14 + 115 * sky.daylight)
         windowGlow.color = UIColor(sky.skyHorizonColor.lightened(0.25))
 
         // --- Backlit shoji paper.
-        let glow = CGFloat(0.05 + 0.85 * sky.daylight + 0.25 * sky.horizonWarmth)
+        let glow = CGFloat(0.03 + 0.30 * sky.daylight + 0.10 * sky.horizonWarmth)
         for mat in room.shojiMaterials {
             mat.emission.intensity = glow
             mat.emission.contents = UIColor(sky.skyHorizonColor.lightened(0.35 * sky.daylight))
@@ -110,12 +110,12 @@ final class LightingRig {
 
         // --- Image-based lighting for believable PBR highlights.
         scene.lightingEnvironment.contents = TextureFactory.skyEnvironment(sky: sky)
-        scene.lightingEnvironment.intensity = CGFloat(0.25 + 1.0 * sky.daylight)
+        scene.lightingEnvironment.intensity = CGFloat(0.12 + 0.45 * sky.daylight)
         scene.background.contents = UIColor(sky.skyHorizonColor.darkened(0.4))
 
         // --- Paper lantern.
         if let light = room.lanternLight, let paper = room.lanternPaper {
-            let target: CGFloat = lanternOn ? CGFloat(420 - 160 * sky.daylight) : 0
+            let target: CGFloat = lanternOn ? CGFloat(155 - 60 * sky.daylight) : 0
             light.intensity = target
             paper.emission.intensity = lanternOn ? 0.85 : 0.0
         }
@@ -123,7 +123,7 @@ final class LightingRig {
         // --- Sun patch on the tatami.
         if let patch = room.sunPatch {
             let visible = smoothstep(0.02, 0.22, sky.sunElevation)
-            patch.opacity = CGFloat(visible * 0.55)
+            patch.opacity = CGFloat(visible * 0.28)
             let p = RoomLayout.sunPatchPosition(sky: sky)
             patch.position = SCNVector3(x: p.x, y: 0.033, z: p.z)
             let stretch = 1.0 + 1.6 * (1 - clamp(sky.sunElevation / 0.9))
