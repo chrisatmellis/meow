@@ -47,7 +47,7 @@ final class CatPreviewController: NSObject, SCNSceneRendererDelegate, Observable
         key.castsShadow = true
         key.shadowMode = .deferred
         key.shadowRadius = 8
-        key.shadowSampleCount = 12
+        key.shadowSampleCount = RenderQuality.shadowSampleCount
         key.shadowColor = UIColor(white: 0, alpha: 0.4)
         key.orthographicScale = 0.6
         let keyNode = SCNNode()
@@ -94,11 +94,11 @@ final class CatPreviewController: NSObject, SCNSceneRendererDelegate, Observable
         camera.wantsHDR = true
         camera.bloomIntensity = 0.25
         camera.bloomThreshold = 0.9
-        camera.wantsDepthOfField = true
+        camera.wantsDepthOfField = RenderQuality.wantsDepthOfField
         camera.focusDistance = 0.95
         camera.fStop = 5.0
         camera.vignettingIntensity = 0.4
-        camera.screenSpaceAmbientOcclusionIntensity = 0.4
+        camera.screenSpaceAmbientOcclusionIntensity = RenderQuality.ambientOcclusionIntensity
         let camNode = SCNNode()
         camNode.camera = camera
         camNode.position = SCNVector3(x: 0.0, y: 0.30, z: 0.95)
@@ -181,8 +181,8 @@ struct CatPreviewView: UIViewRepresentable {
         view.delegate = controller
         view.rendersContinuously = true
         view.isPlaying = true
-        view.antialiasingMode = .multisampling2X
-        view.preferredFramesPerSecond = 60
+        view.antialiasingMode = RenderQuality.antialiasing
+        view.preferredFramesPerSecond = RenderQuality.preferredFramesPerSecond
         view.backgroundColor = .clear
         view.allowsCameraControl = false
 

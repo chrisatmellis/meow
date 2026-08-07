@@ -22,8 +22,8 @@ final class LightingRig {
         sun.castsShadow = true
         sun.shadowMode = .deferred
         sun.shadowRadius = 6
-        sun.shadowSampleCount = 16
-        sun.shadowMapSize = CGSize(width: 2048, height: 2048)
+        sun.shadowSampleCount = RenderQuality.shadowSampleCount
+        sun.shadowMapSize = RenderQuality.shadowMapSize
         sun.shadowColor = UIColor(white: 0, alpha: 0.55)
         sun.orthographicScale = 3.2
         sun.zNear = 0.2

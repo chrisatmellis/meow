@@ -74,11 +74,11 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
         camera.bloomThreshold = 0.85
         camera.bloomBlurRadius = 12
         camera.motionBlurIntensity = 0.0
-        camera.wantsDepthOfField = true
+        camera.wantsDepthOfField = RenderQuality.wantsDepthOfField
         camera.focusDistance = 2.6
         camera.fStop = 8.0
         camera.focalBlurSampleCount = 8
-        camera.screenSpaceAmbientOcclusionIntensity = 0.45
+        camera.screenSpaceAmbientOcclusionIntensity = RenderQuality.ambientOcclusionIntensity
         camera.screenSpaceAmbientOcclusionRadius = 0.22
         camera.screenSpaceAmbientOcclusionDepthThreshold = 0.05
         camera.colorFringeStrength = 0.6

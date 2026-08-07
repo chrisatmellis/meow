@@ -62,12 +62,6 @@ lateral-sequence walk, a trot, and a bound — jumps onto the window sill or the
 cat tree, and performs the activity. Opening the app at a random moment should
 show you something different each time.
 
-Petting is a negotiation. Swipe on the cat when it's within reach: head, cheek
-and chin are welcome, back is fine, belly and tail are a gamble. Contentment
-builds a purr; overstimulation builds a tail flick, then pinned ears, then a hiss
-and a yowl and the cat leaves. How long that takes depends on the Patience and
-Cuddliness sliders you set.
-
 ### Everything is generated
 
 There are no art assets. The cat's body is a lofted mesh whose cross-sections are

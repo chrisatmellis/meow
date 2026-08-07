@@ -16,8 +16,8 @@ struct SceneContainerView: UIViewRepresentable {
         view.rendersContinuously = true
         view.isPlaying = true
         view.allowsCameraControl = false          // the player never moves
-        view.antialiasingMode = .multisampling2X
-        view.preferredFramesPerSecond = 60
+        view.antialiasingMode = RenderQuality.antialiasing
+        view.preferredFramesPerSecond = RenderQuality.preferredFramesPerSecond
         view.backgroundColor = .black
         view.autoenablesDefaultLighting = false
         view.isJitteringEnabled = false

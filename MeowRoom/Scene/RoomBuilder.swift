@@ -818,6 +818,7 @@ enum RoomBuilder {
     private static func buildDustMotes(room: RoomNode) -> SCNNode {
         let node = SCNNode()
         node.name = "dust"
+        guard RenderQuality.dustMotes else { return node }
 
         let particles = SCNParticleSystem()
         particles.birthRate = 26

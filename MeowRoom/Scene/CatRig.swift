@@ -556,7 +556,8 @@ enum CatBuilder {
     private static func addFurShells(to node: SCNNode, geometry: SCNGeometry,
                                      appearance a: CatAppearance, scaleBoost: Float) {
         guard !a.hairless, a.effectiveFurLength > 0.30 else { return }
-        let layers = a.effectiveFurLength > 0.65 ? 2 : 1
+        let layers = min(RenderQuality.maxFurShells, a.effectiveFurLength > 0.65 ? 2 : 1)
+        guard layers > 0 else { return }
         for i in 0..<layers {
             let shell = SCNNode(geometry: geometry.copy() as? SCNGeometry ?? geometry)
             shell.geometry?.materials = [Materials.furShell(a, layer: i)]
