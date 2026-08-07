@@ -9,7 +9,13 @@ on:
 # Superseded runs are cancelled — macOS minutes are not free.
 concurrency:
   group: verify-${{ github.ref }}
-  cancel-in-progress: true
+  # Deliberately not cancel-in-progress. That is the right setting for a linter,
+  # where only the newest answer matters, but this workflow's screenshots are the
+  # only way to see the app without a Mac — they are the output, not a status
+  # light. Cancelling meant every follow-up push threw away the render someone
+  # was waiting on. Queue instead: a little more runner time, but each push
+  # actually produces the pictures it was pushed to produce.
+  cancel-in-progress: false
 
 jobs:
   engine:

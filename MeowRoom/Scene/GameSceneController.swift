@@ -18,6 +18,11 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
 
     private var lastTime: TimeInterval = 0
     private var skyRefresh: Float = 99
+    /// Exposure eases toward this rather than snapping. The sun moves slowly
+    /// enough not to matter, but the lantern switching itself on at dusk is a
+    /// step change in the room's light, and the camera should adapt to it the
+    /// way an eye does rather than cutting.
+    private var exposureTarget: Float = 0
     private var sky: SkyState = WorldClock.sky()
     private var hudRefresh: Float = 0
 
@@ -73,7 +78,8 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
         camera.bloomIntensity = 0.16
         camera.bloomThreshold = 0.95
         camera.bloomBlurRadius = 10
-        camera.exposureOffset = LightingRig.exposureOffset(sky: sky, lanternOn: sky.wantsLampLight)
+        exposureTarget = Float(LightingRig.exposureOffset(sky: sky, lanternOn: sky.wantsLampLight))
+        camera.exposureOffset = CGFloat(exposureTarget)
         camera.motionBlurIntensity = 0.0
         camera.wantsDepthOfField = RenderQuality.wantsDepthOfField
         camera.focusDistance = 2.6
@@ -453,7 +459,12 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
             let lanternOn = brain.room.lanternAuto ? sky.wantsLampLight : brain.room.lanternOn
             if brain.room.lanternAuto { brain.room.lanternOn = lanternOn }
             lighting.apply(sky: sky, scene: scene, room: room, lanternOn: lanternOn)
-            cameraNode.camera?.exposureOffset = LightingRig.exposureOffset(sky: sky, lanternOn: lanternOn)
+            exposureTarget = Float(LightingRig.exposureOffset(sky: sky, lanternOn: lanternOn))
+        }
+
+        if let camera = cameraNode.camera {
+            camera.exposureOffset = CGFloat(approach(Float(camera.exposureOffset), exposureTarget,
+                                                     rate: 0.7, dt: dt))
         }
 
         brain.update(dt: dt, sky: sky)
