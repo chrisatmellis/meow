@@ -186,10 +186,22 @@ enum Materials {
     }
 
     /// The garden seen through the window. Unlit so it reads as "outside".
+    /// The garden beyond the window.
+    ///
+    /// Carried on emission rather than diffuse so it can exceed 1. Outdoors is
+    /// something like fifty times brighter than a room lit through a window, and
+    /// an 8-bit texture cannot say that — as a plain diffuse colour the night sky
+    /// rendered *brighter* than the day sky, because the texture only darkens by
+    /// about ten while exposure was swinging the other way by far more. As HDR
+    /// emission, `LightingRig` can scale it by the actual daylight, so the view
+    /// blows out at noon the way a real window does and goes properly black at
+    /// night.
     static func backdrop(sky: SkyState) -> SCNMaterial {
         let m = SCNMaterial()
         m.lightingModel = .constant
-        m.diffuse.contents = TextureFactory.gardenBackdrop(sky: sky)
+        m.diffuse.contents = UIColor.black
+        m.emission.contents = TextureFactory.gardenBackdrop(sky: sky)
+        m.emission.intensity = 1        // LightingRig drives this from the sky.
         m.isDoubleSided = true
         return m
     }

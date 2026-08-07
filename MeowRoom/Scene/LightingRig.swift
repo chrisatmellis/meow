@@ -88,8 +88,20 @@ final class LightingRig {
         var key: Float { max(0.05, sun + sky + moon + lantern) }
     }
 
-    /// A pleasant, well-lit interior. Exposure is defined relative to this.
-    private static let referenceLux: Float = 500
+    /// The darkest the room is expected to get: night, with the lantern lit.
+    ///
+    /// Exposure is anchored here rather than at some comfortable midpoint, so it
+    /// is never positive and the camera only ever stops *down*. That matters far
+    /// more than it looks. Emission is authored in absolute terms all over this
+    /// project — the lantern paper, the feeder's LED, the catchlight in the cat's
+    /// eyes, the sheen on its whiskers, the garden beyond the window — and none
+    /// of it participates in the light budget. A positive exposure at night
+    /// multiplied every one of them by eight, which is what kept midnight
+    /// brighter than midday even after the lights themselves were proportional.
+    /// Anchored this way, absolute emission shows at face value at night, when a
+    /// lamp and a pair of eyes *should* be the bright things, and is attenuated
+    /// into invisibility by daylight.
+    private static let referenceLux: Float = 30
 
     /// How much of the real brightness variation survives to the screen.
     ///
@@ -139,7 +151,7 @@ final class LightingRig {
     }
 
     /// Sets the absolute level only. Ratios — and so the look — are unaffected.
-    private static let luxToIntensity: Float = 0.35
+    private static let luxToIntensity: Float = 2.88
 
     static func intensities(for b: LightBudget) -> LightIntensities {
         let k = luxToIntensity
@@ -156,7 +168,7 @@ final class LightingRig {
     /// the sky is already known, so this is computed straight from it instead.
     static func exposureOffset(for budget: LightBudget) -> CGFloat {
         let ev = log2(budget.key / referenceLux) * (1 - retainedContrast)
-        return CGFloat(min(4.2, max(-2.4, -ev)))
+        return CGFloat(min(0.05, max(-6.5, -ev)))
     }
 
     static func exposureOffset(sky: SkyState, lanternOn: Bool) -> CGFloat {
@@ -203,20 +215,24 @@ final class LightingRig {
         // --- Backlit shoji paper. Its brightness is the sky outside and nothing
         // else: the flat floor this used to carry was what left the paper — and
         // the open half beside it — glowing at ten at night.
-        let glow = CGFloat(min(0.52, budget.sky / LightingRig.referenceLux * 0.36))
+        let glow = CGFloat(budget.sky * 0.012)
         for mat in room.shojiMaterials {
             mat.emission.intensity = glow
             mat.emission.contents = UIColor(sky.skyHorizonColor.lightened(0.35 * sky.daylight))
         }
 
         // --- Garden outside.
+        // Outdoors is far brighter than the room it is seen from, so this runs
+        // well past 1 in daylight and the window blows out, as it should.
+        let outdoor = CGFloat(0.7 + budget.sky * 0.073)
         for mat in room.backdropMaterials {
-            mat.diffuse.contents = TextureFactory.gardenBackdrop(sky: sky)
+            mat.emission.contents = TextureFactory.gardenBackdrop(sky: sky)
+            mat.emission.intensity = outdoor
         }
 
         // --- Image-based lighting for believable PBR highlights.
         scene.lightingEnvironment.contents = TextureFactory.skyEnvironment(sky: sky)
-        scene.lightingEnvironment.intensity = CGFloat(budget.sky / LightingRig.referenceLux * 0.43)
+        scene.lightingEnvironment.intensity = CGFloat(min(1.2, budget.sky * 0.0013))
         scene.background.contents = UIColor(sky.skyHorizonColor.darkened(0.4))
 
         // --- Paper lantern.

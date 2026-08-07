@@ -646,7 +646,13 @@ section("room builder") {
         let b = LightingRig.budget(sky: s, lanternOn: lanternOn)
         let e = LightingRig.exposureOffset(for: b)
         expect(b.key > 0, "something is lighting the room at \(hour):00")
-        expect(e >= -2.4 && e <= 4.2, "exposure at \(hour):00 is in range (\(e))")
+        expect(e >= -6.5 && e <= 0.05, "exposure at \(hour):00 is in range (\(e))")
+        // Exposure must never amplify. Emission is authored in absolute terms
+        // all over the project — lantern paper, feeder LED, eye catchlights,
+        // whiskers, the garden — and none of it is in the budget, so a positive
+        // exposure multiplies all of it at once. That is what held midnight
+        // above midday even after the lights themselves were proportional.
+        expect(e <= 0.05, "exposure only ever stops down at \(hour):00 (\(e))")
         samples.append((hour, b.key, e, LightingRig.renderedBrightness(for: b)))
     }
 
