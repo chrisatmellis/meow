@@ -28,8 +28,9 @@ It prints a compact diagnostic report rather than the usual wall of xcodebuild
 output, and keeps the full log for when you need it.
 
 For a device build, set your team once: select the Meow target → Signing &
-Capabilities → Team, and change the bundle identifier from `com.meowroom.Meow`
-to something in your own namespace.
+Capabilities → Team. The bundle identifier is `com.drinkmellis.meowroom`; if you
+are building under a different account, change it to your own namespace here and
+in `Tools/xcode-screenshot.sh`, which installs and launches the app by that ID.
 
 Notifications need a real device to be useful. The simulator will show the
 permission prompt but background delivery is unreliable there.

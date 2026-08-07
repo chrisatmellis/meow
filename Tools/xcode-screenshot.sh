@@ -10,7 +10,7 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT="$(cd "$HERE/.." && pwd)"
-BUNDLE_ID="com.meowroom.Meow"
+BUNDLE_ID="com.drinkmellis.meowroom"
 OUT="$PROJECT/screenshots"
 DERIVED="${TMPDIR:-/tmp}/meow-dd"
 DEVJSON="${TMPDIR:-/tmp}/meow-simdevices.json"
