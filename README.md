@@ -154,6 +154,26 @@ touches around 25 distinct activities, vocalises roughly every ten minutes, and
 gets through most of a week on one hopper of food. That is what the numbers in
 `CatNeeds`, `CatActivity` and `CatBrain.score` were tuned against.
 
+### Looking at the real thing
+
+`Tools/xcode-screenshot.sh` runs the app in a simulator and captures the room at
+dawn, midday, golden hour and night, pinning the clock with a debug-only hook so
+you don't have to wait for them. CI does the same on every push and uploads the
+result.
+
+Judging those by eye is unreliable — a window at luma 230 next to a dark wall
+reads as pure white when nothing is clipping at all — so `Tools/shot-stats.py`
+measures them instead:
+
+```sh
+./Tools/shot-stats.py stats screenshots/*.png   # mean luma, clipped/bright/dark %
+./Tools/shot-stats.py map screenshots/05-night.png   # where the bright region is
+```
+
+Comparing `stats` across two commits is how the exposure work was checked, and
+`map` is what identified the open half of the window — rather than the shoji
+beside it — as the thing glowing at 10pm.
+
 What this does not prove: the stand-ins encode our belief about Apple's APIs
 rather than the APIs themselves, and rendering, audio and touch are all no-ops.
 A green run means the logic is sound and the code compiles; it does not replace

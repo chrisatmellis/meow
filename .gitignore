@@ -29,3 +29,7 @@ Package.resolved
 *.log
 
 screenshots/
+
+# Python
+__pycache__/
+*.pyc
