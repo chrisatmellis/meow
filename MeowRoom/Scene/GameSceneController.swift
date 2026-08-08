@@ -75,9 +75,17 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
         camera.zFar = 40
         camera.wantsHDR = true
         camera.wantsExposureAdaptation = false
-        camera.bloomIntensity = 0.16
-        camera.bloomThreshold = 0.95
-        camera.bloomBlurRadius = 10
+        // Bloom, kept on a short leash.
+        //
+        // At threshold 0.95 and radius 10 this was the single biggest cause of the
+        // room looking washed out. The window legitimately reaches white, and bloom
+        // then spread that white across the entire frame as a milky veil — walls,
+        // floor and ceiling all lifted toward grey, with the contrast gone. A
+        // threshold above 1 means only genuinely over-range highlights bloom, which
+        // is what bloom is for.
+        camera.bloomIntensity = 0.06
+        camera.bloomThreshold = 1.15
+        camera.bloomBlurRadius = 6
         exposureTarget = Float(LightingRig.exposureOffset(sky: sky, lanternOn: sky.wantsLampLight))
         camera.exposureOffset = CGFloat(exposureTarget)
         camera.motionBlurIntensity = 0.0
@@ -88,7 +96,9 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
         camera.screenSpaceAmbientOcclusionIntensity = RenderQuality.ambientOcclusionIntensity
         camera.screenSpaceAmbientOcclusionRadius = 0.22
         camera.screenSpaceAmbientOcclusionDepthThreshold = 0.05
-        camera.colorFringeStrength = 0.6
+        // Chromatic aberration reads as softness at this strength, and softness on
+        // top of a bright window reads as haze.
+        camera.colorFringeStrength = 0.25
         camera.vignettingIntensity = 0.45
         camera.vignettingPower = 1.2
         camera.saturation = 1.04

@@ -143,11 +143,21 @@ final class LightingRig {
 
     static func intensities(for b: LightBudget) -> LightIntensities {
         let k = scale(b.key)
-        return LightIntensities(sun: b.sun * 0.85 * k,
+        // The sun's share moved from the directional light to the soft one: 0.85/0.15
+        // to 0.45/0.55. Nothing about the budget changed, so the day/night ordering
+        // and the totals are exactly as they were — only the *character* of daylight
+        // is different, and that is the point.
+        //
+        // A room screened with paper does not get hard sunlight. Shoji is a diffuser;
+        // that is what it is for. Sending most of the sun through the omni fill makes
+        // the light arrive from the whole window rather than from a point 9 metres
+        // away, which is both what actually happens and what stops the room reading
+        // as though someone opened a skylight.
+        return LightIntensities(sun: b.sun * 0.45 * k,
                                 moon: b.moon * 1.00 * k,
                                 ambient: (b.sky * 0.30 + b.lantern * 0.10) * k,
                                 windowGlow: b.sky * 0.45 * k,
-                                bounce: (b.sun * 0.15 + b.sky * 0.25 + b.lantern * 0.15) * k,
+                                bounce: (b.sun * 0.55 + b.sky * 0.25 + b.lantern * 0.15) * k,
                                 lantern: b.lantern * 0.75 * k)
     }
 
@@ -210,16 +220,24 @@ final class LightingRig {
         // --- Backlit shoji paper. Its brightness is the sky outside and nothing
         // else: the flat floor this used to carry was what left the paper — and
         // the open half beside it — glowing at ten at night.
-        let glow = CGFloat(min(0.28, budget.sky * 0.0004))
+        // Halved. Paper backlit by an overcast sky is bright, but it is not a
+        // light box — at 0.28 the panels clipped, taking their own texture with
+        // them, so the shoji read as a white rectangle rather than as paper.
+        let glow = CGFloat(min(0.14, budget.sky * 0.0002))
         for mat in room.shojiMaterials {
             mat.emission.intensity = glow
             mat.emission.contents = UIColor(sky.skyHorizonColor.lightened(0.35 * sky.daylight))
         }
 
         // --- Garden outside.
-        // Outdoors is far brighter than the room it is seen from, so this runs
-        // well past 1 in daylight and the window blows out, as it should.
-        let outdoor = CGFloat(min(0.62, 0.28 + budget.sky * 0.0005))
+        //
+        // Outdoors really is far brighter than the room it is seen from, and the
+        // previous value leaned on that: the window blew out "as it should". Two
+        // things were wrong with it. The blowout was not confined to the window —
+        // bloom carried it across the whole frame — and a window that clips to
+        // white throws away the garden behind it, which is drawn and then never
+        // seen. Bright enough to read as outside, dim enough to still be a garden.
+        let outdoor = CGFloat(min(0.34, 0.16 + budget.sky * 0.00027))
         for mat in room.backdropMaterials {
             mat.emission.contents = TextureFactory.gardenBackdrop(sky: sky)
             mat.emission.intensity = outdoor
@@ -227,7 +245,7 @@ final class LightingRig {
 
         // --- Image-based lighting for believable PBR highlights.
         scene.lightingEnvironment.contents = TextureFactory.skyEnvironment(sky: sky)
-        scene.lightingEnvironment.intensity = CGFloat(min(0.62, budget.sky * 0.0009))
+        scene.lightingEnvironment.intensity = CGFloat(min(0.45, budget.sky * 0.0007))
         scene.background.contents = UIColor(sky.skyHorizonColor.darkened(0.4))
 
         // --- Paper lantern.
@@ -241,8 +259,12 @@ final class LightingRig {
 
         // --- Sun patch on the tatami.
         if let patch = room.sunPatch {
+            // Additive, on a floor that is already the brightest surface in the
+            // room, at an opacity that made it glare. It stays because the cat
+            // seeks it out and the brain has opinions about sunbathing, but as a
+            // warm tint rather than a shaft of light on the tatami.
             let visible = smoothstep(0.02, 0.22, sky.sunElevation)
-            patch.opacity = CGFloat(visible * 0.28)
+            patch.opacity = CGFloat(visible * 0.07)
             let p = RoomLayout.sunPatchPosition(sky: sky)
             patch.position = SCNVector3(x: p.x, y: 0.033, z: p.z)
             let stretch = 1.0 + 1.6 * (1 - clamp(sky.sunElevation / 0.9))
