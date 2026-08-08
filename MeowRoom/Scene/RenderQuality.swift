@@ -70,6 +70,23 @@ enum RenderQuality {
         }
     }
 
+    /// Multiplier on the segment counts of the cat's procedural meshes.
+    ///
+    /// The counts in `CatBuilder` are written for the high tier and scaled from
+    /// here, so a weaker device gets a coarser cat rather than a different one.
+    static var meshDetail: Float {
+        switch tier {
+        case .high: return 1.0
+        case .medium: return 0.85
+        case .low: return 0.65
+        }
+    }
+
+    /// The character creator is a head close-up filling the screen, and it used to
+    /// render the identical gameplay muzzle — sized for a cat two metres away. It
+    /// gets a finer one; there is nothing else in that scene to pay for it.
+    static let previewMeshDetail: Float = 1.5
+
     static var dustMotes: Bool { tier != .low }
 
     static var preferredFramesPerSecond: Int { tier == .low ? 30 : 60 }

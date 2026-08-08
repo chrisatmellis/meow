@@ -1134,6 +1134,59 @@ section("height fields") {
     }
 }
 
+section("triangle budget") {
+    /// Walks a node tree adding up geometry, counting each instance separately.
+    func triangles(_ node: SCNNode) -> Int {
+        var total = node.geometry?.estimatedTriangles ?? 0
+        for child in node.childNodes { total += triangles(child) }
+        return total
+    }
+
+    /// The heaviest single piece of geometry under a node, and what it is.
+    func worst(_ node: SCNNode, path: String = "") -> (Int, String) {
+        var best = (node.geometry?.estimatedTriangles ?? 0, path)
+        for child in node.childNodes {
+            let sub = worst(child, path: "\(path)/\(child.name ?? "?")")
+            if sub.0 > best.0 { best = sub }
+        }
+        return best
+    }
+
+    // The room, without the cat.
+    //
+    // The point of a budget is that fidelity work cannot quietly cost 200,000
+    // triangles. It also catches the specific failure this replaces: SceneKit
+    // tessellates a primitive at 48 segments whether it is a floor cushion or a
+    // 2.2 mm wire hoop, and the paper lantern's seven ribs were spending 16,128
+    // triangles between them — more than the entire cat.
+    let room = RoomBuilder.build(sky: WorldClock.sky())
+    let roomTris = triangles(room.root)
+    expect(roomTris < 90_000, "the room fits its triangle budget (\(roomTris))")
+    let heaviest = worst(room.root)
+    expect(heaviest.0 < 12_000,
+           "no single room object dominates (\(heaviest.0) at \(heaviest.1))")
+
+    // Every breed of cat, at every render tier that changes its geometry.
+    for breed in CatBreed.allCases {
+        var a = BreedPresets.appearance(for: breed)
+        a.seed = 7
+        let rig = CatBuilder.build(a)
+        let tris = triangles(rig.root)
+        expect(tris < 60_000, "\(breed.rawValue) fits its triangle budget (\(tris))")
+        expect(tris > 3_000, "\(breed.rawValue) has enough geometry to be a cat (\(tris))")
+    }
+
+    // And the two together, which is what actually ships a frame.
+    var a = BreedPresets.appearance(for: .maineCoon)
+    a.seed = 7
+    let total = roomTris + triangles(CatBuilder.build(a).root)
+    expect(total < 140_000, "room plus the heaviest cat fits the frame budget (\(total))")
+    if CommandLine.arguments.contains("--budget") {
+        print("    room \(roomTris), heaviest object \(heaviest.0) at \(heaviest.1)")
+        print("    maine coon \(triangles(CatBuilder.build(a).root)), total \(total)")
+    }
+}
+
 section("surface maps") {
 
     func decode(_ b: UInt8) -> Float { Float(b) / 255 * 2 - 1 }

@@ -379,7 +379,7 @@ enum RoomBuilder {
 
         for dx in [-1, 1] as [Float] {
             for dz in [-1, 1] as [Float] {
-                let leg = SCNCylinder(radius: 0.018, height: CGFloat(RoomLayout.tableTop - 0.015))
+                let leg = SCNCylinder(radius: 0.018, height: CGFloat(RoomLayout.tableTop - 0.015)).sized()
                 let l = SCNNode.make(leg, Materials.darkWood())
                 l.position = SCNVector3(x: c.x + dx * (s.x / 2 - 0.06),
                                         y: (RoomLayout.tableTop - 0.015) / 2,
@@ -389,13 +389,13 @@ enum RoomBuilder {
         }
 
         // A teacup, precariously placed.
-        let cup = SCNTube(innerRadius: 0.030, outerRadius: 0.035, height: 0.055)
+        let cup = SCNTube(innerRadius: 0.030, outerRadius: 0.035, height: 0.055).sized()
         let cupNode = SCNNode.make(cup, Materials.ceramic(RGBColor(hex: 0xE8E4DA), key: "cup"))
-        let cupBase = SCNCylinder(radius: 0.035, height: 0.006)
+        let cupBase = SCNCylinder(radius: 0.035, height: 0.006).sized()
         let baseNode = SCNNode.make(cupBase, Materials.ceramic(RGBColor(hex: 0xE8E4DA), key: "cup"))
         baseNode.position = SCNVector3(x: 0, y: -0.0245, z: 0)
         cupNode.addChildNode(baseNode)
-        let tea = SCNCylinder(radius: 0.029, height: 0.004)
+        let tea = SCNCylinder(radius: 0.029, height: 0.004).sized()
         let teaNode = SCNNode.make(tea, Materials.pbr(diffuse: UIColor(RGBColor(hex: 0x6E7B3E)), roughness: 0.15))
         teaNode.position = SCNVector3(x: 0, y: 0.012, z: 0)
         cupNode.addChildNode(teaNode)
@@ -425,7 +425,7 @@ enum RoomBuilder {
             f.position = SCNVector3(x: c.x - s.x / 2 - 0.004, y: y, z: c.z)
             node.addChildNode(f)
 
-            let pull = SCNTorus(ringRadius: 0.022, pipeRadius: 0.004)
+            let pull = SCNTorus(ringRadius: 0.022, pipeRadius: 0.004).sized()
             let p = SCNNode.make(pull, Materials.metal(RGBColor(hex: 0x3A3A3E), roughness: 0.45))
             p.position = SCNVector3(x: c.x - s.x / 2 - 0.014, y: y, z: c.z)
             p.eulerAngles = SCNVector3(x: 0, y: 0, z: deg(90))
@@ -442,7 +442,7 @@ enum RoomBuilder {
         // Bamboo tripod.
         for i in 0..<3 {
             let a = Float(i) / 3 * .pi * 2
-            let leg = SCNCylinder(radius: 0.010, height: 0.36)
+            let leg = SCNCylinder(radius: 0.010, height: 0.36).sized()
             let l = SCNNode.make(leg, Materials.darkWood())
             l.position = SCNVector3(x: c.x + cosf(a) * 0.09, y: 0.18, z: c.z + sinf(a) * 0.09)
             l.eulerAngles = SCNVector3(x: sinf(a) * 0.22, y: 0, z: -cosf(a) * 0.22)
@@ -462,7 +462,7 @@ enum RoomBuilder {
         // Ribs.
         for i in 0..<7 {
             let y = -0.14 + Float(i) * 0.047
-            let ring = SCNTorus(ringRadius: CGFloat(0.172 * sqrtf(max(0.05, 1 - powf(y / 0.21, 2)))), pipeRadius: 0.0022)
+            let ring = SCNTorus(ringRadius: CGFloat(0.172 * sqrtf(max(0.05, 1 - powf(y / 0.21, 2)))), pipeRadius: 0.0022).sized()
             let rNode = SCNNode.make(ring, Materials.hinoki())
             rNode.position = SCNVector3(x: c.x, y: RoomLayout.lanternLightHeight - 0.10 + y, z: c.z)
             rNode.castsShadow = false
@@ -504,7 +504,7 @@ enum RoomBuilder {
         node.addChildNode(n)
 
         for y in [1.95, 0.89] as [Float] {
-            let rod = SCNCylinder(radius: 0.011, height: 0.50)
+            let rod = SCNCylinder(radius: 0.011, height: 0.50).sized()
             let r = SCNNode.make(rod, Materials.darkWood())
             r.position = SCNVector3(x: -RoomLayout.halfWidth + 0.05, y: y, z: -1.20)
             r.eulerAngles = SCNVector3(x: deg(90), y: 0, z: 0)
@@ -520,12 +520,12 @@ enum RoomBuilder {
                               y: RoomLayout.tansuSize.y,
                               z: RoomLayout.tansuCenter.z - 0.16)
 
-        let pot = SCNTube(innerRadius: 0.075, outerRadius: 0.088, height: 0.07)
+        let pot = SCNTube(innerRadius: 0.075, outerRadius: 0.088, height: 0.07).sized()
         let p = SCNNode.make(pot, Materials.ceramic(RGBColor(hex: 0x5A4038), key: "pot"))
         p.position = SCNVector3(x: base.x, y: base.y + 0.035, z: base.z)
         node.addChildNode(p)
 
-        let soil = SCNCylinder(radius: 0.078, height: 0.05)
+        let soil = SCNCylinder(radius: 0.078, height: 0.05).sized()
         let s = SCNNode.make(soil, Materials.pbr(diffuse: UIColor(RGBColor(hex: 0x3A2E24)), roughness: 1))
         s.position = SCNVector3(x: base.x, y: base.y + 0.045, z: base.z)
         node.addChildNode(s)
@@ -561,7 +561,7 @@ enum RoomBuilder {
 
         // Two sisal posts.
         func post(x: Float, z: Float, height: Float) {
-            let p = SCNCylinder(radius: 0.048, height: CGFloat(height))
+            let p = SCNCylinder(radius: 0.048, height: CGFloat(height)).sized()
             let pn = SCNNode.make(p, Materials.sisal())
             pn.position = SCNVector3(x: x, y: height / 2 + 0.05, z: z)
             node.addChildNode(pn)
@@ -578,11 +578,11 @@ enum RoomBuilder {
         }
 
         // Dangling pompom on a string.
-        let string = SCNCylinder(radius: 0.0018, height: 0.22)
+        let string = SCNCylinder(radius: 0.0018, height: 0.22).sized()
         let sn = SCNNode.make(string, Materials.pbr(diffuse: UIColor(white: 0.85, alpha: 1), roughness: 0.9))
         sn.position = SCNVector3(x: b.x + 0.20, y: RoomLayout.catTreeTopPlatform.y - 0.11, z: b.z + 0.14)
         node.addChildNode(sn)
-        let pom = SCNSphere(radius: 0.030)
+        let pom = SCNSphere(radius: 0.030).sized()
         let pn = SCNNode.make(pom, Materials.linen(RGBColor(hex: 0xC4576A), key: "pompom"))
         pn.position = SCNVector3(x: b.x + 0.20, y: RoomLayout.catTreeTopPlatform.y - 0.24, z: b.z + 0.14)
         pn.name = "pompom"
@@ -596,7 +596,7 @@ enum RoomBuilder {
         node.name = "catBed"
         let c = RoomLayout.catBedCenter
 
-        let rim = SCNTorus(ringRadius: 0.21, pipeRadius: 0.058)
+        let rim = SCNTorus(ringRadius: 0.21, pipeRadius: 0.058).sized()
         let r = SCNNode.make(rim, Materials.linen(RGBColor(hex: 0x8E9E8C), key: "bedRim"))
         r.position = SCNVector3(x: c.x, y: 0.058, z: c.z)
         node.addChildNode(r)
@@ -625,24 +625,24 @@ enum RoomBuilder {
         ch.position = SCNVector3(x: b.x, y: 0.09, z: b.z + 0.13)
         node.addChildNode(ch)
 
-        let bowl = SCNTube(innerRadius: 0.070, outerRadius: 0.082, height: 0.036)
+        let bowl = SCNTube(innerRadius: 0.070, outerRadius: 0.082, height: 0.036).sized()
         let bo = SCNNode.make(bowl, Materials.ceramic(RGBColor(hex: 0xDDD8CE), key: "bowl"))
         bo.position = SCNVector3(x: RoomLayout.feederBowl.x, y: 0.018, z: RoomLayout.feederBowl.z)
         node.addChildNode(bo)
-        let bowlFloor = SCNCylinder(radius: 0.082, height: 0.006)
+        let bowlFloor = SCNCylinder(radius: 0.082, height: 0.006).sized()
         let bf = SCNNode.make(bowlFloor, Materials.ceramic(RGBColor(hex: 0xDDD8CE), key: "bowl"))
         bf.position = SCNVector3(x: RoomLayout.feederBowl.x, y: 0.003, z: RoomLayout.feederBowl.z)
         node.addChildNode(bf)
 
         // Kibble level, scaled at runtime by RoomState.feederFood.
-        let food = SCNCylinder(radius: 0.066, height: 0.030)
+        let food = SCNCylinder(radius: 0.066, height: 0.030).sized()
         let fn = SCNNode.make(food, Materials.pbr(diffuse: UIColor(RGBColor(hex: 0x8A5A32)), roughness: 0.95))
         fn.position = SCNVector3(x: RoomLayout.feederBowl.x, y: 0.019, z: RoomLayout.feederBowl.z)
         node.addChildNode(fn)
         room.foodPile = fn
 
         // A little status LED.
-        let led = SCNSphere(radius: 0.006)
+        let led = SCNSphere(radius: 0.006).sized()
         let ledMat = Materials.pbr(diffuse: UIColor(red: 0.3, green: 1.0, blue: 0.5, alpha: 1), roughness: 0.2)
         ledMat.emission.contents = UIColor(red: 0.3, green: 1.0, blue: 0.5, alpha: 1)
         ledMat.emission.intensity = 0.9
@@ -662,36 +662,36 @@ enum RoomBuilder {
         let cx = b.x
         let cz = b.z + 0.24
 
-        let basin = SCNTube(innerRadius: 0.105, outerRadius: 0.125, height: 0.085)
+        let basin = SCNTube(innerRadius: 0.105, outerRadius: 0.125, height: 0.085).sized()
         let ba = SCNNode.make(basin, shell)
         ba.position = SCNVector3(x: cx, y: 0.043, z: cz)
         node.addChildNode(ba)
-        let basinFloor = SCNCylinder(radius: 0.125, height: 0.008)
+        let basinFloor = SCNCylinder(radius: 0.125, height: 0.008).sized()
         let bf = SCNNode.make(basinFloor, shell)
         bf.position = SCNVector3(x: cx, y: 0.004, z: cz)
         node.addChildNode(bf)
 
         // Pump tower at the back with a curved spout arcing forward.
-        let tower = SCNCylinder(radius: 0.045, height: 0.17)
+        let tower = SCNCylinder(radius: 0.045, height: 0.17).sized()
         let tw = SCNNode.make(tower, shell)
         tw.position = SCNVector3(x: cx, y: 0.09, z: cz - 0.058)
         node.addChildNode(tw)
 
-        let spout = SCNTorus(ringRadius: 0.045, pipeRadius: 0.008)
+        let spout = SCNTorus(ringRadius: 0.045, pipeRadius: 0.008).sized()
         let sp = SCNNode.make(spout, shell)
         sp.position = SCNVector3(x: cx, y: 0.175, z: cz - 0.028)
         sp.eulerAngles = SCNVector3(x: 0, y: 0, z: deg(90))
         node.addChildNode(sp)
 
         // Water surface (scaled with the level) and the falling stream.
-        let surface = SCNCylinder(radius: 0.100, height: 0.004)
+        let surface = SCNCylinder(radius: 0.100, height: 0.004).sized()
         let su = SCNNode.make(surface, Materials.water())
         su.position = SCNVector3(x: cx, y: 0.055, z: cz)
         su.castsShadow = false
         node.addChildNode(su)
         room.waterSurface = su
 
-        let stream = SCNCylinder(radius: 0.006, height: 0.11)
+        let stream = SCNCylinder(radius: 0.006, height: 0.11).sized()
         let st = SCNNode.make(stream, Materials.water())
         st.position = SCNVector3(x: cx, y: 0.115, z: cz + 0.010)
         st.castsShadow = false
@@ -741,11 +741,11 @@ enum RoomBuilder {
         node.name = "toys"
 
         // Basket.
-        let basket = SCNTube(innerRadius: 0.11, outerRadius: 0.125, height: 0.12)
+        let basket = SCNTube(innerRadius: 0.11, outerRadius: 0.125, height: 0.12).sized()
         let b = SCNNode.make(basket, Materials.sisal())
         b.position = SCNVector3(x: RoomLayout.toyBasketCenter.x, y: 0.06, z: RoomLayout.toyBasketCenter.z)
         node.addChildNode(b)
-        let basketFloor = SCNCylinder(radius: 0.125, height: 0.008)
+        let basketFloor = SCNCylinder(radius: 0.125, height: 0.008).sized()
         let bf = SCNNode.make(basketFloor, Materials.sisal())
         bf.position = SCNVector3(x: RoomLayout.toyBasketCenter.x, y: 0.004, z: RoomLayout.toyBasketCenter.z)
         node.addChildNode(bf)
@@ -765,7 +765,7 @@ enum RoomBuilder {
         room.toyMouse = mouse
 
         // Jingle ball.
-        let ball = SCNSphere(radius: 0.024)
+        let ball = SCNSphere(radius: 0.024).sized()
         let ballMat = Materials.plastic(RGBColor(hex: 0xE0A83A))
         let bn = SCNNode.make(ball, ballMat)
         bn.position = SCNVector3(x: RoomLayout.toyBallSpot.x, y: 0.024, z: RoomLayout.toyBallSpot.z)

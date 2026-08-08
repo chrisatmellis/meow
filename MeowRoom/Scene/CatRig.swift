@@ -65,12 +65,30 @@ enum CatBuilder {
     /// against the torso, so the stripe period is the same everywhere on the cat.
     /// Without this every part maps the whole texture over itself and short pieces —
     /// tail segments especially — come out looking bandaged.
+    /// Segments around a lofted part, scaled by render tier.
+    static func seg(_ base: Int, _ detail: Float) -> Int {
+        max(4, Int((Float(base) * detail).rounded()))
+    }
+
+    /// Rings along a lofted part, scaled by render tier.
+    static func ring(_ base: Int, _ detail: Float) -> Int {
+        max(3, Int((Float(base) * detail).rounded()))
+    }
+
     private static func vSpan(_ length: Float, _ a: CatAppearance) -> Float {
         max(0.05, length / max(0.05, a.torsoLength))
     }
 
     static func build(_ a: CatAppearance, preview: Bool = false) -> CatRig {
         let rig = CatRig(appearance: a)
+
+        // Segment counts below are written for the high tier and scaled from here,
+        // so a weaker device gets a coarser cat rather than a different one, and
+        // the character creator — a head close-up filling the screen — gets a finer
+        // one than the cat you see from across the room.
+        let detail = preview ? RenderQuality.previewMeshDetail : RenderQuality.meshDetail
+        func seg(_ base: Int) -> Int { CatBuilder.seg(base, detail) }
+        func ring(_ base: Int) -> Int { CatBuilder.ring(base, detail) }
 
         let furMat = Materials.catFur(a, preview: preview)
         let skinMat = Materials.skin(a.noseColor, gloss: 0.55)
@@ -109,7 +127,7 @@ enum CatBuilder {
             let sag = -R * 0.16 * a.chonk * sinf(t * .pi)
             rings.append(LoftRing(center: Vec3(x: 0, y: sag, z: z), radiusX: rx, radiusY: ry))
         }
-        let torsoGeo = MeshBuilder.loft(rings, segments: 22, capStart: true, capEnd: true)
+        let torsoGeo = MeshBuilder.loft(rings, segments: seg(22), capStart: true, capEnd: true)
         let torso = SCNNode.make(torsoGeo, furMat, name: "torso")
         rig.spine.addChildNode(torso)
         rig.chestNode = torso
@@ -120,7 +138,7 @@ enum CatBuilder {
         if a.effectiveFluff > 0.45 {
             let ruff = MeshBuilder.blob(radius: R * (1.15 + 0.55 * a.effectiveFluff),
                                         scaleX: 1.05, scaleY: 0.95, scaleZ: 0.55,
-                                        rings: 12, segments: 18,
+                                        rings: ring(12), segments: seg(18),
                                         vSpan: vSpan(R * 1.3, a))
             let rn = SCNNode.make(ruff, Materials.furShell(a, layer: 0))
             rn.position = SCNVector3(x: 0, y: -R * 0.05, z: L * 0.44)
@@ -135,7 +153,7 @@ enum CatBuilder {
         // cat loafs or sits, rather than being welded to the chest.
         let neckLen = (0.046 + 0.030 * (1 - a.headWidth)) * scale
         let neckR = R * (0.52 + 0.22 * a.neckThickness)
-        let neckGeo = MeshBuilder.tube(length: neckLen * 1.6, count: 4, segments: 14, radius: { t in
+        let neckGeo = MeshBuilder.tube(length: neckLen * 1.6, count: 4, segments: seg(14), radius: { t in
             neckR * (1 - 0.10 * t)
         }, vSpan: vSpan(neckLen * 1.6, a))
         let neckNode = SCNNode.make(neckGeo, furMat, name: "neck")
@@ -144,7 +162,7 @@ enum CatBuilder {
 
         rig.head.position = SCNVector3(x: 0, y: neckLen * 0.42, z: neckLen * 1.42)
         rig.neck.addChildNode(rig.head)
-        buildHead(rig: rig, a: a, furMat: furMat, skinMat: skinMat)
+        buildHead(rig: rig, a: a, furMat: furMat, skinMat: skinMat, detail: detail)
 
         // ---- Legs ---------------------------------------------------------
         let hipDrop = -R * 0.30
@@ -186,7 +204,7 @@ enum CatBuilder {
             let thickTop = R * (0.52 + 0.26 * a.legThickness) * (isFront ? 0.90 : 1.10)
             let thickBottom = R * (0.15 + 0.11 * a.legThickness)
 
-            let upperGeo = MeshBuilder.tube(length: upper * 1.06, count: 5, segments: 10, radius: { t in
+            let upperGeo = MeshBuilder.tube(length: upper * 1.06, count: 5, segments: seg(12), radius: { t in
                 mix(thickTop, thickTop * 0.52, t)
             }, vSpan: vSpan(upper, a))
             let un = SCNNode.make(upperGeo, furMat)
@@ -196,7 +214,7 @@ enum CatBuilder {
             leg.knee.position = SCNVector3(x: 0, y: -upper, z: 0)
             leg.hip.addChildNode(leg.knee)
 
-            let lowerGeo = MeshBuilder.tube(length: lower * 1.06, count: 5, segments: 9, radius: { t in
+            let lowerGeo = MeshBuilder.tube(length: lower * 1.06, count: 5, segments: seg(14), radius: { t in
                 mix(thickTop * 0.50, thickBottom, t)
             }, vSpan: vSpan(lower, a))
             let ln = SCNNode.make(lowerGeo, furMat)
@@ -209,7 +227,7 @@ enum CatBuilder {
             // Paw: a small rounded blob plus toe bumps.
             let pawR = R * (0.20 + 0.13 * a.pawSize)
             let pawGeo = MeshBuilder.blob(radius: pawR, scaleX: 0.95, scaleY: 0.72, scaleZ: 1.35,
-                                          rings: 8, segments: 12, vSpan: vSpan(pawR * 2.7, a))
+                                          rings: ring(8), segments: seg(16), vSpan: vSpan(pawR * 2.7, a))
             let pn = SCNNode.make(pawGeo, furMat)
             pn.position = SCNVector3(x: 0, y: -pawLen * 0.35, z: pawR * 0.30)
             leg.ankle.addChildNode(pn)
@@ -217,7 +235,7 @@ enum CatBuilder {
 
             // Paw pads peeking out underneath.
             let padGeo = MeshBuilder.blob(radius: pawR * 0.55, scaleX: 1.0, scaleY: 0.30, scaleZ: 1.0,
-                                          rings: 6, segments: 10)
+                                          rings: ring(6), segments: seg(12))
             let pad = SCNNode.make(padGeo, Materials.skin(a.pawPadColor, gloss: 0.35))
             pad.position = SCNVector3(x: 0, y: -pawLen * 0.35 - pawR * 0.46, z: pawR * 0.30)
             leg.ankle.addChildNode(pad)
@@ -236,11 +254,11 @@ enum CatBuilder {
         }
 
         // ---- Tail -----------------------------------------------------------
-        buildTail(rig: rig, a: a, furMat: furMat)
+        buildTail(rig: rig, a: a, furMat: furMat, detail: detail)
 
         // ---- Collar ----------------------------------------------------------
         if a.collarStyle != .none {
-            buildCollar(rig: rig, a: a)
+            buildCollar(rig: rig, a: a, detail: detail)
         }
 
         return rig
@@ -248,7 +266,10 @@ enum CatBuilder {
 
     // MARK: - Head
 
-    private static func buildHead(rig: CatRig, a: CatAppearance, furMat: SCNMaterial, skinMat: SCNMaterial) {
+    private static func buildHead(rig: CatRig, a: CatAppearance, furMat: SCNMaterial, skinMat: SCNMaterial, detail: Float) {
+        func seg(_ base: Int) -> Int { CatBuilder.seg(base, detail) }
+        func ring(_ base: Int) -> Int { CatBuilder.ring(base, detail) }
+
         let hr = a.headRadius
         let widthMul = 0.86 + 0.34 * a.headWidth
         let roundMul = 0.84 + 0.30 * a.headRoundness
@@ -257,7 +278,7 @@ enum CatBuilder {
                                      scaleX: widthMul,
                                      scaleY: roundMul,
                                      scaleZ: 1.05 + 0.18 * (1 - a.headRoundness),
-                                     rings: 16, segments: 20,
+                                     rings: ring(18), segments: seg(28),
                                      vSpan: vSpan(hr * 2.2, a))
         let skullNode = SCNNode.make(skull, furMat, name: "skull")
         rig.head.addChildNode(skullNode)
@@ -268,7 +289,7 @@ enum CatBuilder {
         let muzzleW = hr * (0.52 + 0.34 * a.muzzleWidth)
         let muzzle = MeshBuilder.blob(radius: muzzleW, scaleX: 1.25, scaleY: 0.86,
                                       scaleZ: max(0.35, muzzleLen / muzzleW),
-                                      rings: 10, segments: 14,
+                                      rings: ring(12), segments: seg(28),
                                       vSpan: vSpan(muzzleLen * 2, a))
         let muzzleNode = SCNNode.make(muzzle, furMat, name: "muzzle")
         muzzleNode.position = SCNVector3(x: 0, y: -hr * 0.26, z: hr * (0.52 + 0.26 * a.muzzleLength))
@@ -276,7 +297,7 @@ enum CatBuilder {
 
         // Nose leather.
         let nose = MeshBuilder.blob(radius: hr * (0.10 + 0.07 * a.noseSize), scaleX: 1.2, scaleY: 0.85, scaleZ: 0.8,
-                                    rings: 7, segments: 10)
+                                    rings: ring(9), segments: seg(16))
         let noseNode = SCNNode.make(nose, skinMat, name: "nose")
         noseNode.position = SCNVector3(x: 0,
                                        y: -hr * 0.14,
@@ -287,7 +308,7 @@ enum CatBuilder {
         rig.jaw.position = SCNVector3(x: 0, y: -hr * 0.34, z: hr * 0.52)
         rig.head.addChildNode(rig.jaw)
         let chin = MeshBuilder.blob(radius: hr * (0.20 + 0.14 * a.chinSize), scaleX: 1.1, scaleY: 0.7, scaleZ: 1.0,
-                                    rings: 8, segments: 12, vSpan: vSpan(hr * 0.6, a))
+                                    rings: ring(9), segments: seg(16), vSpan: vSpan(hr * 0.6, a))
         let chinNode = SCNNode.make(chin, furMat)
         chinNode.position = SCNVector3(x: 0, y: -hr * 0.06, z: hr * (0.18 + 0.30 * a.muzzleLength))
         rig.jaw.addChildNode(chinNode)
@@ -297,7 +318,7 @@ enum CatBuilder {
             for side in [-1, 1] as [Float] {
                 let cheek = MeshBuilder.blob(radius: hr * (0.34 + 0.36 * a.cheekFluff),
                                              scaleX: 0.75, scaleY: 1.0, scaleZ: 0.75,
-                                             rings: 9, segments: 12,
+                                             rings: ring(9), segments: seg(14),
                                              vSpan: vSpan(hr * 0.9, a))
                 let cn = SCNNode.make(cheek, Materials.furShell(a, layer: 0))
                 cn.position = SCNVector3(x: side * hr * 0.70 * widthMul, y: -hr * 0.20, z: hr * 0.14)
@@ -360,7 +381,7 @@ enum CatBuilder {
             rig.head.addChildNode(socket)
 
             // Eyeball: mostly hidden, so it only needs to read as a dark wet sphere.
-            let ball = SCNSphere(radius: CGFloat(eyeR))
+            let ball = SCNSphere(radius: CGFloat(eyeR)).sized()
             ball.segmentCount = 20
             let ballMat = Materials.pbr(diffuse: UIColor(white: CGFloat(0.10 + 0.25 * a.scleraTint), alpha: 1),
                                         roughness: 0.05, metalness: 0)
@@ -467,7 +488,10 @@ enum CatBuilder {
 
     // MARK: - Tail
 
-    private static func buildTail(rig: CatRig, a: CatAppearance, furMat: SCNMaterial) {
+    private static func buildTail(rig: CatRig, a: CatAppearance, furMat: SCNMaterial, detail: Float) {
+        func seg(_ base: Int) -> Int { CatBuilder.seg(base, detail) }
+        func ring(_ base: Int) -> Int { CatBuilder.ring(base, detail) }
+
         // The root only carries the 180° yaw, so the animator's pitch is unambiguous:
         // inside `tailPitch`, +Z runs down the tail and +X rotation lifts it.
         rig.tailRoot.position = SCNVector3(x: 0, y: a.torsoRadius * 0.55, z: -a.torsoLength * 0.5)
@@ -490,7 +514,7 @@ enum CatBuilder {
             let t0 = Float(i) / Float(segCount)
             let t1 = Float(i + 1) / Float(segCount)
             let tailSpan = vSpan(segLen, a)
-            let geo = MeshBuilder.tube(length: segLen * 1.08, count: 3, segments: 10, radius: { u in
+            let geo = MeshBuilder.tube(length: segLen * 1.08, count: 3, segments: seg(10), radius: { u in
                 let t = mix(t0, t1, u)
                 var r = a.tailRadius
                 switch a.tailShape {
@@ -505,7 +529,7 @@ enum CatBuilder {
             node.addChildNode(geoNode)
 
             if a.effectiveFluff > 0.35 || a.tailFluff > 0.4 {
-                let shellGeo = MeshBuilder.tube(length: segLen * 1.10, count: 3, segments: 10, radius: { u in
+                let shellGeo = MeshBuilder.tube(length: segLen * 1.10, count: 3, segments: seg(10), radius: { u in
                     let t = mix(t0, t1, u)
                     return a.tailRadius * (1.35 + 0.9 * a.tailFluff) * (a.tailShape == .plumed
                                                                         ? (0.8 + 1.1 * sinf(t * .pi * 0.9)) : 1.0)
@@ -516,7 +540,7 @@ enum CatBuilder {
 
             // Tail rings for tabby cats.
             if a.tailRingCount > 0.15 && (i % 2 == 0) && a.pattern != .solid {
-                let ring = SCNTorus(ringRadius: CGFloat(a.tailRadius * 0.86), pipeRadius: CGFloat(a.tailRadius * 0.20))
+                let ring = SCNTorus(ringRadius: CGFloat(a.tailRadius * 0.86), pipeRadius: CGFloat(a.tailRadius * 0.20)).sized()
                 let rn = SCNNode.make(ring, Materials.skin(a.markingColor, gloss: 0.2))
                 rn.position = SCNVector3(x: 0, y: 0, z: segLen * 0.5)
                 rn.eulerAngles = SCNVector3(x: deg(90), y: 0, z: 0)
@@ -531,7 +555,10 @@ enum CatBuilder {
 
     // MARK: - Collar
 
-    private static func buildCollar(rig: CatRig, a: CatAppearance) {
+    private static func buildCollar(rig: CatRig, a: CatAppearance, detail: Float) {
+        func seg(_ base: Int) -> Int { CatBuilder.seg(base, detail) }
+        func ring(_ base: Int) -> Int { CatBuilder.ring(base, detail) }
+
         let holder = SCNNode()
         holder.position = SCNVector3(x: 0, y: 0, z: 0.012 * a.scale)
         rig.neck.addChildNode(holder)
@@ -542,13 +569,13 @@ enum CatBuilder {
         case .none:
             return
         case .bandana:
-            let cloth = MeshBuilder.blob(radius: r * 1.25, scaleX: 1.0, scaleY: 0.55, scaleZ: 0.9, rings: 8, segments: 14)
+            let cloth = MeshBuilder.blob(radius: r * 1.25, scaleX: 1.0, scaleY: 0.55, scaleZ: 0.9, rings: ring(8), segments: seg(14))
             let cn = SCNNode.make(cloth, Materials.linen(a.collarColor, key: "bandana-\(a.collarColor.hashValue)"))
             cn.position = SCNVector3(x: 0, y: -r * 0.6, z: r * 0.25)
             cn.eulerAngles = SCNVector3(x: deg(90), y: 0, z: 0)
             holder.addChildNode(cn)
         default:
-            let band = SCNTorus(ringRadius: CGFloat(r), pipeRadius: CGFloat(r * 0.16))
+            let band = SCNTorus(ringRadius: CGFloat(r), pipeRadius: CGFloat(r * 0.16)).sized()
             let mat = a.collarStyle == .ribbon
                 ? Materials.linen(a.collarColor, key: "ribbon-\(a.collarColor.hashValue)")
                 : Materials.pbr(diffuse: UIColor(a.collarColor), roughness: 0.5)
@@ -558,7 +585,7 @@ enum CatBuilder {
         }
 
         if a.collarHasBell || a.collarStyle == .bell {
-            let bell = SCNSphere(radius: CGFloat(r * 0.30))
+            let bell = SCNSphere(radius: CGFloat(r * 0.30)).sized()
             let bn = SCNNode.make(bell, Materials.metal(a.bellColor, roughness: 0.18))
             bn.position = SCNVector3(x: 0, y: -r * 0.95, z: r * 0.20)
             bn.name = "bell"

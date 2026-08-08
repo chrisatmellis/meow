@@ -252,8 +252,13 @@ enum MeshBuilder {
     }
 
     /// Thin strands (whiskers, sisal fibres) drawn as very skinny tapered tubes.
-    static func strand(length: Float, thickness: Float, droop: Float) -> MeshData {
-        return tube(length: length, count: 5, segments: 4, radius: { t in
+    ///
+    /// Six sides rather than four. A whisker is one of the few things on a cat that
+    /// is routinely seen against a bright window, in silhouette, where a four-sided
+    /// tube is a square prism and reads as one — and it costs 5 triangles a whisker
+    /// to fix across the fourteen the cat has.
+    static func strand(length: Float, thickness: Float, droop: Float, segments: Int = 6) -> MeshData {
+        return tube(length: length, count: 5, segments: max(3, segments), radius: { t in
             thickness * (1 - t * 0.85) + 0.00015
         }, offset: { t in
             Vec3(x: 0, y: -droop * t * t * length, z: 0)

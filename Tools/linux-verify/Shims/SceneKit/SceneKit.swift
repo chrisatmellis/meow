@@ -179,6 +179,8 @@ open class SCNGeometryElement: NSObject {
         self.init(); self.indices = indices.map(Int32.init)
     }
     public override init() { super.init() }
+    /// Triangles in this element. Every element the game builds is a triangle list.
+    open var primitiveCount: Int { indices.count / 3 }
 }
 
 open class SCNGeometry: NSObject {
@@ -198,15 +200,31 @@ open class SCNGeometry: NSObject {
         return g
     }
     open func insertMaterial(_ material: SCNMaterial, at index: Int) {}
+
+    /// Not part of SceneKit. The harness needs a triangle budget it can hold the
+    /// room to, and the counts that matter come from the primitive tessellations,
+    /// which are documented formulas rather than anything the shim has to guess at.
+    /// Overridden per primitive; this base case covers geometry built from raw mesh
+    /// data, where the element already knows.
+    open var estimatedTriangles: Int {
+        elements.reduce(0) { $0 + $1.primitiveCount }
+    }
 }
 
 open class SCNLevelOfDetail: NSObject {}
 
+
+
 open class SCNSphere: SCNGeometry {
     open var radius: CGFloat = 1
-    open var segmentCount: Int = 24
+    // 48 on the device, not 24. The harness counts triangles against a budget, so
+    // the default has to match the one the real framework uses or the budget is
+    // measuring a phone that does not exist.
+    open var segmentCount: Int = 48
     open var isGeodesic: Bool = false
     public convenience init(radius: CGFloat) { self.init(); self.radius = radius }
+    // Longitudes × latitudes, two triangles each, minus the degenerate poles.
+    open override var estimatedTriangles: Int { segmentCount * (segmentCount / 2) * 2 }
 }
 
 open class SCNBox: SCNGeometry {
@@ -224,22 +242,36 @@ open class SCNCylinder: SCNGeometry {
     open var radius: CGFloat = 1
     open var height: CGFloat = 1
     open var radialSegmentCount: Int = 48
+    open var heightSegmentCount: Int = 1
     public convenience init(radius: CGFloat, height: CGFloat) { self.init(); self.radius = radius; self.height = height }
+    // Side quads plus a fan at each end.
+    open override var estimatedTriangles: Int {
+        radialSegmentCount * heightSegmentCount * 2 + radialSegmentCount * 2
+    }
 }
 
 open class SCNTube: SCNGeometry {
     open var innerRadius: CGFloat = 0.25
     open var outerRadius: CGFloat = 0.5
     open var height: CGFloat = 1
+    open var radialSegmentCount: Int = 48
+    open var heightSegmentCount: Int = 1
     public convenience init(innerRadius: CGFloat, outerRadius: CGFloat, height: CGFloat) {
         self.init(); self.innerRadius = innerRadius; self.outerRadius = outerRadius; self.height = height
+    }
+    // Inner wall, outer wall, and an annulus at each end.
+    open override var estimatedTriangles: Int {
+        radialSegmentCount * heightSegmentCount * 4 + radialSegmentCount * 4
     }
 }
 
 open class SCNTorus: SCNGeometry {
     open var ringRadius: CGFloat = 0.5
     open var pipeRadius: CGFloat = 0.25
+    open var ringSegmentCount: Int = 48
+    open var pipeSegmentCount: Int = 24
     public convenience init(ringRadius: CGFloat, pipeRadius: CGFloat) { self.init(); self.ringRadius = ringRadius; self.pipeRadius = pipeRadius }
+    open override var estimatedTriangles: Int { ringSegmentCount * pipeSegmentCount * 2 }
 }
 
 open class SCNCone: SCNGeometry {
