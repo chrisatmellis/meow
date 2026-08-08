@@ -22,8 +22,18 @@ public struct CGGradientDrawingOptions: OptionSet {
 public enum CGLineCap: UInt32 { case butt, round, square }
 public enum CGBlendMode: Int32 { case normal, multiply, screen, overlay }
 
+public final class CGImage {
+    public let width: Int
+    public let height: Int
+    public init(width: Int = 0, height: Int = 0) {
+        self.width = width
+        self.height = height
+    }
+}
+
 public final class CGContext {
     public init() {}
+    public func makeImage() -> CGImage? { CGImage() }
     public func setFillColor(_ color: CGColor) {}
     public func setStrokeColor(_ color: CGColor) {}
     public func setLineWidth(_ width: CGFloat) {}

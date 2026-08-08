@@ -30,6 +30,7 @@ open class UIColor {
 
 open class UIImage {
     public init() {}
+    open var cgImage: CGImage? { CGImage() }
 }
 
 open class UIGraphicsImageRendererFormat {

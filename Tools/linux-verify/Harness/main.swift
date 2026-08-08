@@ -2,6 +2,7 @@
 // texture code on Linux against the framework shims and asserts invariants.
 import Foundation
 import SceneKit
+import RealityKit
 
 if CommandLine.arguments.contains("--profile") {
     runProfile()
@@ -699,6 +700,172 @@ section("room builder") {
     expect(brightest.key / darkest.key > 20,
            "the underlying light really does span a wide range (\(brightest.key / darkest.key)x)")
     expect(true, "lighting applied across a whole day")
+}
+
+// MARK: - RealityKit stand-in
+
+// The stand-in cannot be checked against Apple's framework — that is the gap the
+// README is honest about. What it can be checked for is self-consistency, and
+// that is where the real danger is: a transposed matrix or a quaternion with the
+// wrong handedness typechecks, runs, and silently mangles every joint on device.
+section("realitykit shim") {
+    func approxEqual(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ tol: Float = 1e-4) -> Bool {
+        simd_length(a - b) < tol
+    }
+
+    // Identity really is identity.
+    let identity = Transform.identity.matrix
+    for c in 0..<4 {
+        for r in 0..<4 {
+            expect(abs(identity[c, r] - (c == r ? 1 : 0)) < 1e-6, "identity transform is identity")
+        }
+    }
+
+    // Matrix multiply is not commutative and does compose in the documented order.
+    let t = Transform(scale: SIMD3<Float>(2, 3, 4),
+                      rotation: simd_quatf(angle: 0.7, axis: SIMD3<Float>(0, 1, 0)),
+                      translation: SIMD3<Float>(1, -2, 5))
+    let roundTrip = Transform(matrix: t.matrix)
+    expect(approxEqual(roundTrip.translation, t.translation), "transform decompose recovers translation")
+    expect(approxEqual(roundTrip.scale, t.scale, 1e-3), "transform decompose recovers scale")
+    let probe = SIMD3<Float>(0.3, -0.4, 0.9)
+    expect(approxEqual(roundTrip.rotation.act(probe), t.rotation.act(probe), 1e-3),
+           "transform decompose recovers rotation")
+
+    // Inverse is a real inverse.
+    let back = t.matrix.inverse * t.matrix
+    for c in 0..<4 {
+        for r in 0..<4 {
+            expect(abs(back[c, r] - (c == r ? 1 : 0)) < 1e-4, "matrix inverse undoes the matrix")
+        }
+    }
+
+    // Quaternion and matrix agree about what a rotation does.
+    for (angle, axis) in [(Float(0.4), SIMD3<Float>(1, 0, 0)),
+                          (Float(-1.2), SIMD3<Float>(0, 1, 0)),
+                          (Float(2.6), SIMD3<Float>(0, 0, 1)),
+                          (Float(0.9), SIMD3<Float>(0.3, 0.5, -0.8))] {
+        let q = simd_quatf(angle: angle, axis: simd_normalize(axis))
+        let viaQuat = q.act(probe)
+        let m = q.matrix
+        let v4 = m * SIMD4<Float>(probe, 1)
+        expect(approxEqual(viaQuat, SIMD3<Float>(v4.x, v4.y, v4.z), 1e-4),
+               "quaternion and its matrix rotate alike (angle \(angle))")
+        expect(abs(simd_length(viaQuat) - simd_length(probe)) < 1e-4, "rotation preserves length")
+        // And the matrix reads back as the same rotation.
+        expect(approxEqual(simd_quatf(m).act(probe), viaQuat, 1e-3), "matrix converts back to its quaternion")
+        // Inverse undoes it.
+        expect(approxEqual((q.inverse * q).act(probe), probe, 1e-4), "quaternion inverse undoes it")
+    }
+
+    // World transforms compose through the parent chain.
+    let root = Entity()
+    root.transform = Transform(translation: SIMD3<Float>(1, 0, 0))
+    let mid = Entity()
+    mid.transform = Transform(rotation: simd_quatf(angle: .pi / 2, axis: SIMD3<Float>(0, 1, 0)),
+                              translation: SIMD3<Float>(0, 2, 0))
+    let leaf = Entity()
+    leaf.transform = Transform(translation: SIMD3<Float>(0, 0, 3))
+    root.addChild(mid)
+    mid.addChild(leaf)
+
+    // Rotating +90° about Y sends local +Z to world +X.
+    expect(approxEqual(leaf.worldPosition, SIMD3<Float>(4, 2, 0), 1e-4),
+           "world transform composes through parents (got \(leaf.worldPosition))")
+    expect(leaf.parent === mid && mid.parent === root, "parent links are wired")
+    expect(root.findEntity(named: "") === root, "findEntity matches by name")
+
+    // Space conversion is the inverse of itself.
+    let inLeaf = SIMD3<Float>(0.5, -1, 2)
+    let inWorld = leaf.convert(position: inLeaf, to: nil)
+    expect(approxEqual(leaf.convert(position: inWorld, from: nil), inLeaf, 1e-3),
+           "convert to and from world round-trips")
+    let inRoot = leaf.convert(position: inLeaf, to: root)
+    expect(approxEqual(leaf.convert(position: inRoot, from: root), inLeaf, 1e-3),
+           "convert between entities round-trips")
+
+    // Directions ignore translation; points do not.
+    let dir = leaf.convert(direction: SIMD3<Float>(0, 0, 1), from: nil)
+    expect(abs(simd_length(dir) - 1) < 1e-4, "direction conversion preserves length")
+
+    // look(at:) actually aims -Z at the target. The SceneKit stand-in left this
+    // empty, which is why the sun and moon aiming went unchecked for so long.
+    let aimer = Entity()
+    let targetPoint = SIMD3<Float>(3, 0, 0)
+    aimer.look(at: targetPoint, from: SIMD3<Float>(0, 0, 0), relativeTo: nil)
+    let forward = aimer.orientation.act(SIMD3<Float>(0, 0, -1))
+    expect(approxEqual(forward, simd_normalize(targetPoint), 1e-3),
+           "look(at:) points -Z at the target (got \(forward))")
+    expect(approxEqual(aimer.position, SIMD3<Float>(0, 0, 0), 1e-4), "look(at:) places the entity at `from`")
+
+    // A skeleton keeps its joints, and a pose built from it starts at rest.
+    let jointNames = ["root", "spine", "head"]
+    let skeleton = MeshResource.Skeleton(
+        id: "cat",
+        jointNames: jointNames,
+        inverseBindPoseMatrices: Array(repeating: matrix_identity_float4x4, count: 3),
+        restPoseTransforms: [Transform(translation: SIMD3<Float>(0, 1, 0)),
+                             Transform(translation: SIMD3<Float>(0, 2, 0)),
+                             Transform(translation: SIMD3<Float>(0, 3, 0))],
+        parentIndices: [nil, 0, 1])
+    expect(skeleton != nil, "skeleton builds from matching-length arrays")
+    expect(skeleton?.joints.count == 3, "skeleton keeps every joint")
+    expect(skeleton?.joints[2].parentIndex == 1, "skeleton keeps the joint hierarchy")
+
+    // Mismatched lengths must fail rather than silently truncate.
+    expect(MeshResource.Skeleton(id: "bad", jointNames: jointNames,
+                                 inverseBindPoseMatrices: [matrix_identity_float4x4]) == nil,
+           "skeleton rejects mismatched joint arrays")
+
+    if let skeleton = skeleton {
+        var pose = SkeletalPose(id: "cat", from: skeleton)
+        expect(pose.jointNames == jointNames, "pose takes its joint names from the skeleton")
+        expect(pose.jointTransforms.count == 3, "pose has a transform per joint")
+        expect(pose["head"] != nil, "pose is addressable by joint name")
+        pose["head"] = Transform(translation: SIMD3<Float>(9, 9, 9))
+        expect(approxEqual(pose["head"]!.translation, SIMD3<Float>(9, 9, 9)),
+               "posing a joint by name sticks")
+        expect(approxEqual(pose["spine"]!.translation, SIMD3<Float>(0, 2, 0)),
+               "posing one joint leaves the others alone")
+
+        let component = SkeletalPosesComponent(poses: [pose])
+        expect(component.poses["cat"] != nil, "pose set is addressable by id")
+        expect(component.poses["nope"] == nil, "pose set does not invent poses")
+    }
+
+    // Components are stored and retrieved by type, not by accident.
+    let entity = Entity()
+    entity.components.set(DirectionalLightComponent(intensity: 1234))
+    expect(entity.components[DirectionalLightComponent.self]?.intensity == 1234,
+           "component round-trips through the set")
+    expect(entity.components[PointLightComponent.self] == nil,
+           "component set does not confuse component types")
+    entity.components.remove(DirectionalLightComponent.self)
+    expect(entity.components[DirectionalLightComponent.self] == nil, "component removal works")
+
+    // A skinned part carries its influences and its skeleton binding.
+    var part = MeshResource.Part(id: "body", materialIndex: 0)
+    part.positions = [SIMD3<Float>(0, 0, 0), SIMD3<Float>(1, 0, 0)]
+    part.triangleIndices = [0, 1, 0]
+    part.skeletonID = "cat"
+    part.jointInfluences = MeshResource.JointInfluences(
+        influences: [MeshJointInfluence(jointIndex: 0, weight: 1),
+                     MeshJointInfluence(jointIndex: 1, weight: 0)],
+        influencesPerVertex: 1)
+    expect(part.jointInfluences?.influencesPerVertex == 1, "part records influences per vertex")
+    expect(part.jointInfluences?.influences.count == part.positions.count,
+           "one influence per vertex at one influence per vertex")
+
+    var contents = MeshResource.Contents()
+    contents.models = [MeshResource.Model(id: "cat", parts: [part])]
+    if let skeleton = skeleton { contents.skeletons = [skeleton] }
+    if let mesh = try? MeshResource.generate(from: contents) {
+        expect(mesh.contents.models.first?.parts.first?.skeletonID == "cat",
+               "generated mesh keeps its skeleton binding")
+        expect(mesh.expectedMaterialCount == 1, "material count follows the highest material index")
+    } else {
+        expect(false, "mesh generates from contents")
+    }
 }
 
 // MARK: - Report
