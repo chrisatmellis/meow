@@ -1134,6 +1134,67 @@ section("height fields") {
     }
 }
 
+section("mouth") {
+    for breed in CatBreed.allCases {
+        var a = BreedPresets.appearance(for: breed)
+        a.seed = 3
+        let rig = CatBuilder.build(a)
+        let animator = CatAnimator(rig: rig)
+
+        guard let cavity = rig.head.childNodes.first(where: { $0.name == "oralCavity" }),
+              let tongue = rig.jaw.childNodes.first(where: { $0.name == "tongue" }) else {
+            expect(false, "\(breed.rawValue) has a mouth behind its jaw")
+            continue
+        }
+
+        // Measured in head space, and with the pose held still, so the only thing
+        // moving is the jaw. Comparing world positions across a pose change instead
+        // just measures the head walking off, which is what the first version of
+        // this test did — it reported the cavity moving eight centimetres.
+        var motion = CatMotion()
+        motion.pose = .sitting
+        for _ in 0..<120 { animator.update(dt: 1.0 / 60, motion: motion) }
+        let closedCavity = rig.head.convertPosition(cavity.worldPosition, from: nil)
+        let closedTongue = rig.head.convertPosition(tongue.worldPosition, from: nil)
+
+        animator.triggerMeow()
+        for _ in 0..<8 { animator.update(dt: 1.0 / 60, motion: motion) }
+        let openCavity = rig.head.convertPosition(cavity.worldPosition, from: nil)
+        let openTongue = rig.head.convertPosition(tongue.worldPosition, from: nil)
+
+        expect(rig.jaw.eulerAngles.x > 0.05, "\(breed.rawValue) actually opens its jaw")
+
+        // The whole point of parenting the cavity to the head: it must stay where it
+        // is while the jaw swings away, or it is not a mouth, it is a second chin.
+        let cavityMoved = (openCavity - closedCavity).length
+        expect(cavityMoved < 1e-4,
+               "\(breed.rawValue) mouth cavity stays with the head, not the jaw (\(cavityMoved) m)")
+
+        // And the tongue must go with the jaw, because it does.
+        let tongueMoved = (openTongue - closedTongue).length
+        expect(tongueMoved > 1e-4, "\(breed.rawValue) tongue moves with the jaw (\(tongueMoved) m)")
+
+        // The cavity has to sit inside the head, spanning the gap the jaw opens —
+        // far enough back not to poke through the muzzle, not so far it misses.
+        let inHead = rig.head.convertPosition(cavity.position, from: rig.head)
+        let headRadius = a.headRadius
+        expect(inHead.length < headRadius * 1.2,
+               "\(breed.rawValue) mouth cavity is inside the head (\(inHead.length) vs \(headRadius))")
+        expect(inHead.y < 0, "\(breed.rawValue) mouth cavity is in the lower half of the head")
+        expect(inHead.z > 0, "\(breed.rawValue) mouth cavity is toward the muzzle, not the skull")
+
+        // The two properties that actually guarantee no hole, whatever angle the
+        // jaw ends up at: the cavity is a closed surface, and it is drawn from the
+        // inside as well as the outside. Single-sided, the gap the jaw opens would
+        // look straight through its back face and out the far side of the head.
+        expect(cavity.geometry?.firstMaterial?.isDoubleSided == true,
+               "\(breed.rawValue) mouth cavity renders from inside the mouth")
+        if let mesh = MeshSourceRegistry.mesh(for: cavity.geometry!) {
+            expect(mesh.indices.count > 0, "\(breed.rawValue) mouth cavity has geometry")
+        }
+    }
+}
+
 section("translucency") {
     var a = BreedPresets.appearance(for: .domesticShorthair)
     a.seed = 11

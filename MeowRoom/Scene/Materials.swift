@@ -112,6 +112,21 @@ enum Materials {
         return m
     }
 
+    /// The inside of the mouth. Dark, wet, and mostly in shadow — what matters is
+    /// that it is *not a hole*. The jaw opens for meows, eating, drinking, grooming
+    /// and yawns, and behind it was the inside of the skull.
+    static func oralCavity(_ color: RGBColor) -> SCNMaterial {
+        let m = pbr(diffuse: UIColor(color.darkened(0.45)), roughness: 0.30, metalness: 0)
+        // Both sides: the cavity is seen from inside, through the gap the jaw opens.
+        m.isDoubleSided = true
+        return m
+    }
+
+    static func tongue(_ color: RGBColor) -> SCNMaterial {
+        pbr(diffuse: TextureFactory.tongue(color), roughness: 0.25, metalness: 0,
+            maps: TextureFactory.tongueMaps())
+    }
+
     static func skin(_ color: RGBColor, gloss: Float = 0.5) -> SCNMaterial {
         pbr(diffuse: UIColor(color), roughness: 1 - gloss * 0.75, metalness: 0)
     }

@@ -300,6 +300,40 @@ enum SurfaceMaps {
                     plausibleMillimetres: 1.0...4.0)
     }
 
+    // MARK: - Mouth
+
+    /// Filiform papillae: the backward-facing spines that make a cat's lick rasp.
+    /// Seeded to match `TextureFactory.tongue`, so the relief is on the spines the
+    /// albedo already drew.
+    static func tongue(size: Int = 256) -> Spec {
+        var f = HeightField(size: size, fill: 0)
+        var rng = SeededGenerator(seed: 1717)
+        for _ in 0..<2200 {
+            let x = rng.float(0, Float(size)), y = rng.float(0, Float(size))
+            let r = rng.float(0.8, 2.2)
+            // Taller than they are wide, and all leaning the same way down the
+            // tongue — that consistent lean is what a random speckle cannot give.
+            f.addStroke(x0: x, y0: y - r * 0.8, x1: x, y1: y + r * 0.8,
+                        width: r, height: 1)
+        }
+        // The central groove.
+        for y in 0..<size {
+            for x in 0..<size {
+                let d = abs(Float(x) - Float(size) * 0.5) / (Float(size) * 0.18)
+                if d < 1 { f[x, y] -= (1 - d) * (1 - d) * 0.7 }
+            }
+        }
+        f.normalize()
+        return Spec(field: f,
+                    // A cat's tongue is about 3 cm of working surface.
+                    relief: SurfaceRelief(surfaceMetres: 0.03, tile: 1, mapSize: size),
+                    tiltDegrees: 14,
+                    // Wet, and the spine tips are the wettest part.
+                    roughnessBase: 0.22, roughnessVariation: 0.12,
+                    occlusionRadius: 4, occlusionStrength: 1.3,
+                    plausibleMillimetres: 0.05...0.9)
+    }
+
     // MARK: - Eyes
 
     /// The iris, which is not flat.

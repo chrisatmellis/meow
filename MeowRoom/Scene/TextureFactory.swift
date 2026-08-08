@@ -494,6 +494,58 @@ enum TextureFactory {
         }
     }
 
+    // MARK: - Mouth
+
+    /// The tongue: pink, wet, and covered in backward-facing spines.
+    ///
+    /// Those spines — filiform papillae, the thing that makes a cat's lick feel like
+    /// sandpaper — are the only detail that matters here. Without them a tongue is a
+    /// pink lozenge, and the mouth is open often enough to notice: not only for the
+    /// half second of a meow, but through eating, drinking, grooming and a yawn.
+    static func tongue(_ color: RGBColor) -> UIImage {
+        cached("tongue-\(color.hexKey)", bytes: textureBytes(256), pinned: true) {
+            render(256) { ctx, s in
+                ctx.setFillColor(UIColor(color).cgColor)
+                ctx.fill(CGRect(x: 0, y: 0, width: s, height: s))
+
+                // A darker central groove, which every tongue has.
+                ctx.saveGState()
+                let groove = [UIColor(color.darkened(0.22), alpha: 0.55).cgColor,
+                              UIColor(color, alpha: 0.0).cgColor] as CFArray
+                if let grad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                                         colors: groove, locations: [0, 1]) {
+                    for dir in [-1.0, 1.0] as [CGFloat] {
+                        ctx.saveGState()
+                        ctx.clip(to: CGRect(x: s * 0.5 + (dir < 0 ? -s * 0.18 : 0), y: 0,
+                                            width: s * 0.18, height: s))
+                        ctx.drawLinearGradient(grad,
+                                               start: CGPoint(x: s * 0.5, y: 0),
+                                               end: CGPoint(x: s * 0.5 + dir * s * 0.18, y: 0),
+                                               options: [])
+                        ctx.restoreGState()
+                    }
+                }
+                ctx.restoreGState()
+
+                var rng = SeededGenerator(seed: 1717)
+                for _ in 0..<2200 {
+                    let x = CGFloat(rng.float(0, 1)) * s
+                    let y = CGFloat(rng.float(0, 1)) * s
+                    let r = CGFloat(rng.float(0.8, 2.2))
+                    ctx.setFillColor(UIColor(color.lightened(Float(rng.float(0.10, 0.30))),
+                                             alpha: CGFloat(rng.float(0.25, 0.6))).cgColor)
+                    wrapped(s, x: x, y: y, radius: r) { dx, dy in
+                        ctx.fillEllipse(in: CGRect(x: x + dx, y: y + dy, width: r, height: r * 1.6))
+                    }
+                }
+            }
+        }
+    }
+
+    static func tongueMaps() -> MapSet {
+        surfaceMaps("tongue", size: 256) { SurfaceMaps.tongue() }
+    }
+
     // MARK: - Eyes
 
     static func iris(color: RGBColor, pupil: PupilShape, dilation: Float, brightness: Float) -> UIImage {

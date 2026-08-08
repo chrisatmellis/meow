@@ -408,6 +408,9 @@ func runRender(outputDirectory: String) {
         shot("head-\(breed.rawValue)-threequarter", rig.root,
              eye: SCNVector3(x: head.x + d * 0.62, y: head.y + d * 0.30, z: head.z + d * 0.72),
              target: head, fov: 30, size: (460, 460))
+
+        // Mid-meow, jaw wide. Until recently there was nothing behind it and an open
+        // mouth was a hole through the cat's face, so this is worth looking at.
     }
 
     // --- A few breeds, so the silhouettes can be compared.

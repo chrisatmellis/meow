@@ -328,6 +328,31 @@ enum CatBuilder {
         chinNode.position = SCNVector3(x: 0, y: -hr * 0.06, z: hr * (0.18 + 0.30 * a.muzzleLength))
         rig.jaw.addChildNode(chinNode)
 
+        // Something behind the teeth.
+        //
+        // The jaw rotates up to 26°, and not only for the half second of a meow —
+        // eating, drinking, grooming and stretching all open it too. Behind it there
+        // was nothing at all, so an open mouth showed the inside of the skull blob,
+        // which is to say a hole through the cat's face.
+        //
+        // The cavity hangs off the head rather than the jaw, so it stays put while
+        // the jaw swings away from it, which is what a mouth does.
+        let mouthDepth = hr * (0.34 + 0.20 * a.muzzleLength)
+        let cavity = MeshBuilder.blob(radius: hr * 0.30, scaleX: 1.05, scaleY: 0.62,
+                                      scaleZ: max(0.6, mouthDepth / (hr * 0.30)),
+                                      rings: ring(6), segments: seg(12))
+        let cavityNode = SCNNode.make(cavity, Materials.oralCavity(a.innerEarColor), name: "oralCavity")
+        cavityNode.position = SCNVector3(x: 0, y: -hr * 0.30,
+                                         z: hr * (0.30 + 0.24 * a.muzzleLength))
+        rig.head.addChildNode(cavityNode)
+
+        // The tongue goes with the jaw, because it does.
+        let tongueGeo = MeshBuilder.blob(radius: hr * 0.17, scaleX: 0.80, scaleY: 0.26,
+                                         scaleZ: 1.9, rings: ring(7), segments: seg(12))
+        let tongueNode = SCNNode.make(tongueGeo, Materials.tongue(a.noseColor), name: "tongue")
+        tongueNode.position = SCNVector3(x: 0, y: hr * 0.02, z: hr * (0.20 + 0.24 * a.muzzleLength))
+        rig.jaw.addChildNode(tongueNode)
+
         // Cheek floof.
         if a.cheekFluff > 0.25 && !a.hairless {
             for side in [-1, 1] as [Float] {
