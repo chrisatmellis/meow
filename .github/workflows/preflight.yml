@@ -16,6 +16,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The workflows source this file, so a value containing a space or a
+      # bracket that is not quoted gets parsed as a command and the job dies
+      # before building anything. That cost a macOS run to discover once.
+      - name: Check the credentials file parses
+        run: |
+          bash -c '
+            set -e
+            . ci/credentials.env
+            for v in ASC_KEY_ID ASC_ISSUER_ID ASC_TEAM_ID ASC_KEY_FILE \
+                     ASC_P12_FILE ASC_P12_PASSWORD ASC_PROFILE_FILE \
+                     ASC_PROFILE_NAME ASC_SIGNING_IDENTITY; do
+              [ -n "${!v}" ] || { echo "  ✗ $v is empty or failed to parse"; exit 1; }
+            done
+            for f in "$ASC_KEY_FILE" "$ASC_P12_FILE" "$ASC_PROFILE_FILE"; do
+              [ -f "$f" ] || { echo "  ✗ missing file: $f"; exit 1; }
+            done
+            echo "  ✓ ci/credentials.env parses and every file it names exists"
+          '
+
       - name: Check App Store Connect setup
         env:
           S_KEY_P8: ${{ secrets.APP_STORE_CONNECT_KEY_P8 }}
