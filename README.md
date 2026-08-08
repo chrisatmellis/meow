@@ -132,6 +132,26 @@ oval or round pupil; the legs are solved with two-bone IK so the paws stay
 planted. The room — tatami, shoji, futon, tansu, cat tree, feeder, fountain,
 litter box, paper lantern — is built the same way.
 
+### Surfaces have shape, not just colour
+
+Every surface also carries a normal, roughness and occlusion map, generated from
+a height field in `SurfaceMaps.swift` that is built alongside the colour texture
+rather than derived from it. Deriving from the albedo would emboss the tabby
+stripes, which are dark and completely flat.
+
+The maps are authored by **angle**, not by depth. Depth on its own does not
+predict how a surface looks — it only means something read against the width of
+the features carrying it, and authoring millimetres directly produced wood at
+0.5° of tilt and rope at 30° in the same pass, one invisible and one a cliff.
+Each surface declares the RMS tilt it should read at; `HeightField` solves for
+the slope that achieves it, and the physical depth that implies is derived and
+bounded per material. When the two disagree it means the field's features are
+the wrong size, which is a more useful thing to be told than a number being off.
+
+Everything wraps. The height fields are periodic by construction, and the Core
+Graphics generators draw anything near an edge again on the opposite side, so
+the floor and walls have no repeat grid in them.
+
 ### Petting is a negotiation, and it is felt
 
 Swipe on the cat when it is within reach. Head, cheek and chin are welcome; the
@@ -180,9 +200,11 @@ project against hand-written stand-ins for the Apple frameworks and runs it,
 on any machine with a Swift toolchain:
 
 ```sh
-./Tools/linux-verify/verify.sh              # ~13M assertions across 15 areas
+./Tools/linux-verify/verify.sh              # ~13M assertions across 19 areas
 ./Tools/linux-verify/verify.sh --profile    # simulate whole days, report the results
 ./Tools/linux-verify/verify.sh --render ./r # software-rasterise the cat and the room
+./Tools/linux-verify/verify.sh --maps ./m   # write every surface's material maps as PNGs
+./Tools/linux-verify/verify.sh --budget     # print triangle counts against the budget
 ```
 
 The assertions cover the solar clock, mesh winding and normals, every breed and
@@ -191,6 +213,21 @@ every slider extreme through the rig builder, twenty poses through the animator
 archetype through four simulated hours of the brain, the petting and
 overstimulation cycle, the wand, treats, consumables, offline catch-up, resuming
 from the background, the save file, and the whole room and lighting across a day.
+
+They also cover the material pipeline, which is deliberately pure Foundation so
+that it can be checked without a graphics framework: that a surface rising along
++u tilts its normal toward −u (an inverted normal map does not look broken, it
+looks like the light is on the wrong side); that every baked normal is unit
+length and no steeper than 78°; that each surface hits the tilt it asked for and
+implies a depth a real version of that material could have; that the noise tiles
+exactly and the seam is no steeper than the middle of the tile; that meshes are
+watertight; that the texture cache stays inside its byte budget and its pinned
+room textures survive a 48-hour sky sweep; and that the room and every breed of
+cat fit a triangle budget.
+
+`--maps` is how the material work is looked at while CI is unavailable. It writes
+each surface's height, normal, roughness and occlusion map tiled 2×2, so a map
+that fails to tile announces itself as a cross through the middle of the image.
 
 The profile is the tuning tool. A healthy cat spends 40–55% of the day asleep,
 touches around 25 distinct activities, vocalises roughly every ten minutes, and
