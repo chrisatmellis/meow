@@ -109,7 +109,7 @@ func runProfile() {
     }
 
     print("\n── light across the day ────────────────────────────────")
-    print("  hour      sun     sky    moon lantern  |    key    EV   screen")
+    print("  hour      sun     sky    moon lantern  |    key    EV   lights")
     var dayCal = Calendar(identifier: .gregorian)
     dayCal.timeZone = TimeZone(identifier: "UTC")!
     var lo = Float.infinity, hi = -Float.infinity
@@ -124,5 +124,6 @@ func runProfile() {
                      hour, b.sun, b.sky, b.moon, b.lantern,
                      b.key, Float(LightingRig.exposureOffset(for: b)), screen))
     }
-    print(String(format: "  screen brightness spans %.2f stops across the day", log2(hi / lo)))
+    print(String(format: "  room light spans %.2f stops across the day (less than that on screen,", log2(hi / lo)))
+    print("  since the tone mapper and sRGB both compress the bottom end)")
 }

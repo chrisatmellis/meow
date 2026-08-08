@@ -646,52 +646,43 @@ section("room builder") {
         let b = LightingRig.budget(sky: s, lanternOn: lanternOn)
         let e = LightingRig.exposureOffset(for: b)
         expect(b.key > 0, "something is lighting the room at \(hour):00")
-        expect(e >= -6.5 && e <= 0.05, "exposure at \(hour):00 is in range (\(e))")
-        // Exposure must never amplify. Emission is authored in absolute terms
-        // all over the project — lantern paper, feeder LED, eye catchlights,
-        // whiskers, the garden — and none of it is in the budget, so a positive
-        // exposure multiplies all of it at once. That is what held midnight
-        // above midday even after the lights themselves were proportional.
-        expect(e <= 0.05, "exposure only ever stops down at \(hour):00 (\(e))")
+        // Exposure is deliberately constant. Varying it with the sky rescales
+        // every emissive in the room too — lantern paper, feeder LED, eye
+        // catchlights, the garden — none of which are in the budget, and three
+        // builds each broke a different hour that way. The day/night difference
+        // lives in the lights instead.
+        expect(abs(e - LightingRig.exposureOffset(for: LightingRig.budget(sky: s, lanternOn: false))) < 1e-6,
+               "exposure does not vary with the lantern at \(hour):00")
+        expect(e >= -2.0 && e <= 0.05, "exposure at \(hour):00 is in range (\(e))")
         samples.append((hour, b.key, e, LightingRig.renderedBrightness(for: b)))
     }
 
-    // The light actually put into the scene must stay proportional to the budget
-    // the camera meters off. Nothing checked this, and the gap is what made
-    // midnight brighter than noon: coefficients picked to land on familiar levels
-    // left night 6.5x dimmer than noon while the budget claimed 88x, so night's
-    // +3 EV of compensation had nothing to cancel and lifted the room past midday.
-    var ratios: [Float] = []
-    for hour in 0..<24 {
-        var comps = DateComponents(); comps.year = 2026; comps.month = 9; comps.day = 21; comps.hour = hour
-        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "UTC")!
-        let s = WorldClock.sky(at: cal.date(from: comps)!, timeZone: TimeZone(identifier: "UTC")!)
-        let b = LightingRig.budget(sky: s, lanternOn: s.wantsLampLight)
-        ratios.append(LightingRig.intensities(for: b).total / b.key)
-    }
-    let spread = ratios.max()! / ratios.min()!
-    expect(spread < 1.001,
-           "scene light tracks the metered budget at every hour (spread \(spread))")
-
-    // A brighter room must still render brighter. This is the invariant that was
-    // missing: with each light on its own hand-fitted curve nothing related them,
-    // so late night drifted until it was brighter on screen than noon and no
-    // assertion anywhere could tell.
+    // More lux must mean more light in the room. `renderedBrightness` is the sum
+    // of what actually goes into the scene, so this is a check on the lights
+    // themselves, not on a model of them — which is what the previous version
+    // got wrong. The failure it guards against is a coefficient tuned to make
+    // one hour look right inverting the order somewhere else.
     let byKey = samples.sorted { $0.key < $1.key }
     for (a, b) in zip(byKey, byKey.dropFirst()) {
         expect(b.rendered >= a.rendered - 1e-4,
                "more light renders brighter (\(a.hour):00 \(a.key)lx vs \(b.hour):00 \(b.key)lx)")
-        expect(b.exposure <= a.exposure + 1e-4,
-               "more light means stopping down (\(a.hour):00 vs \(b.hour):00)")
+        expect(abs(b.exposure - a.exposure) < 1e-6,
+               "exposure is the same at every hour (\(a.hour):00 vs \(b.hour):00)")
     }
 
     // ...and the day must still have visible contrast in it. Full compensation
     // would satisfy the ordering above while making every hour look identical,
     // which is the failure this pairs with.
     let darkest = byKey.first!, brightest = byKey.last!
+    // These bounds are in light, not in pixels. SceneKit's tone mapper and sRGB
+    // both compress hard at the bottom, so a 29x range in the room shows up as
+    // a much smaller difference on screen — an earlier build with only 7.7x
+    // between night and noon rendered them within 8% of each other. Hence a
+    // floor well above "some difference": below about 4x, night stops reading
+    // as night at all.
     let stops = log2(brightest.rendered / darkest.rendered)
-    expect(stops > 0.8, "day is not flat: \(stops) stops between \(darkest.hour):00 and \(brightest.hour):00")
-    expect(stops < 3.2, "day is not extreme: \(stops) stops")
+    expect(stops > 2.0, "day is not flat: \(stops) stops between \(darkest.hour):00 and \(brightest.hour):00")
+    expect(stops < 6.0, "day is not extreme: \(stops) stops")
     expect(brightest.key / darkest.key > 20,
            "the underlying light really does span a wide range (\(brightest.key / darkest.key)x)")
     expect(true, "lighting applied across a whole day")

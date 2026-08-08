@@ -88,31 +88,6 @@ final class LightingRig {
         var key: Float { max(0.05, sun + sky + moon + lantern) }
     }
 
-    /// The darkest the room is expected to get: night, with the lantern lit.
-    ///
-    /// Exposure is anchored here rather than at some comfortable midpoint, so it
-    /// is never positive and the camera only ever stops *down*. That matters far
-    /// more than it looks. Emission is authored in absolute terms all over this
-    /// project — the lantern paper, the feeder's LED, the catchlight in the cat's
-    /// eyes, the sheen on its whiskers, the garden beyond the window — and none
-    /// of it participates in the light budget. A positive exposure at night
-    /// multiplied every one of them by eight, which is what kept midnight
-    /// brighter than midday even after the lights themselves were proportional.
-    /// Anchored this way, absolute emission shows at face value at night, when a
-    /// lamp and a pair of eyes *should* be the bright things, and is attenuated
-    /// into invisibility by daylight.
-    private static let referenceLux: Float = 30
-
-    /// How much of the real brightness variation survives to the screen.
-    ///
-    /// A camera that compensates fully renders midnight and noon identically,
-    /// which is exactly how every hour in this room ended up the same brightness.
-    /// Compensating only partly keeps night reading as night: the frame lands at
-    /// `reference * (key / reference) ^ retainedContrast`, so the ~6 stops between
-    /// a lantern at midnight and full noon arrive as about 1.5 stops on screen —
-    /// plainly different, still readable.
-    private static let retainedContrast: Float = 0.25
-
     /// Lux by path, for the current sky. Daylight is overwhelmingly the sun and
     /// the sky through the opening; at night a paper lantern is worth far more
     /// than the moon, which is why a room with the lamp off really is dim.
@@ -128,17 +103,11 @@ final class LightingRig {
     /// How the budget is split across the actual lights.
     ///
     /// Every entry is a share of one source's lux, and the shares of each source
-    /// sum to one, so the total light in the room stays strictly proportional to
-    /// `budget.key`. That proportionality is the contract the whole model rests
-    /// on, and it is easy to break by accident: pick each light's coefficient so
-    /// a screenshot looks right at one hour and you have hand-fitted the sources
-    /// again, one layer further down, while exposure carries on metering off a
-    /// budget the lights no longer match.
-    ///
-    /// Doing precisely that made midnight brighter than noon. Coefficients tuned
-    /// to land on the old levels left night only 6.5x dimmer than noon while the
-    /// budget claimed 88x, so night's +3 EV of compensation had nothing to cancel
-    /// against and lifted the room 1.3x above midday instead.
+    /// sum to one, so the mix between lights is fixed by the budget and only the
+    /// overall level moves. Picking a coefficient per light so one screenshot
+    /// looks right is how this went wrong before: that is hand-fitting the
+    /// sources again, one layer down, and it left night only 6.5x dimmer than
+    /// noon while the budget claimed 88x.
     struct LightIntensities {
         var sun: Float
         var moon: Float
@@ -150,11 +119,30 @@ final class LightingRig {
         var total: Float { sun + moon + ambient + windowGlow + bounce + lantern }
     }
 
-    /// Sets the absolute level only. Ratios — and so the look — are unaffected.
-    private static let luxToIntensity: Float = 2.88
+    /// Total SceneKit intensity at full daylight, and the lux that corresponds to.
+    private static let noonIntensity: Float = 900
+    private static let noonLux: Float = 2563
+
+    /// How much of the budget's range reaches the lights.
+    ///
+    /// Not 1, because SceneKit is not a linear-light renderer: its tone mapper
+    /// saturates, so driving intensities to the tens of thousands buys nothing
+    /// and then needs a huge negative exposure to bring back, which crushes the
+    /// scene. Measured directly — two builds computing an identical "effective
+    /// light" of 263 at midday rendered at mean 126 and mean 67. Keeping the
+    /// numbers in a range the tone mapper treats roughly linearly is what makes
+    /// the budget's ratios survive to the screen.
+    private static let intensityGamma: Float = 0.75
+
+    /// Lux to SceneKit intensity for a given budget. Compressive, so a moonlit
+    /// room is dimmer than noon by a believable amount rather than by the full
+    /// physical 88x, which no display could show anyway.
+    private static func scale(_ key: Float) -> Float {
+        noonIntensity * powf(key / noonLux, intensityGamma) / max(key, 0.05)
+    }
 
     static func intensities(for b: LightBudget) -> LightIntensities {
-        let k = luxToIntensity
+        let k = scale(b.key)
         return LightIntensities(sun: b.sun * 0.85 * k,
                                 moon: b.moon * 1.00 * k,
                                 ambient: (b.sky * 0.30 + b.lantern * 0.10) * k,
@@ -163,23 +151,30 @@ final class LightingRig {
                                 lantern: b.lantern * 0.75 * k)
     }
 
-    /// Exposure in EV, metered off the budget the way a real camera would.
-    /// SceneKit's own `wantsExposureAdaptation` would ramp visibly after launch;
-    /// the sky is already known, so this is computed straight from it instead.
-    static func exposureOffset(for budget: LightBudget) -> CGFloat {
-        let ev = log2(budget.key / referenceLux) * (1 - retainedContrast)
-        return CGFloat(min(0.05, max(-6.5, -ev)))
-    }
+    /// Exposure is fixed, and that is the point.
+    ///
+    /// Three builds tried to vary it with the sky and each broke a different
+    /// hour. Positive exposure at night multiplies every emissive in the room —
+    /// lantern paper, the feeder's LED, eye catchlights, the garden — none of
+    /// which are in the budget, and midnight came out brighter than midday.
+    /// Anchoring it so it only ever stops down fixed that and crushed daylight
+    /// instead, because a large negative exposure cannot be paid for by raising
+    /// intensities past where the tone mapper saturates.
+    ///
+    /// The day/night difference belongs in the lights, where it is a property of
+    /// the room, not in the camera, where it silently rescales everything else
+    /// as well. So the budget drives `intensities(for:)` and this stays put.
+    static func exposureOffset(for budget: LightBudget) -> CGFloat { -0.35 }
 
     static func exposureOffset(sky: SkyState, lanternOn: Bool) -> CGFloat {
         exposureOffset(for: budget(sky: sky, lanternOn: lanternOn))
     }
 
-    /// Where the frame should land in brightness once exposure has been applied.
-    /// Only meaningful relative to itself — the tests use it to assert that a
-    /// brighter room really does render brighter.
+    /// What the room is actually lit by, which with exposure fixed is what
+    /// reaches the screen. The tests use it to assert a brighter room renders
+    /// brighter, and that the day is neither flat nor extreme.
     static func renderedBrightness(for budget: LightBudget) -> Float {
-        referenceLux * powf(budget.key / referenceLux, retainedContrast)
+        intensities(for: budget).total
     }
 
     func apply(sky: SkyState, scene: SCNScene, room: RoomNode, lanternOn: Bool) {
@@ -215,7 +210,7 @@ final class LightingRig {
         // --- Backlit shoji paper. Its brightness is the sky outside and nothing
         // else: the flat floor this used to carry was what left the paper — and
         // the open half beside it — glowing at ten at night.
-        let glow = CGFloat(budget.sky * 0.012)
+        let glow = CGFloat(min(0.55, budget.sky * 0.0008))
         for mat in room.shojiMaterials {
             mat.emission.intensity = glow
             mat.emission.contents = UIColor(sky.skyHorizonColor.lightened(0.35 * sky.daylight))
@@ -224,7 +219,7 @@ final class LightingRig {
         // --- Garden outside.
         // Outdoors is far brighter than the room it is seen from, so this runs
         // well past 1 in daylight and the window blows out, as it should.
-        let outdoor = CGFloat(0.7 + budget.sky * 0.073)
+        let outdoor = CGFloat(min(1.0, 0.33 + budget.sky * 0.001))
         for mat in room.backdropMaterials {
             mat.emission.contents = TextureFactory.gardenBackdrop(sky: sky)
             mat.emission.intensity = outdoor
