@@ -266,6 +266,18 @@ def assign_build(version: str, group_name: str | None = None):
 
     for g in groups:
         name = g["attributes"].get("name")
+
+        # Internal groups cannot be assigned builds — Apple answers this endpoint
+        # with "Cannot add internal group to a build" — because they already have
+        # every build. That is also why App Store Connect shows no control for it,
+        # and why looking for one is a dead end: there is nothing an internal group
+        # could be assigned that it does not have.
+        if g["attributes"].get("isInternalGroup"):
+            print(f"  {name!r} is internal, so it already has build {version} — "
+                  "internal groups receive every build automatically and cannot be "
+                  "assigned one. Testers see it in the TestFlight app.")
+            continue
+
         status, resp = request("POST", f"betaGroups/{g['id']}/relationships/builds",
                                token, {"data": [{"type": "builds", "id": build_id}]})
         if status in (200, 201, 204):
