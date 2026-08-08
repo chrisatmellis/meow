@@ -116,7 +116,10 @@ jobs:
             for f in screenshots/*.png; do echo "- \`$f\`"; done
           } > README.md
 
-          git add screenshots README.md
+          # -f because screenshots/ is in .gitignore, which is correct for the
+          # source branch and exactly wrong for the branch whose entire purpose is
+          # to carry them.
+          git add -f screenshots README.md
           git commit -q -m "screenshots from ${GITHUB_SHA:0:7}"
           git push -qf origin screenshots-publish:screenshots
           echo "published to the screenshots branch"
