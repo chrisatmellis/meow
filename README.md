@@ -40,45 +40,51 @@ golden hour and night without waiting for them.
 
 ## Shipping a build
 
-From a Mac, `Product → Archive` then `Distribute App → App Store Connect` needs
-nothing set up beyond a team — that is the shortest path to a first TestFlight
-build, and it is worth doing once by hand to prove the account side works.
+```sh
+./Tools/testflight.sh          # from a Mac; ~10 minutes, then Apple takes 5-15 more
+```
 
-To have CI do it instead, run the `testflight` workflow from the Actions tab. It
-is manual-only on purpose: it spends macOS minutes and pushes to real testers,
-neither of which should follow from an ordinary commit. It needs four repository
-secrets (Settings → Secrets and variables → Actions):
+That is the whole thing. Everything it needs is committed in `ci/` — the App
+Store Connect API key, the distribution certificate, the provisioning profile —
+so there is nothing to install, nothing to configure, and no need to open Xcode.
+It asks Apple what the last build number was, archives, signs, and uploads.
+`ci/README.md` explains what is in there, why it is committed rather than kept
+in repository secrets, and how to rotate it.
 
-| Secret | Where it comes from |
-| --- | --- |
-| `APP_STORE_CONNECT_KEY_P8` | The `.p8` file's contents, pasted whole, `BEGIN`/`END` lines included |
-| `APP_STORE_CONNECT_KEY_ID` | The 10-character Key ID shown beside the key |
-| `APP_STORE_CONNECT_ISSUER_ID` | The UUID at the top of the Integrations page — one per account, not per key |
-| `APPLE_TEAM_ID` | The 10-character Team ID from developer.apple.com → Membership |
+The same steps run in CI via the `testflight` workflow, from the Actions tab.
+It is manual-only on purpose: it spends macOS minutes and pushes to real
+testers, neither of which should follow from an ordinary commit. If repository
+secrets (`APP_STORE_CONNECT_KEY_P8`, `APP_STORE_CONNECT_KEY_ID`,
+`APP_STORE_CONNECT_ISSUER_ID`, `APPLE_TEAM_ID`) are set they win; `ci/` is the
+fallback, so moving to secrets later is just setting them.
 
-Generate the key at App Store Connect → Users and Access → Integrations →
-App Store Connect API, with the **App Manager** role. **The `.p8` downloads
-exactly once and cannot be retrieved again** — if it is lost, revoke it and
-generate another.
+`./Tools/asc-preflight.py latest-build` reports the highest build number App
+Store Connect has seen, and the `preflight` workflow checks the whole credential
+set on a free runner in about ten seconds, naming whatever is wrong — a mangled
+`.p8`, the key's own id pasted where the issuer id belongs, a missing app
+record. Each of those otherwise appears twenty minutes into an archive as an
+error mentioning none of them.
 
-Once the secrets are in, run the `preflight` workflow. It checks all four on a
-free runner in about ten seconds and names whatever is wrong — a mangled `.p8`,
-the key's own id pasted where the issuer id belongs, a missing app record. Each
-of those otherwise appears twenty minutes into an archive as an error that
-mentions none of them.
+### Two things that are not obvious
 
-One step cannot be automated: the App Store Connect app record. Apple's API can
-create bundle ids but not app records, so that one has to be made in the UI
-(Apps → ＋ → New App). `preflight` will say so, and list the records that do
+**The archive is unsigned, and the export step signs it.** Signing during the
+archive fails outright on an account with no registered devices: `xcodebuild`
+asks for an *iOS App Development* profile, and development profiles are built
+from a device list. This account has none and needs none — the build is going to
+TestFlight, not to a cable. App Store distribution profiles carry no device list
+at all, so the export step can use one with nothing else set up.
+
+**Signing is manual, from a committed `.p12`, and `-allowProvisioningUpdates` is
+deliberately absent.** Automatic signing asks Apple's cloud signing service to
+produce an identity, and this key is not permitted to use it — that is the
+"Cloud signing permission error", and the "no profiles were found" that follows
+is a symptom rather than a second problem. The certificate was minted from a
+locally generated CSR so we hold its private key, and it is supplied directly.
+
+One step genuinely cannot be automated: the App Store Connect app record.
+Apple's API can create bundle ids but not app records, so that one is made in
+the UI (Apps → ＋ → New App). `preflight` says so, and lists the records that do
 exist, if it is missing.
-
-The key is enough on its own: `-allowProvisioningUpdates` lets Xcode mint the
-distribution certificate and provisioning profile from it, so no `.p12` ever has
-to be exported from a Mac and stored in CI.
-
-The build number comes from the workflow run number rather than the committed
-`CURRENT_PROJECT_VERSION`. App Store Connect rejects a build number it has seen
-before, and it does so only after the entire archive has been built.
 
 ## What's in the box
 

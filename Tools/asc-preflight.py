@@ -15,6 +15,7 @@ wheel failed to build.
 """
 import argparse
 import base64
+import os
 import json
 import re
 import subprocess
@@ -24,6 +25,7 @@ import urllib.error
 import urllib.request
 
 API = "https://api.appstoreconnect.apple.com/v1"
+BUNDLE_ID = "com.drinkmellis.meowroom"
 
 
 def b64url(data: bytes) -> str:
@@ -80,7 +82,57 @@ def get(path: str, token: str):
             return e.code, {"raw": body[:400]}
 
 
+def credentials():
+    """Reads ci/credentials.env, which is shell but only ever KEY="value"."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(here, "..", "ci", "credentials.env")
+    values = {}
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            values[k.strip()] = v.strip().strip('"').strip("'")
+    values["ASC_KEY_FILE"] = os.path.normpath(
+        os.path.join(here, "..", values.get("ASC_KEY_FILE", "")))
+    return values
+
+
+def latest_build() -> int:
+    """The highest build number App Store Connect has seen for this app.
+
+    Asked before archiving rather than after. A duplicate build number is only
+    rejected at upload, which is ten minutes of archive to find out about a
+    one-line problem.
+    """
+    c = credentials()
+    token = sign_jwt(c["ASC_KEY_FILE"], c["ASC_KEY_ID"], c["ASC_ISSUER_ID"])
+    status, body = get("apps?limit=200", token)
+    if status != 200:
+        raise SystemExit(f"App Store Connect returned {status}")
+    app_id = next((app["id"] for app in body.get("data", [])
+                   if app["attributes"]["bundleId"] == BUNDLE_ID), None)
+    if app_id is None:
+        raise SystemExit(f"no app record for {BUNDLE_ID}")
+    status, body = get(f"builds?filter[app]={app_id}&limit=200", token)
+    if status != 200:
+        raise SystemExit(f"App Store Connect returned {status}")
+    numbers = []
+    for build in body.get("data", []):
+        version = build["attributes"].get("version")
+        if version and version.isdigit():
+            numbers.append(int(version))
+    return max(numbers, default=0)
+
+
 def main():
+    # One positional mode, so the common "what build number is next" question
+    # needs no flags at all — the answer is entirely in ci/credentials.env.
+    if len(sys.argv) > 1 and sys.argv[1] == "latest-build":
+        print(latest_build())
+        return 0
+
     p = argparse.ArgumentParser()
     p.add_argument("--key", required=True)
     p.add_argument("--key-id", required=True)
