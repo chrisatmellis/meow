@@ -799,6 +799,43 @@ section("realitykit shim") {
     expect(approxEqual(leaf.convert(position: inRoot, from: root), inLeaf, 1e-3),
            "convert between entities round-trips")
 
+    // --- MeshData -> MeshResource must not lose or reorder anything.
+    //
+    // The adapter is the one place the game's renderer-independent vertex buffers
+    // become RealityKit's, so it is worth asserting the conversion is faithful rather
+    // than merely type-correct. A silent index or winding change here would show up
+    // much later as inside-out geometry that no other test would catch.
+    for (label, mesh) in [("blob", MeshBuilder.blob(radius: 0.1)),
+                          ("tube", MeshBuilder.tube(length: 0.4, radius: { 0.05 + 0.02 * $0 })),
+                          ("ear", MeshBuilder.ear(length: 0.08, width: 0.05,
+                                                  thickness: 0.012, curl: 0.3))] {
+        guard let resource = try? mesh.meshResource(name: label),
+              let part = resource.contents.models.first?.parts.first else {
+            expect(false, "\(label) converts to a MeshResource")
+            continue
+        }
+        expect(part.positions.count == mesh.positions.count, "\(label) keeps every vertex")
+        expect(part.normals?.count == mesh.normals.count, "\(label) keeps every normal")
+        expect(part.textureCoordinates?.count == mesh.uvs.count, "\(label) keeps every uv")
+        expect(part.triangleIndices?.count == mesh.indices.count, "\(label) keeps every index")
+        expect(resource.contents.instances.count == 1, "\(label) has one instance")
+        expect(resource.expectedMaterialCount == 1, "\(label) wants one material")
+
+        for (i, p) in part.positions.enumerated() {
+            let q = mesh.positions[i]
+            expect(abs(p.x - q.x) < 1e-6 && abs(p.y - q.y) < 1e-6 && abs(p.z - q.z) < 1e-6,
+                   "\(label) vertex \(i) survives the conversion unmoved")
+        }
+        // Winding, and therefore which way the surface faces, is carried entirely by
+        // index order. Int32 -> UInt32 is a widening for non-negative values, but only
+        // if the order is untouched.
+        if let idx = part.triangleIndices {
+            for (i, v) in idx.enumerated() {
+                expect(v == UInt32(mesh.indices[i]), "\(label) index \(i) keeps its place")
+            }
+        }
+    }
+
     // Directions ignore translation; points do not.
     let dir = leaf.convert(direction: SIMD3<Float>(0, 0, 1), from: nil)
     expect(abs(simd_length(dir) - 1) < 1e-4, "direction conversion preserves length")
