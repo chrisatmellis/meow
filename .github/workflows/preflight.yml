@@ -33,6 +33,20 @@ jobs:
               [ -f "$f" ] || { echo "  ✗ missing file: $f"; exit 1; }
             done
             echo "  ✓ ci/credentials.env parses and every file it names exists"
+
+            # macOS security(1) cannot read a PKCS#12 in OpenSSL 3 defaults
+            # (AES-256/SHA-256) and reports it as "MAC verification failed ...
+            # (wrong password?)", which sends you looking at the password
+            # instead of the encoding. It needs the legacy SHA-1/3DES form.
+            mac=$(openssl pkcs12 -in "$ASC_P12_FILE" -passin pass:"$ASC_P12_PASSWORD" \
+                    -info -noout 2>&1 | grep -i "^MAC:" | head -1)
+            echo "  · p12 $mac"
+            case "$mac" in
+              *sha1*) echo "  ✓ p12 is in the legacy encoding macOS can import" ;;
+              *) echo "  ✗ p12 uses a MAC macOS cannot import; rebuild it with"
+                 echo "    -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES -macalg sha1"
+                 exit 1 ;;
+            esac
           '
 
       - name: Check App Store Connect setup
