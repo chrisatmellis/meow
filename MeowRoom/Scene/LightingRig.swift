@@ -120,7 +120,7 @@ final class LightingRig {
     }
 
     /// Total SceneKit intensity at full daylight, and the lux that corresponds to.
-    private static let noonIntensity: Float = 900
+    private static let noonIntensity: Float = 680
     private static let noonLux: Float = 2563
 
     /// How much of the budget's range reaches the lights.
@@ -210,7 +210,7 @@ final class LightingRig {
         // --- Backlit shoji paper. Its brightness is the sky outside and nothing
         // else: the flat floor this used to carry was what left the paper — and
         // the open half beside it — glowing at ten at night.
-        let glow = CGFloat(min(0.55, budget.sky * 0.0008))
+        let glow = CGFloat(min(0.36, budget.sky * 0.0005))
         for mat in room.shojiMaterials {
             mat.emission.intensity = glow
             mat.emission.contents = UIColor(sky.skyHorizonColor.lightened(0.35 * sky.daylight))
@@ -219,7 +219,7 @@ final class LightingRig {
         // --- Garden outside.
         // Outdoors is far brighter than the room it is seen from, so this runs
         // well past 1 in daylight and the window blows out, as it should.
-        let outdoor = CGFloat(min(1.0, 0.33 + budget.sky * 0.001))
+        let outdoor = CGFloat(min(0.78, 0.28 + budget.sky * 0.0007))
         for mat in room.backdropMaterials {
             mat.emission.contents = TextureFactory.gardenBackdrop(sky: sky)
             mat.emission.intensity = outdoor
