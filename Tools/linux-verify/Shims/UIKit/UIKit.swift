@@ -29,8 +29,10 @@ open class UIColor {
 }
 
 open class UIImage {
-    public init() {}
-    open var cgImage: CGImage? { CGImage() }
+    private let backing: CGImage?
+    public init() { backing = nil }
+    public init(cgImage: CGImage) { backing = cgImage }
+    open var cgImage: CGImage? { backing ?? CGImage() }
 }
 
 open class UIGraphicsImageRendererFormat {

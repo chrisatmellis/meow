@@ -22,10 +22,46 @@ public struct CGGradientDrawingOptions: OptionSet {
 public enum CGLineCap: UInt32 { case butt, round, square }
 public enum CGBlendMode: Int32 { case normal, multiply, screen, overlay }
 
+public final class CGDataProvider {
+    public init?(data: CFData) {}
+}
+
+public typealias CFData = Data
+
+public struct CGImageAlphaInfo: RawRepresentable {
+    public let rawValue: UInt32
+    public init(rawValue: UInt32) { self.rawValue = rawValue }
+    public static let none = CGImageAlphaInfo(rawValue: 0)
+    public static let premultipliedLast = CGImageAlphaInfo(rawValue: 1)
+    public static let premultipliedFirst = CGImageAlphaInfo(rawValue: 2)
+    public static let last = CGImageAlphaInfo(rawValue: 3)
+    public static let noneSkipLast = CGImageAlphaInfo(rawValue: 5)
+}
+
+public struct CGBitmapInfo: OptionSet {
+    public let rawValue: UInt32
+    public init(rawValue: UInt32) { self.rawValue = rawValue }
+    public static let byteOrder32Big = CGBitmapInfo(rawValue: 1 << 12)
+    public static let byteOrder32Little = CGBitmapInfo(rawValue: 2 << 12)
+}
+
+public enum CGColorRenderingIntent { case defaultIntent }
+
 public final class CGImage {
     public let width: Int
     public let height: Int
     public init(width: Int = 0, height: Int = 0) {
+        self.width = width
+        self.height = height
+    }
+
+    /// The raw-bytes constructor. `TextureBaker` uses this to turn a baked
+    /// `[UInt8]` map into an image without going through a drawing context —
+    /// the maps are computed, not drawn, so there is nothing to draw them with.
+    public init?(width: Int, height: Int, bitsPerComponent: Int, bitsPerPixel: Int,
+                 bytesPerRow: Int, space: CGColorSpace, bitmapInfo: CGBitmapInfo,
+                 provider: CGDataProvider, decode: UnsafePointer<CGFloat>?,
+                 shouldInterpolate: Bool, intent: CGColorRenderingIntent) {
         self.width = width
         self.height = height
     }

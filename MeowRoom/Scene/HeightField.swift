@@ -217,12 +217,16 @@ struct HeightField {
         var out = [UInt8](repeating: 0, count: size * size * 4)
         for y in 0..<size {
             for x in 0..<size {
-                // Sobel, /8 to give the average slope per texel.
-                let tl = self[x - 1, y - 1], t = self[x, y - 1], tr = self[x + 1, y - 1]
-                let l = self[x - 1, y], r = self[x + 1, y]
-                let bl = self[x - 1, y + 1], b = self[x, y + 1], br = self[x + 1, y + 1]
-                let dx = ((tr + 2 * r + br) - (tl + 2 * l + bl)) / 8
-                let dy = ((bl + 2 * b + br) - (tl + 2 * t + tr)) / 8
+                // Central difference, not Sobel.
+                //
+                // Sobel averages across three rows, which is the right call for
+                // scanned or noisy height data and the wrong one here: this field
+                // is computed, so it has no noise to reject, and its finest
+                // features — a tatami cord about three texels wide, a single fur
+                // hair about one — are narrower than Sobel's kernel. Sobel turned
+                // the tatami weave into a 4.7° suggestion of a weave. This keeps it.
+                let dx = (self[x + 1, y] - self[x - 1, y]) * 0.5
+                let dy = (self[x, y + 1] - self[x, y - 1]) * 0.5
 
                 // The normal leans *against* the slope: uphill in +u tilts the
                 // normal toward -u. This is the sign the harness pins with a ramp.
@@ -276,6 +280,51 @@ struct HeightField {
     /// permanent half-step lean across every surface in the game — invisible on its
     /// own, and exactly the sort of bias that shows up as a mystery once it is
     /// multiplied by a low sun angle.
+    /// RMS gradient of the field, in height units per texel.
+    ///
+    /// The bridge between "how bumpy is this field" and "how strong will the map
+    /// look", and the reason the surfaces below are specified by angle rather than
+    /// by depth. Depth alone does not predict appearance: wood grain 0.12 mm deep
+    /// spread across a 3 mm line is a 2% slope, which is physically right and
+    /// completely invisible. Measured across the whole field, this is.
+    func rmsGradient() -> Float {
+        var sum: Float = 0
+        for y in 0..<size {
+            for x in 0..<size {
+                let dx = (self[x + 1, y] - self[x - 1, y]) * 0.5
+                let dy = (self[x, y + 1] - self[x, y - 1]) * 0.5
+                sum += dx * dx + dy * dy
+            }
+        }
+        return sqrtf(sum / Float(size * size))
+    }
+
+    /// The slope scale that makes this field bake to roughly `degrees` of RMS tilt.
+    ///
+    /// Solved rather than guessed, so a field can be reworked — more octaves, finer
+    /// grain, a different feature size — without silently changing how strong the
+    /// surface looks. The harness measures the achieved tilt and holds it to this.
+    func slopeScale(forRMSTilt degrees: Float) -> Float {
+        let g = rmsGradient()
+        guard g > 1e-6 else { return 0 }
+        return tanf(degrees * .pi / 180) / g
+    }
+
+    /// What the baked map actually achieves, measured the way a renderer sees it:
+    /// the RMS angle between each normal and straight out.
+    func measuredRMSTilt(slopeScale: Float) -> Float {
+        var sum: Float = 0
+        for y in 0..<size {
+            for x in 0..<size {
+                let dx = (self[x + 1, y] - self[x - 1, y]) * 0.5 * slopeScale
+                let dy = (self[x, y + 1] - self[x, y - 1]) * 0.5 * slopeScale
+                let a = atanf(sqrtf(dx * dx + dy * dy))
+                sum += a * a
+            }
+        }
+        return sqrtf(sum / Float(size * size)) * 180 / .pi
+    }
+
     private static func encode(_ v: Float) -> UInt8 {
         UInt8(min(max(((v * 0.5 + 0.5) * 255).rounded(), 0), 255))
     }
@@ -313,13 +362,13 @@ struct HeightField {
     }
 }
 
-/// The physical facts a normal map needs in order to be the right strength.
+/// Where a surface's texture sits in the real room.
 ///
-/// A height field is unitless — it says *where* the relief is, never *how deep*.
-/// Depth only becomes meaningful once you know how much of the world one texel
-/// covers, and that depends on the surface's real size and how many times the
-/// texture repeats across it. Getting this wrong is not subtle: the same weave
-/// baked without it looks like corduroy on the floor and like sandpaper on a cushion.
+/// Two jobs. It gates resolution — a surface needs enough texels per metre of wall
+/// or floor to survive being looked at. And it converts between the slope the map
+/// is baked at and the physical depth that implies, so a surface can be checked
+/// for plausibility: tatami rush stands about a millimetre proud, plaster tooth a
+/// fifth of that, and anything claiming a centimetre is wrong.
 struct SurfaceRelief {
     /// The largest dimension of the surface in metres, from `RoomLayout`.
     var surfaceMetres: Float
@@ -327,22 +376,20 @@ struct SurfaceRelief {
     var tile: Float
     /// Texels across one repeat.
     var mapSize: Int
-    /// Peak-to-trough depth of the relief, in metres. Tatami rush is about a
-    /// millimetre; plaster tooth is a fifth of that; wood grain less again.
-    var reliefMetres: Float
 
     /// Metres of surface covered by one texel.
     var texelMetres: Float {
         surfaceMetres / max(1e-6, tile * Float(mapSize))
     }
 
-    /// What `HeightField.normalMap` wants: rise over run, both in metres.
-    var slopeScale: Float {
-        reliefMetres / max(1e-9, texelMetres)
+    /// The depth a given slope scale corresponds to, in metres. Derived rather than
+    /// authored: depth is the consequence, appearance is the control.
+    func reliefMetres(slopeScale: Float) -> Float {
+        slopeScale * texelMetres
     }
 
-    /// Texels per metre of real surface. The plan's resolution gate: below about
-    /// 256 px/m a surface reads as blurred once the camera is anywhere near it.
+    /// Texels per metre of real surface. Below about 256 px/m a surface in frame
+    /// reads as blurred once the camera is anywhere near it.
     var texelsPerMetre: Float {
         Float(mapSize) * tile / max(1e-6, surfaceMetres)
     }

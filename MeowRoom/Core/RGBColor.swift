@@ -31,6 +31,18 @@ struct RGBColor: Codable, Equatable, Hashable {
     /// Perceptual-ish luminance.
     var luminance: Float { 0.2126 * r + 0.7152 * g + 0.0722 * b }
 
+    /// Short, stable identity for cache keys.
+    ///
+    /// `TextureFactory.wood`, `.fabric` and `.ceramic` all take a colour *and* a
+    /// name, and used to key on the name alone — two calls with the same name and
+    /// different colours silently handed back the first one's texture. Nothing in
+    /// the room triggers that today, but it is the kind of bug that only appears
+    /// once someone adds a second cushion.
+    var hexKey: String {
+        String(format: "%02X%02X%02X",
+               Int((r * 255).rounded()), Int((g * 255).rounded()), Int((b * 255).rounded()))
+    }
+
     func lightened(_ amount: Float) -> RGBColor {
         RGBColor(mix(r, 1, amount), mix(g, 1, amount), mix(b, 1, amount))
     }

@@ -490,3 +490,79 @@ func runRender(outputDirectory: String) {
                      label as NSString, b.minY, b.maxY, b.minX, b.maxX, fraction * 100, hudTop))
     }
 }
+
+// MARK: - Material map inspection
+
+/// Writes every surface's height, normal, roughness and occlusion map as PNGs.
+///
+/// The material work has no other eyes on it: CI is unavailable, and Core Graphics
+/// is a no-op in the shim, so the *colour* textures cannot be inspected here at all.
+/// The relief can, because it is plain arithmetic over `[Float]`, and looking at it
+/// is how "the tatami has a weave" gets separated from "the tatami has noise".
+///
+/// Each map is written at its own resolution, tiled 2×2, so seams show up. A map
+/// that does not tile announces itself immediately as a cross through the middle.
+func runMapDump(outputDirectory: String) {
+    let fm = FileManager.default
+    try? fm.createDirectory(atPath: outputDirectory, withIntermediateDirectories: true)
+
+    func write(_ rgba: [UInt8], size: Int, name: String) {
+        // Tile 2×2 so the seam runs down the middle of the image, where it is
+        // obvious, rather than around the outside where it is not.
+        let w = size * 2
+        var rgb = [UInt8](repeating: 0, count: w * w * 3)
+        for y in 0..<w {
+            for x in 0..<w {
+                let src = ((y % size) * size + (x % size)) * 4
+                let dst = (y * w + x) * 3
+                rgb[dst] = rgba[src]
+                rgb[dst + 1] = rgba[src + 1]
+                rgb[dst + 2] = rgba[src + 2]
+            }
+        }
+        let path = "\(outputDirectory)/\(name).png"
+        writePNG(rgb, width: w, height: w, to: path)
+        print("  \(name).png  \(w)×\(w)")
+    }
+
+    func heightBytes(_ f: HeightField) -> [UInt8] {
+        var out = [UInt8](repeating: 255, count: f.size * f.size * 4)
+        for i in 0..<(f.size * f.size) {
+            let g = UInt8(min(max(f.samples[i] * 255, 0), 255))
+            out[i * 4] = g; out[i * 4 + 1] = g; out[i * 4 + 2] = g
+        }
+        return out
+    }
+
+    var specs: [(String, SurfaceMaps.Spec)] = [
+        ("tatami", SurfaceMaps.tatami()),
+        ("wood", SurfaceMaps.wood()),
+        ("plaster", SurfaceMaps.plaster()),
+        ("shoji", SurfaceMaps.shojiPaper()),
+        ("fabric", SurfaceMaps.fabric()),
+        ("futon", SurfaceMaps.futonCover()),
+        ("sisal", SurfaceMaps.sisal()),
+        ("litter", SurfaceMaps.litterSubstrate()),
+    ]
+    var cat = BreedPresets.appearance(for: .domesticShorthair)
+    cat.seed = 4242
+    specs.append(("coat-shorthair", SurfaceMaps.catCoat(cat, size: 512)))
+    var persian = BreedPresets.appearance(for: .persian)
+    persian.seed = 4242
+    specs.append(("coat-persian", SurfaceMaps.catCoat(persian, size: 512)))
+
+    for (name, spec) in specs {
+        let f = spec.field
+        write(heightBytes(f), size: f.size, name: "\(name)-height")
+        write(f.normalMap(slopeScale: spec.slopeScale), size: f.size, name: "\(name)-normal")
+        write(f.roughnessMap(base: spec.roughnessBase, variation: spec.roughnessVariation),
+              size: f.size, name: "\(name)-roughness")
+        write(f.occlusionMap(radius: spec.occlusionRadius, strength: spec.occlusionStrength),
+              size: f.size, name: "\(name)-occlusion")
+
+        print(String(format: "  %@: %d px/m, tilt %.1f° (asked %.1f°), relief %.2f mm",
+                     name as NSString, Int(spec.relief.texelsPerMetre),
+                     f.measuredRMSTilt(slopeScale: spec.slopeScale), spec.tiltDegrees,
+                     spec.reliefMetres * 1000))
+    }
+}

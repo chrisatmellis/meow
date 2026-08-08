@@ -4,23 +4,42 @@ import UIKit
 
 enum Materials {
 
+    /// - Parameter maps: normal, roughness and occlusion for this surface. Passing
+    ///   them replaces the flat `roughness` scalar, which is the whole point — a
+    ///   single number cannot say that the raised cords of a tatami mat are polished
+    ///   and the gaps between them are not.
     static func pbr(diffuse: Any,
                     roughness: Float = 0.8,
                     metalness: Float = 0.0,
                     tile: (Float, Float)? = nil,
-                    doubleSided: Bool = false) -> SCNMaterial {
+                    doubleSided: Bool = false,
+                    maps: TextureFactory.MapSet? = nil) -> SCNMaterial {
         let m = SCNMaterial()
         m.lightingModel = .physicallyBased
         m.diffuse.contents = diffuse
         m.roughness.contents = NSNumber(value: roughness)
         m.metalness.contents = NSNumber(value: metalness)
         m.isDoubleSided = doubleSided
+
+        if let maps = maps {
+            if let n = maps.normal { m.normal.contents = n }
+            if let r = maps.roughness { m.roughness.contents = r }
+            if let o = maps.occlusion { m.ambientOcclusion.contents = o }
+        }
+
         if let (u, v) = tile {
-            for prop in [m.diffuse, m.roughness, m.metalness, m.emission, m.normal] {
+            // Every channel has to tile by the same amount. Only `diffuse` used to
+            // get the transform, which was harmless while it was the only textured
+            // channel and is not harmless now: a normal map left untiled would
+            // stretch one repeat of the relief across all four of the albedo's, and
+            // the floor would light as though the weave ran at a different pitch to
+            // the weave you can see.
+            for prop in [m.diffuse, m.roughness, m.metalness, m.emission,
+                         m.normal, m.ambientOcclusion] {
                 prop.wrapS = .repeat
                 prop.wrapT = .repeat
+                prop.contentsTransform = SCNMatrix4MakeScale(u, v, 1)
             }
-            m.diffuse.contentsTransform = SCNMatrix4MakeScale(u, v, 1)
         }
         return m
     }
@@ -31,9 +50,14 @@ enum Materials {
         let tex = preview ? TextureFactory.catCoatPreview(a) : TextureFactory.catCoat(a)
         let m = pbr(diffuse: tex,
                     roughness: a.hairless ? 0.42 : (0.95 - 0.45 * a.furGloss),
-                    metalness: 0.0)
-        // A hint of sheen so light rakes across the coat.
-        m.specular.contents = UIColor(white: CGFloat(0.15 + 0.35 * a.furGloss), alpha: 1)
+                    metalness: 0.0,
+                    maps: TextureFactory.catCoatMaps(a, preview: preview))
+        // The sheen that used to be attempted here with `m.specular` is now real:
+        // `specular` is ignored entirely under physically-based lighting, so that
+        // line did nothing at all. Gloss is carried by the coat's roughness map,
+        // which varies along each hair, so light rakes across the fur instead of
+        // washing the whole cat evenly.
+        //
         // Warm sub-surface-ish bounce on thin fur, especially on the ears.
         m.emission.contents = UIColor(a.baseCoat.mixed(with: RGBColor(1, 0.7, 0.6), 0.5), alpha: 1)
         m.emission.intensity = CGFloat(a.hairless ? 0.035 : 0.02)
@@ -93,35 +117,42 @@ enum Materials {
     // MARK: - Room surfaces
 
     static func tatami() -> SCNMaterial {
-        pbr(diffuse: TextureFactory.tatami(), roughness: 0.92, metalness: 0, tile: (4, 4))
+        pbr(diffuse: TextureFactory.tatami(), roughness: 0.92, metalness: 0, tile: (8, 8),
+            maps: TextureFactory.tatamiMaps())
     }
 
     static func tatamiBorder() -> SCNMaterial {
-        pbr(diffuse: TextureFactory.tatamiBorder(), roughness: 0.85, metalness: 0, tile: (6, 1))
+        pbr(diffuse: TextureFactory.tatamiBorder(), roughness: 0.85, metalness: 0, tile: (6, 1),
+            maps: TextureFactory.tatamiBorderMaps())
     }
 
     static func darkWood() -> SCNMaterial {
         pbr(diffuse: TextureFactory.wood(base: RGBColor(hex: 0x4A3524), key: "dark"),
-            roughness: 0.55, metalness: 0, tile: (2, 2))
+            roughness: 0.55, metalness: 0, tile: (2, 2),
+            maps: TextureFactory.woodMaps(key: "dark"))
     }
 
     static func lightWood() -> SCNMaterial {
         pbr(diffuse: TextureFactory.wood(base: RGBColor(hex: 0xB08A5C), key: "light"),
-            roughness: 0.62, metalness: 0, tile: (2, 2))
+            roughness: 0.62, metalness: 0, tile: (2, 2),
+            maps: TextureFactory.woodMaps(key: "light"))
     }
 
     static func hinoki() -> SCNMaterial {
         pbr(diffuse: TextureFactory.wood(base: RGBColor(hex: 0xD9C39A), key: "hinoki"),
-            roughness: 0.70, metalness: 0, tile: (1, 3))
+            roughness: 0.70, metalness: 0, tile: (1, 3),
+            maps: TextureFactory.woodMaps(key: "hinoki"))
     }
 
     static func plaster() -> SCNMaterial {
-        pbr(diffuse: TextureFactory.plaster(), roughness: 0.96, metalness: 0, tile: (3, 2))
+        pbr(diffuse: TextureFactory.plaster(), roughness: 0.96, metalness: 0, tile: (3, 2),
+            maps: TextureFactory.plasterMaps())
     }
 
     /// Shoji paper: lit from behind, so its emission is driven by the outdoor light.
     static func shoji() -> SCNMaterial {
-        let m = pbr(diffuse: TextureFactory.shojiPaper(), roughness: 0.9, metalness: 0, tile: (2, 3))
+        let m = pbr(diffuse: TextureFactory.shojiPaper(), roughness: 0.9, metalness: 0, tile: (2, 3),
+                    maps: TextureFactory.shojiMaps())
         m.emission.contents = UIColor(white: 1, alpha: 1)
         m.emission.intensity = 0.15
         m.isDoubleSided = true
@@ -129,19 +160,23 @@ enum Materials {
     }
 
     static func futon() -> SCNMaterial {
-        pbr(diffuse: TextureFactory.futonCover(), roughness: 0.95, metalness: 0, tile: (2, 3))
+        pbr(diffuse: TextureFactory.futonCover(), roughness: 0.95, metalness: 0, tile: (2, 3),
+            maps: TextureFactory.futonMaps())
     }
 
     static func linen(_ color: RGBColor, key: String) -> SCNMaterial {
-        pbr(diffuse: TextureFactory.fabric(color, key: key), roughness: 0.95, metalness: 0, tile: (3, 3))
+        pbr(diffuse: TextureFactory.fabric(color, key: key), roughness: 0.95, metalness: 0, tile: (3, 3),
+            maps: TextureFactory.fabricMaps(key: key))
     }
 
     static func sisal() -> SCNMaterial {
-        pbr(diffuse: TextureFactory.sisal(), roughness: 0.98, metalness: 0, tile: (2, 6))
+        pbr(diffuse: TextureFactory.sisal(), roughness: 0.98, metalness: 0, tile: (2, 6),
+            maps: TextureFactory.sisalMaps())
     }
 
     static func litter() -> SCNMaterial {
-        pbr(diffuse: TextureFactory.litterSubstrate(), roughness: 1.0, metalness: 0, tile: (2, 2))
+        pbr(diffuse: TextureFactory.litterSubstrate(), roughness: 1.0, metalness: 0, tile: (2, 2),
+            maps: TextureFactory.litterMaps())
     }
 
     static func scroll() -> SCNMaterial {
@@ -178,7 +213,8 @@ enum Materials {
     }
 
     static func lanternPaper() -> SCNMaterial {
-        let m = pbr(diffuse: TextureFactory.shojiPaper(), roughness: 0.9, metalness: 0)
+        let m = pbr(diffuse: TextureFactory.shojiPaper(), roughness: 0.9, metalness: 0,
+                    maps: TextureFactory.shojiMaps())
         m.emission.contents = UIColor(red: 1.0, green: 0.86, blue: 0.62, alpha: 1)
         m.emission.intensity = 0.0
         m.isDoubleSided = true

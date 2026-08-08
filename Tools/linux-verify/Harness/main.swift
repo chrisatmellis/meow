@@ -30,6 +30,12 @@ if let i = CommandLine.arguments.firstIndex(of: "--emit-save") {
     exit(1)
 }
 
+if let i = CommandLine.arguments.firstIndex(of: "--maps") {
+    let dir = CommandLine.arguments.count > i + 1 ? CommandLine.arguments[i + 1] : "./maps"
+    runMapDump(outputDirectory: dir)
+    exit(0)
+}
+
 if let i = CommandLine.arguments.firstIndex(of: "--render") {
     let dir = CommandLine.arguments.count > i + 1 ? CommandLine.arguments[i + 1] : "./renders"
     runRender(outputDirectory: dir)
@@ -1011,23 +1017,37 @@ section("height fields") {
         expect(abs(shifted - same) < 1e-6, "tileable noise repeats at exactly its period")
     }
 
-    // Physical scaling. The same field on two differently-tiled surfaces must not
-    // bake to the same slope, or the denser tiling comes out flattened.
+    // Solving for tilt. This is the control the whole material library is authored
+    // against, so it has to be accurate over the range of fields in use — from a
+    // near-smooth sheet of paper to gravel.
     do {
-        let coarse = SurfaceRelief(surfaceMetres: 3.6, tile: 2, mapSize: 512, reliefMetres: 0.0010)
-        let dense = SurfaceRelief(surfaceMetres: 3.6, tile: 6, mapSize: 512, reliefMetres: 0.0010)
-        expect(dense.slopeScale > coarse.slopeScale * 2.9,
-               "tiling a texture more densely steepens its slopes proportionally")
-        expect(coarse.texelsPerMetre > 256, "the tatami-sized case clears the density floor")
+        for cells in [4, 16, 64] {
+            for target in [Float(2), 6, 12, 20] {
+                var f = HeightField(size: 96, fill: 0.5)
+                f.addNoise(seed: UInt64(cells) &* 31 &+ 7, cells: cells, octaves: 3, amplitude: 0.4)
+                f.normalize()
+                let s = f.slopeScale(forRMSTilt: target)
+                let got = f.measuredRMSTilt(slopeScale: s)
+                expect(abs(got - target) < max(0.5, target * 0.1),
+                       "asking \(cells)-cell noise for \(target)° gives \(got)°")
+            }
+        }
+        // A flat field cannot be tilted, and must not try to divide its way there.
+        let flat = HeightField(size: 16, fill: 0.5)
+        expect(flat.slopeScale(forRMSTilt: 10) == 0, "a flat field solves to zero slope, not infinity")
+    }
 
-        let thin = SurfaceRelief(surfaceMetres: 3.6, tile: 2, mapSize: 512, reliefMetres: 0.0002)
-        expect(thin.slopeScale < coarse.slopeScale,
-               "shallower relief bakes to gentler slopes at the same tiling")
-
-        // Sanity on the units: one texel of the coarse floor is about 3.5 mm, and a
-        // 1 mm rush cord across it is a slope of roughly 0.28.
+    // Physical scaling. The same map on two differently-tiled surfaces implies
+    // different real depths — a texture repeated more often covers less ground.
+    do {
+        let coarse = SurfaceRelief(surfaceMetres: 3.6, tile: 2, mapSize: 512)
+        let dense = SurfaceRelief(surfaceMetres: 3.6, tile: 6, mapSize: 512)
         expect(abs(coarse.texelMetres - 3.6 / 1024) < 1e-6, "texel size is metres per repeat per texel")
-        expect(coarse.slopeScale > 0.2 && coarse.slopeScale < 0.4, "tatami slope lands near 0.28")
+        expect(dense.reliefMetres(slopeScale: 0.3) < coarse.reliefMetres(slopeScale: 0.3) / 2.9,
+               "the same slope on a more densely tiled surface is shallower relief")
+        expect(coarse.texelsPerMetre > 256, "the tatami-sized case clears the density floor")
+        expect(abs(coarse.reliefMetres(slopeScale: 0.28) - 0.28 * 3.6 / 1024) < 1e-9,
+               "relief is slope times texel size")
     }
 
     // Flat stays flat, and does not divide by zero on the way.
@@ -1080,6 +1100,152 @@ section("height fields") {
                "negative variation makes the peaks the rough ones")
         expect(r.allSatisfy { $0 <= 255 }, "roughness stays in range")
     }
+}
+
+section("surface maps") {
+
+    func decode(_ b: UInt8) -> Float { Float(b) / 255 * 2 - 1 }
+
+    // name, spec, the size TextureFactory declares for it, and whether it is a
+    // large surface that the player is looking straight at.
+    let surfaces: [(String, SurfaceMaps.Spec, Int, Bool)] = [
+        ("tatami", SurfaceMaps.tatami(), 512, true),
+        ("tatamiBorder", SurfaceMaps.tatamiBorder(), 128, false),
+        ("wood", SurfaceMaps.wood(), 512, true),
+        ("hinoki", SurfaceMaps.hinoki(), 512, true),
+        ("plaster", SurfaceMaps.plaster(), 512, true),
+        ("shoji", SurfaceMaps.shojiPaper(), 512, true),
+        ("fabric", SurfaceMaps.fabric(), 256, true),
+        ("futon", SurfaceMaps.futonCover(), 256, true),
+        ("sisal", SurfaceMaps.sisal(), 256, false),
+        ("litter", SurfaceMaps.litterSubstrate(), 256, false),
+    ]
+
+    for (name, spec, declaredSize, inFrame) in surfaces {
+        // The size TextureFactory budgets for must be the size actually produced,
+        // or the cache accounting is a fiction.
+        expect(spec.field.size == declaredSize,
+               "\(name) is \(spec.field.size)², but TextureFactory budgets \(declaredSize)²")
+        expect(spec.relief.mapSize == spec.field.size,
+               "\(name) relief map size agrees with its field")
+
+        expect(spec.field.samples.allSatisfy { $0.isFinite && $0 >= -0.001 && $0 <= 1.001 },
+               "\(name) is normalized into 0...1 and finite")
+
+        // Texel density, from the room's real dimensions. Below ~150 px/m a
+        // surface reads as mush; the big surfaces need considerably better.
+        expect(spec.relief.texelsPerMetre >= 150,
+               "\(name) resolves at \(Int(spec.relief.texelsPerMetre)) px/m, under the 150 floor")
+        if inFrame {
+            expect(spec.relief.texelsPerMetre >= 256,
+                   "\(name) is a surface in frame and resolves at only \(Int(spec.relief.texelsPerMetre)) px/m")
+        }
+
+        // The tilt asked for is the tilt achieved. Without this, reworking a
+        // field's structure quietly changes how strong its surface looks.
+        let measured = spec.field.measuredRMSTilt(slopeScale: spec.slopeScale)
+        expect(abs(measured - spec.tiltDegrees) < max(0.6, spec.tiltDegrees * 0.12),
+               "\(name) asked for \(spec.tiltDegrees)° of tilt and bakes to \(measured)°")
+
+        // Physical plausibility, derived from the slope rather than authored, and
+        // bounded per material rather than by one loose global band. This is the
+        // check that keeps the tilt targets from turning plaster into stucco: if a
+        // surface cannot hit its angle inside its real depth, its features are too
+        // broad and the field needs tightening, not the number.
+        let mm = spec.reliefMetres * 1000
+        expect(spec.plausibleMillimetres.contains(mm),
+               "\(name) implies \(mm) mm of relief, outside \(spec.plausibleMillimetres) for that material")
+
+        // The baked normals must describe a surface, not a cliff face.
+        let map = spec.field.normalMap(slopeScale: spec.slopeScale)
+        var minZ: Float = 1
+        var sumZ: Float = 0
+        var unit = true
+        let texels = spec.field.size * spec.field.size
+        for i in 0..<texels {
+            let x = decode(map[i * 4 + 0]), y = decode(map[i * 4 + 1]), z = decode(map[i * 4 + 2])
+            if abs(sqrtf(x * x + y * y + z * z) - 1) > 0.01 { unit = false }
+            minZ = min(minZ, z)
+            sumZ += z
+        }
+        expect(unit, "\(name) bakes unit normals")
+        expect(minZ > 0.20, "\(name) has a normal leaning past 78 degrees — relief is too steep")
+        expect(sumZ / Float(texels) > 0.80,
+               "\(name) averages \(sumZ / Float(texels)) out of the surface — relief is too strong overall")
+
+        let rough = spec.field.roughnessMap(base: spec.roughnessBase, variation: spec.roughnessVariation)
+        expect(rough.count == texels * 4, "\(name) roughness map is the right size")
+        let ao = spec.field.occlusionMap(radius: spec.occlusionRadius, strength: spec.occlusionStrength)
+        var anyOccluded = false
+        for i in 0..<texels where ao[i * 4] < 250 { anyOccluded = true; break }
+        expect(anyOccluded || name == "tatamiBorder",
+               "\(name) has some cavity occlusion — a map of solid white is doing nothing")
+    }
+
+    // The coat follows the cat, so check it across the range of cats.
+    for breed in CatBreed.allCases {
+        var a = BreedPresets.appearance(for: breed)
+        a.seed = 4242
+        let spec = SurfaceMaps.catCoat(a, size: 256)
+        expect(spec.field.size == 256, "\(breed.rawValue) coat field is the size asked for")
+        expect(spec.field.samples.allSatisfy { $0.isFinite }, "\(breed.rawValue) coat relief is finite")
+        expect(spec.relief.texelsPerMetre >= 256,
+               "\(breed.rawValue) coat resolves at \(Int(spec.relief.texelsPerMetre)) px/m")
+        let map = spec.field.normalMap(slopeScale: spec.slopeScale)
+        var minZ: Float = 1
+        for i in 0..<(256 * 256) { minZ = min(minZ, decode(map[i * 4 + 2])) }
+        expect(minZ > 0.20, "\(breed.rawValue) fur relief stays inside 78 degrees")
+        expect(spec.roughnessBase >= 0 && spec.roughnessBase <= 1,
+               "\(breed.rawValue) coat roughness is in range")
+        let mm = spec.reliefMetres * 1000
+        expect(spec.plausibleMillimetres.contains(mm),
+               "\(breed.rawValue) coat implies \(mm) mm of fur relief, outside \(spec.plausibleMillimetres)")
+    }
+
+    // A long-haired cat must get more relief than a short-haired one, or the whole
+    // furLength axis of the character creator does nothing to how the cat lights.
+    var shortHair = BreedPresets.appearance(for: .domesticShorthair)
+    shortHair.seed = 1
+    var longHair = shortHair
+    longHair.furLength = 1
+    expect(SurfaceMaps.catCoat(longHair, size: 128).tiltDegrees >
+           SurfaceMaps.catCoat(shortHair, size: 128).tiltDegrees * 1.5,
+           "long fur reads as deeper relief than short fur")
+}
+
+section("texture cache") {
+    TextureFactory.clearCache()
+    expect(TextureFactory.cacheBytes == 0, "a cleared cache accounts for nothing")
+
+    _ = TextureFactory.tatami()
+    let afterOne = TextureFactory.cacheBytes
+    expect(afterOne == TextureFactory.textureBytes(512),
+           "a 512² texture costs 512² × 4 bytes, not one slot")
+    _ = TextureFactory.tatami()
+    expect(TextureFactory.cacheBytes == afterOne, "a second call is a hit, not a second entry")
+
+    // The collision the old keys allowed: same name, different colour.
+    _ = TextureFactory.wood(base: RGBColor(hex: 0x4A3524), key: "dark")
+    _ = TextureFactory.wood(base: RGBColor(hex: 0xB08A5C), key: "dark")
+    expect(TextureFactory.cacheCount == 3,
+           "two woods with the same name and different bases are two textures")
+
+    // Pinning: a night of sky transitions must not cost the room its floor.
+    TextureFactory.clearCache()
+    _ = TextureFactory.tatami()
+    _ = TextureFactory.plaster()
+    let pinnedKeys = ["tatami", "plaster"]
+    let start = Date(timeIntervalSince1970: 1_700_000_000)
+    for h in 0..<48 {
+        let sky = WorldClock.sky(at: start.addingTimeInterval(Double(h) * 1800))
+        _ = TextureFactory.gardenBackdrop(sky: sky)
+        _ = TextureFactory.skyEnvironment(sky: sky)
+    }
+    for key in pinnedKeys {
+        expect(TextureFactory.cacheContains(key), "\(key) survives a 48-hour sky sweep")
+    }
+    expect(TextureFactory.cacheBytes <= TextureFactory.byteBudget,
+           "the cache stays inside its byte budget")
 }
 
 // MARK: - Report

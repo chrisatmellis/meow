@@ -6,27 +6,104 @@ import CoreGraphics
 /// Results are cached because the room is rebuilt whenever the player edits the cat.
 enum TextureFactory {
 
-    private static var cache: [String: UIImage] = [:]
+    private struct Entry {
+        let image: UIImage
+        let bytes: Int
+        let pinned: Bool
+        var lastUsed: UInt64
+    }
+
+    private static var cache: [String: Entry] = [:]
     private static let cacheLock = NSLock()
+    private static var clock: UInt64 = 0
+    private static var bytesUsed = 0
 
-    /// Editing the cat generates a new coat texture each time, so the cache is
-    /// bounded: past the limit it is dropped wholesale and refilled on demand.
-    private static let cacheLimit = 48
+    /// Budgeted in bytes, not entries.
+    ///
+    /// This used to be a flat count of 48 that dropped everything at once. That was
+    /// wrong in both directions: the static room alone uses about thirty slots, and
+    /// the day/night `garden-*` and `env-*` buckets pushed past the limit on their
+    /// own, so every few hours the whole cache was wiped and the 1024² coat was
+    /// redrawn from scratch — a visible hitch, caused by bookkeeping. Counting
+    /// entries also treats a 128² border swatch and a 1024² coat as equally
+    /// expensive, when one is 64 KB and the other is 4 MB.
+    ///
+    /// Now that every surface carries a normal, roughness and occlusion map as well
+    /// as its colour, the total is roughly four times what it was, which is why this
+    /// had to be fixed before the material work rather than after it.
+    static var byteBudget: Int {
+        switch RenderQuality.tier {
+        case .high: return 160 << 20
+        case .medium: return 96 << 20
+        case .low: return 48 << 20
+        }
+    }
 
-    private static func cached(_ key: String, _ make: () -> UIImage) -> UIImage {
+    /// - Parameter pinned: for surfaces that exist for the whole session and are
+    ///   expensive to rebuild — the room's own materials. Pinned entries are never
+    ///   evicted, so a long night of sky transitions cannot cost the floor its maps.
+    private static func cached(_ key: String, bytes: Int = 0, pinned: Bool = false,
+                               _ make: () -> UIImage) -> UIImage {
         cacheLock.lock()
-        if let hit = cache[key] { cacheLock.unlock(); return hit }
+        clock &+= 1
+        if var hit = cache[key] {
+            hit.lastUsed = clock
+            cache[key] = hit
+            cacheLock.unlock()
+            return hit.image
+        }
         cacheLock.unlock()
+
         let img = make()
+
         cacheLock.lock()
-        if cache.count >= cacheLimit { cache.removeAll(keepingCapacity: true) }
-        cache[key] = img
+        clock &+= 1
+        // Re-check: another thread may have made the same texture while we were
+        // drawing. Keep whichever is already installed so callers never hold two.
+        if let hit = cache[key] { cacheLock.unlock(); return hit.image }
+        cache[key] = Entry(image: img, bytes: max(bytes, 4096), pinned: pinned, lastUsed: clock)
+        bytesUsed += max(bytes, 4096)
+        evictIfNeeded()
         cacheLock.unlock()
         return img
     }
 
+    /// Least-recently-used, skipping pinned entries. Caller holds the lock.
+    private static func evictIfNeeded() {
+        let budget = byteBudget
+        guard bytesUsed > budget else { return }
+        let evictable = cache.filter { !$0.value.pinned }.sorted { $0.value.lastUsed < $1.value.lastUsed }
+        for (key, entry) in evictable {
+            cache.removeValue(forKey: key)
+            bytesUsed -= entry.bytes
+            if bytesUsed <= budget { return }
+        }
+    }
+
+    /// Bytes an RGBA8 texture of this edge length occupies.
+    static func textureBytes(_ size: Int) -> Int { size * size * 4 }
+
     static func clearCache() {
-        cacheLock.lock(); cache.removeAll(); cacheLock.unlock()
+        cacheLock.lock()
+        cache.removeAll()
+        bytesUsed = 0
+        cacheLock.unlock()
+    }
+
+    /// Test and diagnostic access to the cache's accounting.
+    static var cacheBytes: Int {
+        cacheLock.lock(); defer { cacheLock.unlock() }
+        return bytesUsed
+    }
+
+    static var cacheCount: Int {
+        cacheLock.lock(); defer { cacheLock.unlock() }
+        return cache.count
+    }
+
+    static func cacheContains(_ key: String) -> Bool {
+        cacheLock.lock(); defer { cacheLock.unlock() }
+        return cache[key] != nil
     }
 
     private static func render(_ size: Int, _ body: (CGContext, CGFloat) -> Void) -> UIImage {
@@ -55,13 +132,13 @@ enum TextureFactory {
 
     static func catCoat(_ a: CatAppearance) -> UIImage {
         let key = "coat-\(coatKey(a))"
-        return cached(key) { drawCoat(a, size: 1024) }
+        return cached(key, bytes: textureBytes(1024)) { drawCoat(a, size: 1024) }
     }
 
     /// Small, cheap version used by the live preview in the character creator.
     static func catCoatPreview(_ a: CatAppearance) -> UIImage {
         let key = "coatP-\(coatKey(a))"
-        return cached(key) { drawCoat(a, size: 512) }
+        return cached(key, bytes: textureBytes(512)) { drawCoat(a, size: 512) }
     }
 
     private static func coatKey(_ a: CatAppearance) -> String {
@@ -368,7 +445,7 @@ enum TextureFactory {
     /// Soft-edged alpha mask used for the long-fur shell layers.
     static func furShellMask(_ a: CatAppearance) -> UIImage {
         let key = "furshell-\(a.seed)-\(Int(a.furDensity * 20))-\(Int(a.furCoarseness * 20))"
-        return cached(key) {
+        return cached(key, bytes: textureBytes(512)) {
             renderAlpha(512) { ctx, s in
                 ctx.clear(CGRect(x: 0, y: 0, width: s, height: s))
                 var rng = SeededGenerator(seed: a.seed &+ 991)
@@ -389,7 +466,7 @@ enum TextureFactory {
     static func iris(color: RGBColor, pupil: PupilShape, dilation: Float, brightness: Float) -> UIImage {
         let key = String(format: "iris-%.3f,%.3f,%.3f-%@-%.2f-%.2f", color.r, color.g, color.b,
                          pupil.rawValue, dilation, brightness)
-        return cached(key) {
+        return cached(key, bytes: textureBytes(256)) {
             render(256) { ctx, s in
                 let c = CGPoint(x: s / 2, y: s / 2)
                 // Sclera ring (barely visible on a cat, but it catches light).
@@ -461,14 +538,17 @@ enum TextureFactory {
     // MARK: - Room surfaces
 
     static func tatami() -> UIImage {
-        cached("tatami") {
+        cached("tatami", bytes: textureBytes(512), pinned: true) {
             render(512) { ctx, s in
                 let straw = RGBColor(hex: 0xC9B383)
                 ctx.setFillColor(UIColor(straw).cgColor)
                 ctx.fill(CGRect(x: 0, y: 0, width: s, height: s))
                 var rng = SeededGenerator(seed: 12)
                 // Woven rush: fine horizontal reeds with slight colour drift.
-                let reeds = 150
+                // 75 per repeat at a tile factor of 8 — the same cord pitch on the
+                // floor as 150 at 4, with twice the texels per cord for the relief
+                // pass in SurfaceMaps to resolve.
+                let reeds = 75
                 for i in 0..<reeds {
                     let y = CGFloat(i) / CGFloat(reeds) * s
                     let h = s / CGFloat(reeds)
@@ -480,8 +560,8 @@ enum TextureFactory {
                 // Cross-weave shadow lines.
                 ctx.setStrokeColor(UIColor(straw.darkened(0.30), alpha: 0.30).cgColor)
                 ctx.setLineWidth(1)
-                for i in 0..<64 {
-                    let x = CGFloat(i) / 64 * s
+                for i in 0..<32 {
+                    let x = CGFloat(i) / 32 * s
                     ctx.move(to: CGPoint(x: x, y: 0))
                     ctx.addLine(to: CGPoint(x: x, y: s))
                 }
@@ -498,7 +578,7 @@ enum TextureFactory {
     }
 
     static func tatamiBorder() -> UIImage {
-        cached("tatamiBorder") {
+        cached("tatamiBorder", bytes: textureBytes(128), pinned: true) {
             render(128) { ctx, s in
                 let cloth = RGBColor(hex: 0x2E3A46)
                 ctx.setFillColor(UIColor(cloth).cgColor)
@@ -516,7 +596,7 @@ enum TextureFactory {
     }
 
     static func wood(base: RGBColor, grain: Float = 1.0, key: String) -> UIImage {
-        cached("wood-\(key)") {
+        cached("wood-\(key)-\(base.hexKey)-\(Int(grain * 100))", bytes: textureBytes(512), pinned: true) {
             render(512) { ctx, s in
                 ctx.setFillColor(UIColor(base).cgColor)
                 ctx.fill(CGRect(x: 0, y: 0, width: s, height: s))
@@ -555,7 +635,7 @@ enum TextureFactory {
     }
 
     static func shojiPaper() -> UIImage {
-        cached("shoji") {
+        cached("shoji", bytes: textureBytes(512), pinned: true) {
             render(512) { ctx, s in
                 ctx.setFillColor(UIColor(RGBColor(hex: 0xF2EADA)).cgColor)
                 ctx.fill(CGRect(x: 0, y: 0, width: s, height: s))
@@ -578,7 +658,7 @@ enum TextureFactory {
     }
 
     static func plaster() -> UIImage {
-        cached("plaster") {
+        cached("plaster", bytes: textureBytes(512), pinned: true) {
             render(512) { ctx, s in
                 let base = RGBColor(hex: 0xD6CBB6)
                 ctx.setFillColor(UIColor(base).cgColor)
@@ -599,7 +679,7 @@ enum TextureFactory {
     }
 
     static func fabric(_ color: RGBColor, key: String, weave: Float = 1) -> UIImage {
-        cached("fabric-\(key)") {
+        cached("fabric-\(key)-\(color.hexKey)-\(Int(weave * 100))", bytes: textureBytes(256), pinned: true) {
             render(256) { ctx, s in
                 ctx.setFillColor(UIColor(color).cgColor)
                 ctx.fill(CGRect(x: 0, y: 0, width: s, height: s))
@@ -625,7 +705,7 @@ enum TextureFactory {
 
     /// Indigo shibori-dyed futon cover.
     static func futonCover() -> UIImage {
-        cached("futon") {
+        cached("futon", bytes: textureBytes(512), pinned: true) {
             render(512) { ctx, s in
                 let indigo = RGBColor(hex: 0x2B4B6F)
                 ctx.setFillColor(UIColor(indigo).cgColor)
@@ -660,7 +740,7 @@ enum TextureFactory {
     }
 
     static func sisal() -> UIImage {
-        cached("sisal") {
+        cached("sisal", bytes: textureBytes(256), pinned: true) {
             render(256) { ctx, s in
                 let rope = RGBColor(hex: 0xC2A878)
                 ctx.setFillColor(UIColor(rope).cgColor)
@@ -685,7 +765,7 @@ enum TextureFactory {
     }
 
     static func litterSubstrate() -> UIImage {
-        cached("litter") {
+        cached("litter", bytes: textureBytes(256), pinned: true) {
             render(256) { ctx, s in
                 let g = RGBColor(hex: 0xCFC7B6)
                 ctx.setFillColor(UIColor(g).cgColor)
@@ -706,7 +786,7 @@ enum TextureFactory {
 
     /// Sumi-e style hanging scroll.
     static func inkScroll() -> UIImage {
-        cached("scroll") {
+        cached("scroll", bytes: textureBytes(512), pinned: true) {
             render(512) { ctx, s in
                 ctx.setFillColor(UIColor(RGBColor(hex: 0xEDE4D0)).cgColor)
                 ctx.fill(CGRect(x: 0, y: 0, width: s, height: s))
@@ -754,7 +834,7 @@ enum TextureFactory {
     /// Equirectangular-ish backdrop seen through the shoji: a small garden and sky.
     static func gardenBackdrop(sky: SkyState) -> UIImage {
         let bucket = Int(sky.sunElevation * 12)   // quantise so we don't redraw every frame
-        return cached("garden-\(bucket)") {
+        return cached("garden-\(bucket)", bytes: textureBytes(512)) {
             render(512) { ctx, s in
                 let zenith = sky.skyZenithColor
                 let horizon = sky.skyHorizonColor
@@ -823,7 +903,7 @@ enum TextureFactory {
     /// Spherical environment map used for image-based lighting.
     static func skyEnvironment(sky: SkyState) -> UIImage {
         let bucket = Int(sky.sunElevation * 10)
-        return cached("env-\(bucket)") {
+        return cached("env-\(bucket)", bytes: 256 * 128 * 4) {
             let w = 256, h = 128
             let format = UIGraphicsImageRendererFormat.default()
             format.scale = 1
@@ -857,7 +937,7 @@ enum TextureFactory {
     // MARK: - Small props
 
     static func ceramic(_ color: RGBColor, key: String) -> UIImage {
-        cached("ceramic-\(key)") {
+        cached("ceramic-\(key)-\(color.hexKey)", bytes: textureBytes(256), pinned: true) {
             render(256) { ctx, s in
                 ctx.setFillColor(UIColor(color).cgColor)
                 ctx.fill(CGRect(x: 0, y: 0, width: s, height: s))
@@ -876,7 +956,7 @@ enum TextureFactory {
     }
 
     static func foliage() -> UIImage {
-        cached("foliage") {
+        cached("foliage", bytes: textureBytes(512), pinned: true) {
             render(256) { ctx, s in
                 let leaf = RGBColor(hex: 0x3E6B3A)
                 ctx.setFillColor(UIColor(leaf).cgColor)
@@ -891,6 +971,99 @@ enum TextureFactory {
                     ctx.fillEllipse(in: CGRect(x: x, y: y, width: r * 1.6, height: r))
                 }
             }
+        }
+    }
+
+    // MARK: - Material maps
+
+    /// The non-colour channels for one surface.
+    struct MapSet {
+        var normal: UIImage?
+        var roughness: UIImage?
+        var occlusion: UIImage?
+    }
+
+    /// Bakes and caches a surface's normal, roughness and occlusion maps.
+    ///
+    /// The three share one height field, so the field is built at most once even
+    /// though each map is cached under its own key and can be evicted on its own.
+    ///
+    /// - Parameter size: the field's edge length, stated here so the cache can
+    ///   budget before anything is built. The harness asserts it against the spec
+    ///   the closure actually returns, so it cannot drift.
+    static func surfaceMaps(_ name: String, size: Int, pinned: Bool = true,
+                            _ make: () -> SurfaceMaps.Spec) -> MapSet {
+        var built: SurfaceMaps.Spec?
+        func spec() -> SurfaceMaps.Spec {
+            if let b = built { return b }
+            let b = make()
+            built = b
+            return b
+        }
+        let bytes = textureBytes(size)
+
+        let normal = cached("\(name)#normal", bytes: bytes, pinned: pinned) { () -> UIImage in
+            let s = spec()
+            let bytes = s.field.normalMap(slopeScale: s.slopeScale)
+            return TextureBaker.image(rgba: bytes, size: s.field.size) ?? UIImage()
+        }
+        let roughness = cached("\(name)#roughness", bytes: bytes, pinned: pinned) { () -> UIImage in
+            let s = spec()
+            let bytes = s.field.roughnessMap(base: s.roughnessBase, variation: s.roughnessVariation)
+            return TextureBaker.image(rgba: bytes, size: s.field.size) ?? UIImage()
+        }
+        let occlusion = cached("\(name)#occlusion", bytes: bytes, pinned: pinned) { () -> UIImage in
+            let s = spec()
+            let bytes = s.field.occlusionMap(radius: s.occlusionRadius, strength: s.occlusionStrength)
+            return TextureBaker.image(rgba: bytes, size: s.field.size) ?? UIImage()
+        }
+        return MapSet(normal: normal, roughness: roughness, occlusion: occlusion)
+    }
+
+    static func tatamiMaps() -> MapSet {
+        surfaceMaps("tatami", size: 512) { SurfaceMaps.tatami() }
+    }
+
+    static func tatamiBorderMaps() -> MapSet {
+        surfaceMaps("tatamiBorder", size: 128) { SurfaceMaps.tatamiBorder() }
+    }
+
+    static func woodMaps(key: String) -> MapSet {
+        surfaceMaps("wood-\(key)", size: 512) {
+            key == "hinoki" ? SurfaceMaps.hinoki() : SurfaceMaps.wood()
+        }
+    }
+
+    static func plasterMaps() -> MapSet {
+        surfaceMaps("plaster", size: 512) { SurfaceMaps.plaster() }
+    }
+
+    static func shojiMaps() -> MapSet {
+        surfaceMaps("shoji", size: 512) { SurfaceMaps.shojiPaper() }
+    }
+
+    static func fabricMaps(key: String) -> MapSet {
+        surfaceMaps("fabric-\(key)", size: 256) { SurfaceMaps.fabric() }
+    }
+
+    static func futonMaps() -> MapSet {
+        surfaceMaps("futon", size: 256) { SurfaceMaps.futonCover() }
+    }
+
+    static func sisalMaps() -> MapSet {
+        surfaceMaps("sisal", size: 256) { SurfaceMaps.sisal() }
+    }
+
+    static func litterMaps() -> MapSet {
+        surfaceMaps("litter", size: 256) { SurfaceMaps.litterSubstrate() }
+    }
+
+    /// The coat's maps follow the cat, so they are not pinned — a player who keeps
+    /// editing their cat would otherwise pin every intermediate coat for the session.
+    static func catCoatMaps(_ a: CatAppearance, preview: Bool = false) -> MapSet {
+        let size = preview ? 256 : 512
+        return surfaceMaps("coat-\(coatKey(a))-\(size)", size: size, pinned: false) {
+            SurfaceMaps.catCoat(a, size: size)
         }
     }
 }
