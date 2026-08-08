@@ -45,6 +45,7 @@ func expect(_ condition: Bool, _ message: @autoclosure () -> String) {
 
 func finite(_ v: Float) -> Bool { v.isFinite }
 func finite(_ v: SCNVector3) -> Bool { v.x.isFinite && v.y.isFinite && v.z.isFinite }
+func finite(_ v: Vec3) -> Bool { v.x.isFinite && v.y.isFinite && v.z.isFinite }
 
 func section(_ name: String, _ body: () -> Void) {
     let start = Date()
@@ -154,14 +155,26 @@ section("world clock") {
 // MARK: - Geometry
 
 section("mesh builder") {
-    func validate(_ geo: SCNGeometry, _ label: String) {
-        expect(geo.materials.isEmpty || !geo.materials.isEmpty, "\(label) built")
+    /// The generators used to be checked only for "did not crash". Now that they
+    /// return raw mesh data rather than an opaque geometry object, the harness can
+    /// assert the buffers are actually well formed.
+    func validate(_ mesh: MeshData, _ label: String) {
+        mesh.normalsIfNeeded()
+        expect(!mesh.positions.isEmpty, "\(label) has vertices")
+        expect(mesh.indices.count % 3 == 0, "\(label) index count is a whole number of triangles")
+        expect(mesh.indices.count >= 3, "\(label) has triangles")
+        expect(mesh.normals.count == mesh.positions.count, "\(label) has a normal per vertex")
+        expect(mesh.uvs.count == mesh.positions.count, "\(label) has a uv per vertex")
+        expect(mesh.indices.allSatisfy { $0 >= 0 && Int($0) < mesh.positions.count },
+               "\(label) indices are in range")
+        expect(mesh.positions.allSatisfy { finite($0) }, "\(label) positions are finite")
+        expect(mesh.normals.allSatisfy { abs($0.length - 1) < 1e-3 }, "\(label) normals are unit length")
     }
 
     let mesh = MeshData()
-    let a = mesh.addVertex(SCNVector3(x: 0, y: 0, z: 0), uv: .zero)
-    let b = mesh.addVertex(SCNVector3(x: 1, y: 0, z: 0), uv: .zero)
-    let c = mesh.addVertex(SCNVector3(x: 0, y: 0, z: 1), uv: .zero)
+    let a = mesh.addVertex(Vec3(x: 0, y: 0, z: 0), uv: .zero)
+    let b = mesh.addVertex(Vec3(x: 1, y: 0, z: 0), uv: .zero)
+    let c = mesh.addVertex(Vec3(x: 0, y: 0, z: 1), uv: .zero)
     mesh.addTriangle(a, b, c)
     mesh.addTriangle(a, a, b)          // degenerate: must be dropped
     expect(mesh.indices.count == 3, "degenerate triangles are rejected")
@@ -174,7 +187,7 @@ section("mesh builder") {
 
     // A loft's side faces must point away from the axis.
     let rings = (0...8).map { i -> LoftRing in
-        LoftRing(center: SCNVector3(x: 0, y: 0, z: Float(i) * 0.1), radiusX: 0.2, radiusY: 0.2)
+        LoftRing(center: Vec3(x: 0, y: 0, z: Float(i) * 0.1), radiusX: 0.2, radiusY: 0.2)
     }
     let loftMesh = MeshData()
     var ringIdx: [[Int32]] = []
@@ -182,10 +195,10 @@ section("mesh builder") {
         var row: [Int32] = []
         for s in 0...16 {
             let ang = Float(s) / 16 * 2 * .pi
-            row.append(loftMesh.addVertex(SCNVector3(x: ring.center.x + cosf(ang) * ring.radiusX,
-                                                     y: ring.center.y + sinf(ang) * ring.radiusY,
-                                                     z: ring.center.z),
-                                          uv: CGPoint(x: CGFloat(s), y: CGFloat(ri))))
+            row.append(loftMesh.addVertex(Vec3(x: ring.center.x + cosf(ang) * ring.radiusX,
+                                               y: ring.center.y + sinf(ang) * ring.radiusY,
+                                               z: ring.center.z),
+                                          uv: Vec2(x: Float(s), y: Float(ri))))
         }
         ringIdx.append(row)
     }
@@ -198,7 +211,7 @@ section("mesh builder") {
     var outward = 0
     for (i, n) in loftMesh.normals.enumerated() {
         let p = loftMesh.positions[i]
-        let radial = SCNVector3(x: p.x, y: p.y, z: 0).normalized
+        let radial = Vec3(x: p.x, y: p.y, z: 0).normalized
         if dot(n, radial) > 0.5 { outward += 1 }
     }
     expect(outward > loftMesh.normals.count * 9 / 10,

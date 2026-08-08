@@ -533,7 +533,7 @@ enum RoomBuilder {
         let trunk = MeshBuilder.tube(length: 0.20, count: 6, segments: 8, radius: { t in
             0.016 * (1 - t * 0.55)
         }, offset: { t in
-            SCNVector3(x: sinf(t * 3.2) * 0.035, y: 0, z: cosf(t * 2.1) * 0.02)
+            Vec3(x: sinf(t * 3.2) * 0.035, y: 0, z: cosf(t * 2.1) * 0.02)
         })
         let tr = SCNNode.make(trunk, Materials.pbr(diffuse: UIColor(RGBColor(hex: 0x4A3A2C)), roughness: 0.9))
         tr.position = SCNVector3(x: base.x, y: base.y + 0.06, z: base.z)

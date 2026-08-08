@@ -107,14 +107,14 @@ enum CatBuilder {
             let ry = R * profile * taper * (0.92 + 0.16 * chestDepth * t)
             // Belly sags a little with weight.
             let sag = -R * 0.16 * a.chonk * sinf(t * .pi)
-            rings.append(LoftRing(center: SCNVector3(x: 0, y: sag, z: z), radiusX: rx, radiusY: ry))
+            rings.append(LoftRing(center: Vec3(x: 0, y: sag, z: z), radiusX: rx, radiusY: ry))
         }
         let torsoGeo = MeshBuilder.loft(rings, segments: 22, capStart: true, capEnd: true)
         let torso = SCNNode.make(torsoGeo, furMat, name: "torso")
         rig.spine.addChildNode(torso)
         rig.chestNode = torso
 
-        addFurShells(to: torso, geometry: torsoGeo, appearance: a, scaleBoost: 1)
+        addFurShells(to: torso, mesh: torsoGeo, appearance: a, scaleBoost: 1)
 
         // Ruff / mane for long-haired cats.
         if a.effectiveFluff > 0.45 {
@@ -261,7 +261,7 @@ enum CatBuilder {
                                      vSpan: vSpan(hr * 2.2, a))
         let skullNode = SCNNode.make(skull, furMat, name: "skull")
         rig.head.addChildNode(skullNode)
-        addFurShells(to: skullNode, geometry: skull, appearance: a, scaleBoost: 0.7)
+        addFurShells(to: skullNode, mesh: skull, appearance: a, scaleBoost: 0.7)
 
         // Muzzle.
         let muzzleLen = hr * (0.34 + 0.72 * a.muzzleLength)
@@ -436,7 +436,7 @@ enum CatBuilder {
     }
 
     /// A spherical cap with planar UVs, used for irises and eyelids.
-    private static func eyeCap(radius: Float, capAngle: Float) -> SCNGeometry {
+    private static func eyeCap(radius: Float, capAngle: Float) -> MeshData {
         let mesh = MeshData()
         let ringCount = 6, segs = 18
         var ringIdx: [[Int32]] = []
@@ -446,11 +446,11 @@ enum CatBuilder {
             var row: [Int32] = []
             for s in 0...segs {
                 let th = Float(s) / Float(segs) * 2 * .pi
-                let p = SCNVector3(x: sinf(phi) * cosf(th) * radius,
-                                   y: sinf(phi) * sinf(th) * radius,
-                                   z: cosf(phi) * radius)
-                let uv = CGPoint(x: CGFloat(0.5 + 0.5 * t * cosf(th)),
-                                 y: CGFloat(0.5 + 0.5 * t * sinf(th)))
+                let p = Vec3(x: sinf(phi) * cosf(th) * radius,
+                             y: sinf(phi) * sinf(th) * radius,
+                             z: cosf(phi) * radius)
+                let uv = Vec2(x: 0.5 + 0.5 * t * cosf(th),
+                              y: 0.5 + 0.5 * t * sinf(th))
                 row.append(mesh.addVertex(p, uv: uv))
             }
             ringIdx.append(row)
@@ -462,7 +462,7 @@ enum CatBuilder {
             }
         }
         mesh.recomputeNormals()
-        return mesh.geometry()
+        return mesh
     }
 
     // MARK: - Tail
@@ -575,14 +575,15 @@ enum CatBuilder {
 
     // MARK: - Fur shells
 
-    private static func addFurShells(to node: SCNNode, geometry: SCNGeometry,
+    private static func addFurShells(to node: SCNNode, mesh: MeshData,
                                      appearance a: CatAppearance, scaleBoost: Float) {
         guard !a.hairless, a.effectiveFurLength > 0.30 else { return }
         let layers = min(RenderQuality.maxFurShells, a.effectiveFurLength > 0.65 ? 2 : 1)
         guard layers > 0 else { return }
         for i in 0..<layers {
-            let shell = SCNNode(geometry: geometry.copy() as? SCNGeometry ?? geometry)
-            shell.geometry?.materials = [Materials.furShell(a, layer: i)]
+            // Realising the mesh once per shell gives each its own geometry, which is
+            // what the old `copy()` dance was for.
+            let shell = SCNNode.make(mesh, Materials.furShell(a, layer: i))
             let s = 1 + (0.035 + 0.075 * a.effectiveFurLength) * Float(i + 1) * scaleBoost
             shell.scale = SCNVector3(x: s, y: s, z: s)
             shell.castsShadow = false
