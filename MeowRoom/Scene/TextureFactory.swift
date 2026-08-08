@@ -1132,6 +1132,11 @@ enum TextureFactory {
 
     /// The coat's maps follow the cat, so they are not pinned — a player who keeps
     /// editing their cat would otherwise pin every intermediate coat for the session.
+    /// The iris is the same shape whatever colour it is, so one set serves every cat.
+    static func irisMaps() -> MapSet {
+        surfaceMaps("iris", size: 256) { SurfaceMaps.iris() }
+    }
+
     static func catCoatMaps(_ a: CatAppearance, preview: Bool = false) -> MapSet {
         let size = preview ? 256 : 512
         return surfaceMaps("coat-\(coatKey(a))-\(size)", size: size, pinned: false) {

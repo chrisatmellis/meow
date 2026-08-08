@@ -1134,6 +1134,94 @@ section("height fields") {
     }
 }
 
+section("translucency") {
+    var a = BreedPresets.appearance(for: .domesticShorthair)
+    a.seed = 11
+    let rig = CatBuilder.build(a)
+
+    expect(rig.translucentParts.count >= 7,
+           "ears, inner ears, nose and four pads are registered (\(rig.translucentParts.count))")
+    expect(rig.translucentParts.allSatisfy { $0.amount > 0 && $0.amount <= 1 },
+           "every translucent amount is a sensible fraction")
+    // The ears must be the strongest. If the body ever out-glows them the effect is
+    // upside down, and an evenly glowing cat looks like a lamp, not like a cat.
+    let strongest = rig.translucentParts.map { $0.amount }.max() ?? 0
+    expect(strongest >= 0.6, "the thinnest part transmits most (\(strongest))")
+    expect(rig.translucentParts.allSatisfy { $0.tint.r > $0.tint.b },
+           "transmitted light is warmer than it is cool — it has been through blood")
+
+    // The geometry of the effect. The player sits at +Z looking down the room, so a
+    // light beyond the cat is backlighting and a light behind the player is not.
+    let at = SCNVector3(x: 0, y: 0.2, z: -0.6)
+    let behindCat = (at - RoomLayout.cameraPosition).normalized
+    let behindPlayer = SCNVector3(x: -behindCat.x, y: -behindCat.y, z: -behindCat.z)
+    let back = Translucency.backlight(at: at, lightDirection: behindCat)
+    let front = Translucency.backlight(at: at, lightDirection: behindPlayer)
+    expect(back > 0.98, "a light directly beyond the cat backlights it fully (\(back))")
+    expect(front == 0, "a light behind the player does not backlight anything (\(front))")
+
+    // Forward-scattered, so it falls away fast rather than linearly. A light 60° off
+    // axis should already be most of the way gone.
+    let side = Translucency.backlight(
+        at: at,
+        lightDirection: SCNVector3(x: behindCat.x * 0.5 + 0.866, y: behindCat.y * 0.5,
+                                   z: behindCat.z * 0.5).normalized)
+    expect(side < back * 0.3, "transmission falls off sharply off-axis (\(side) vs \(back))")
+
+    // And over a real day. Night must be dark: an ear cannot transmit light that is
+    // not there, and this is the failure mode that a mask alone cannot prevent.
+    var cal = Calendar(identifier: .gregorian)
+    cal.timeZone = TimeZone(identifier: "UTC")!
+    var levels: [(Int, Float)] = []
+    for hour in 0..<24 {
+        var comps = DateComponents()
+        comps.year = 2026; comps.month = 6; comps.day = 21; comps.hour = hour
+        let sky = WorldClock.sky(at: cal.date(from: comps)!, timeZone: TimeZone(identifier: "UTC")!)
+        Translucency.apply(rig.translucentParts, sky: sky, lanternOn: false)
+        let level = rig.translucentParts.map { Float($0.material.emission.intensity) }.max() ?? 0
+        expect(level.isFinite && level >= 0 && level <= 0.55,
+               "transmitted light at \(hour):00 is in range (\(level))")
+        levels.append((hour, level))
+    }
+    let darkest = levels.min { $0.1 < $1.1 }!
+    let brightest = levels.max { $0.1 < $1.1 }!
+    expect(darkest.1 < 0.02, "ears do not glow in the dark (\(darkest.1) at \(darkest.0):00)")
+    expect(brightest.1 > 0.05,
+           "ears do light up at some point in the day (best \(brightest.1) at \(brightest.0):00)")
+
+    // Spatial: a cat between the player and the window is backlit; a cat behind the
+    // player's shoulder is not. This is the property that makes it worth doing per
+    // frame rather than baking a mask.
+    var midday = DateComponents()
+    midday.year = 2026; midday.month = 6; midday.day = 21; midday.hour = 12
+    let noon = WorldClock.sky(at: cal.date(from: midday)!, timeZone: TimeZone(identifier: "UTC")!)
+    func level(at position: SCNVector3) -> Float {
+        rig.root.position = position
+        Translucency.apply(rig.translucentParts, sky: noon, lanternOn: false)
+        return rig.translucentParts.map { Float($0.material.emission.intensity) }.max() ?? 0
+    }
+    let byWindow = level(at: SCNVector3(x: 0, y: 0, z: -1.9))
+    let atPlayer = level(at: SCNVector3(x: 0, y: 0, z: 1.6))
+    expect(byWindow > atPlayer * 2,
+           "a cat at the window is backlit; one beside the player is not (\(byWindow) vs \(atPlayer))")
+    rig.root.position = .zero
+
+    if CommandLine.arguments.contains("--budget") {
+        print("    ear transmission by hour: " +
+              levels.map { String(format: "%d:%.2f", $0.0, $0.1) }.joined(separator: " "))
+    }
+
+    // The lantern gives a floor, so a cat in a lit room at night is not stone.
+    var midnight = DateComponents()
+    midnight.year = 2026; midnight.month = 6; midnight.day = 21; midnight.hour = 1
+    let night = WorldClock.sky(at: cal.date(from: midnight)!, timeZone: TimeZone(identifier: "UTC")!)
+    Translucency.apply(rig.translucentParts, sky: night, lanternOn: false)
+    let lanternOff = rig.translucentParts.map { Float($0.material.emission.intensity) }.max() ?? 0
+    Translucency.apply(rig.translucentParts, sky: night, lanternOn: true)
+    let lanternOn = rig.translucentParts.map { Float($0.material.emission.intensity) }.max() ?? 0
+    expect(lanternOn > lanternOff, "the lantern warms the ears at night (\(lanternOff) → \(lanternOn))")
+}
+
 section("triangle budget") {
     /// Walks a node tree adding up geometry, counting each instance separately.
     func triangles(_ node: SCNNode) -> Int {

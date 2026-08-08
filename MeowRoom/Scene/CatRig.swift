@@ -47,6 +47,9 @@ final class CatRig {
     var whiskerRoots: [SCNNode] = []
     var chestNode = SCNNode()
     var bellyNode = SCNNode()
+    /// Parts thin enough to light up from behind — ears, nose, paw pads.
+    /// `Translucency` drives their emission from where the sun actually is.
+    var translucentParts: [TranslucentPart] = []
     var collarNode: SCNNode?
 
     /// Cached measurements used by the animator.
@@ -236,9 +239,15 @@ enum CatBuilder {
             // Paw pads peeking out underneath.
             let padGeo = MeshBuilder.blob(radius: pawR * 0.55, scaleX: 1.0, scaleY: 0.30, scaleZ: 1.0,
                                           rings: ring(6), segments: seg(12))
-            let pad = SCNNode.make(padGeo, Materials.skin(a.pawPadColor, gloss: 0.35))
+            let padMat = Materials.skin(a.pawPadColor, gloss: 0.35)
+            let pad = SCNNode.make(padGeo, padMat)
             pad.position = SCNVector3(x: 0, y: -pawLen * 0.35 - pawR * 0.46, z: pawR * 0.30)
             leg.ankle.addChildNode(pad)
+            // Pads are thicker than an ear and usually face the floor, so they get
+            // much less — but a cat lying on its side in a sun patch shows them.
+            rig.translucentParts.append(
+                TranslucentPart(node: pad, material: padMat, amount: 0.22,
+                                tint: a.pawPadColor.mixed(with: RGBColor(1.0, 0.34, 0.30), 0.45)))
 
             if a.toeTufts > 0.15 && !a.hairless {
                 for k in 0..<3 {
@@ -298,7 +307,13 @@ enum CatBuilder {
         // Nose leather.
         let nose = MeshBuilder.blob(radius: hr * (0.10 + 0.07 * a.noseSize), scaleX: 1.2, scaleY: 0.85, scaleZ: 0.8,
                                     rings: ring(9), segments: seg(16))
-        let noseNode = SCNNode.make(nose, skinMat, name: "nose")
+        // Its own material for the same reason as the ears: the nose is thin enough
+        // to glow, and skinMat is shared with the paw pads.
+        let noseMat = Materials.skin(a.noseColor, gloss: 0.55)
+        let noseNode = SCNNode.make(nose, noseMat, name: "nose")
+        rig.translucentParts.append(
+            TranslucentPart(node: noseNode, material: noseMat, amount: 0.35,
+                            tint: a.noseColor.mixed(with: RGBColor(1.0, 0.34, 0.30), 0.5)))
         noseNode.position = SCNVector3(x: 0,
                                        y: -hr * 0.14,
                                        z: hr * (0.52 + 0.26 * a.muzzleLength) + muzzleLen * 0.80)
@@ -341,15 +356,29 @@ enum CatBuilder {
             let curl: Float = a.earShape == .curled ? -0.9 : (a.earShape == .folded ? 1.6 * a.earFold : 0.12)
             let geo = MeshBuilder.ear(length: earLen, width: earWidth, thickness: earWidth * 0.30, curl: curl,
                                       vSpan: vSpan(earLen, a))
-            let earNode = SCNNode.make(geo, furMat, name: "ear")
+            // Its own material instance rather than the shared body fur: an ear is
+            // the one piece of a cat that visibly lights up from behind, and it
+            // cannot do that while it shares emission with the torso.
+            let earMat = Materials.catFur(a)
+            let earNode = SCNNode.make(geo, earMat, name: "ear")
             holder.addChildNode(earNode)
 
             // Pink inner ear.
             let innerGeo = MeshBuilder.ear(length: earLen * 0.78, width: earWidth * 0.62,
                                            thickness: earWidth * 0.12, curl: curl)
-            let inner = SCNNode.make(innerGeo, Materials.skin(a.innerEarColor, gloss: 0.4))
+            let innerMat = Materials.skin(a.innerEarColor, gloss: 0.4)
+            let inner = SCNNode.make(innerGeo, innerMat)
             inner.position = SCNVector3(x: 0, y: earWidth * 0.09, z: earLen * 0.06)
             holder.addChildNode(inner)
+
+            // Cartilage and a little fur over blood: the thinnest thing on the cat,
+            // and the reason a backlit cat reads as alive rather than as a model.
+            rig.translucentParts.append(
+                TranslucentPart(node: earNode, material: earMat, amount: 0.62,
+                                tint: a.innerEarColor.mixed(with: RGBColor(1.0, 0.36, 0.30), 0.55)))
+            rig.translucentParts.append(
+                TranslucentPart(node: inner, material: innerMat, amount: 0.75,
+                                tint: a.innerEarColor.mixed(with: RGBColor(1.0, 0.30, 0.26), 0.6)))
 
             // Lynx tips / ear furnishings.
             if a.earTufts > 0.2 && !a.hairless {

@@ -544,6 +544,7 @@ func runMapDump(outputDirectory: String) {
         ("sisal", SurfaceMaps.sisal()),
         ("litter", SurfaceMaps.litterSubstrate()),
     ]
+    specs.append(("iris", SurfaceMaps.iris()))
     var cat = BreedPresets.appearance(for: .domesticShorthair)
     cat.seed = 4242
     specs.append(("coat-shorthair", SurfaceMaps.catCoat(cat, size: 512)))

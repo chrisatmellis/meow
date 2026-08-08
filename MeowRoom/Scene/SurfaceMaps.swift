@@ -300,6 +300,64 @@ enum SurfaceMaps {
                     plausibleMillimetres: 1.0...4.0)
     }
 
+    // MARK: - Eyes
+
+    /// The iris, which is not flat.
+    ///
+    /// A real iris is a pleated muscle: radial fibres standing proud of the stroma,
+    /// a collarette ridge partway out, and a rim that falls away into the limbus. It
+    /// is also, on a cat, the single feature a player looks at most — the game leans
+    /// on the look-at solver precisely so that the cat meets your eye.
+    ///
+    /// Seeded to match `TextureFactory.iris`, which strokes its fibres from
+    /// `SeededGenerator(seed: 4242)` at the same radii, so the relief sits on the
+    /// fibres that are drawn rather than between them.
+    static func iris(size: Int = 256) -> Spec {
+        var f = HeightField(size: size, fill: 0.5)
+        let c = Float(size) / 2
+        let irisR = Float(size) * 0.46
+
+        // Radial fibres. Same count, same seed, same radial extents as the albedo.
+        var rng = SeededGenerator(seed: 4242)
+        for _ in 0..<420 {
+            let ang = rng.float(0, 2 * .pi)
+            let r0 = irisR * rng.float(0.18, 0.5)
+            let r1 = irisR * rng.float(0.6, 1.0)
+            let raised = rng.float() < 0.5
+            f.addStroke(x0: c + cosf(ang) * r0, y0: c + sinf(ang) * r0,
+                        x1: c + cosf(ang) * r1, y1: c + sinf(ang) * r1,
+                        width: rng.float(0.8, 2.4),
+                        height: raised ? 0.25 : -0.20)
+        }
+
+        // The collarette: the ridge where the pupillary zone meets the ciliary one.
+        for i in 0..<720 {
+            let ang = Float(i) / 720 * 2 * .pi
+            let r = irisR * (0.52 + 0.03 * HeightField.tileableNoise(cosf(ang) * 3, sinf(ang) * 3,
+                                                                    period: 16, seed: 99))
+            f.addDisc(cx: c + cosf(ang) * r, cy: c + sinf(ang) * r, radius: 3, height: 0.05)
+        }
+
+        // And the limbus, where the iris drops away under the cornea.
+        for i in 0..<720 {
+            let ang = Float(i) / 720 * 2 * .pi
+            f.addDisc(cx: c + cosf(ang) * irisR, cy: c + sinf(ang) * irisR, radius: 4, height: -0.06)
+        }
+        f.normalize()
+
+        return Spec(field: f,
+                    // An eye is about 12 mm across and the texture covers it once.
+                    relief: SurfaceRelief(surfaceMetres: 0.012, tile: 1, mapSize: size),
+                    // Stronger than any room surface. Iris fibres are genuinely deep
+                    // relative to how small they are, and this is the one place on
+                    // the cat a player looks closely enough to tell.
+                    tiltDegrees: 12,
+                    // Wet, and the fibres catch the light more than the crypts do.
+                    roughnessBase: 0.12, roughnessVariation: 0.08,
+                    occlusionRadius: 4, occlusionStrength: 1.2,
+                    plausibleMillimetres: 0.02...0.35)
+    }
+
     // MARK: - The cat
 
     /// Fur, combed by the same field the albedo strokes follow.

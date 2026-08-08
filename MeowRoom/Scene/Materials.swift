@@ -58,9 +58,14 @@ enum Materials {
         // which varies along each hair, so light rakes across the fur instead of
         // washing the whole cat evenly.
         //
-        // Warm sub-surface-ish bounce on thin fur, especially on the ears.
+        // Emission starts at zero. It used to be a flat 0.02 over the whole cat,
+        // standing in for light coming through thin tissue — which is a real effect
+        // in the wrong place: it is strong at the ears, nose and pads and absent
+        // over the body, and it only happens when the light is *behind* the cat.
+        // A constant is neither of those things; it is just a lighter cat.
+        // `Translucency` drives it per part, per frame, from where the sun is.
         m.emission.contents = UIColor(a.baseCoat.mixed(with: RGBColor(1, 0.7, 0.6), 0.5), alpha: 1)
-        m.emission.intensity = CGFloat(a.hairless ? 0.035 : 0.02)
+        m.emission.intensity = 0
         m.diffuse.wrapS = .repeat
         m.diffuse.wrapT = .repeat
         return m
@@ -92,11 +97,16 @@ enum Materials {
         let color = right && a.heterochromia ? a.eyeColorRight : a.eyeColor
         let tex = TextureFactory.iris(color: color, pupil: a.pupilShape,
                                       dilation: 0.5, brightness: a.eyeBrightness)
+        let maps = TextureFactory.irisMaps()
         let m = SCNMaterial()
         m.lightingModel = .physicallyBased
         m.diffuse.contents = tex
-        m.roughness.contents = NSNumber(value: 0.08)
+        m.roughness.contents = maps.roughness ?? NSNumber(value: 0.08)
         m.metalness.contents = NSNumber(value: 0.0)
+        // A real iris is a pleated muscle, and this is where the player is looking.
+        // Flat, it reads as a printed disc behind glass.
+        if let n = maps.normal { m.normal.contents = n }
+        if let o = maps.occlusion { m.ambientOcclusion.contents = o }
         m.emission.contents = tex
         m.emission.intensity = CGFloat(0.06 + 0.22 * a.eyeBrightness)
         return m

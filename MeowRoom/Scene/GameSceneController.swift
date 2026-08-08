@@ -469,6 +469,14 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
 
         brain.update(dt: dt, sky: sky)
         animator.update(dt: dt, motion: brain.motion)
+
+        // After the animator, because it reads where the ears actually ended up,
+        // and every frame rather than with the sky refresh: the sun barely moves in
+        // four seconds but the cat crosses the room, and it is the cat's position
+        // relative to the sun and the player that decides whether its ears light up.
+        Translucency.apply(rig.translucentParts, sky: sky,
+                           lanternOn: brain.room.lanternOn)
+
         updateWand(dt: dt)
         updateRoomProps(dt: dt)
 
