@@ -18,11 +18,6 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 45
 
-    env:
-      KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
-      ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-      TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-
     steps:
       - uses: actions/checkout@v4
 
@@ -31,20 +26,31 @@ jobs:
 
       - name: Authentication key
         env:
-          KEY_P8: ${{ secrets.APP_STORE_CONNECT_KEY_P8 }}
+          S_KEY_P8: ${{ secrets.APP_STORE_CONNECT_KEY_P8 }}
+          S_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          S_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          S_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          for v in KEY_P8 KEY_ID ISSUER_ID TEAM_ID; do
-            if [ -z "${!v}" ]; then
-              echo "::error::Secret $v is not set. See 'Shipping a build' in the README."
-              exit 1
-            fi
-          done
+          # Repository secrets win where they exist; ci/ is the fallback. Moving
+          # to secrets later is then just setting them — see ci/README.md.
+          . ci/credentials.env
+          KEY_ID="${S_KEY_ID:-$ASC_KEY_ID}"
+          echo "KEY_ID=$KEY_ID"                              >> "$GITHUB_ENV"
+          echo "ISSUER_ID=${S_ISSUER_ID:-$ASC_ISSUER_ID}"    >> "$GITHUB_ENV"
+          echo "TEAM_ID=${S_TEAM_ID:-$ASC_TEAM_ID}"          >> "$GITHUB_ENV"
+
           mkdir -p ~/private_keys
-          printf '%s\n' "$KEY_P8" > ~/private_keys/AuthKey_$KEY_ID.p8
-          # A .p8 pasted with mangled newlines fails much later, with an error
-          # that says nothing about the key. Catch it here instead.
+          if [ -n "$S_KEY_P8" ]; then
+            printf '%s\n' "$S_KEY_P8" > ~/private_keys/AuthKey_$KEY_ID.p8
+            echo "using repository secrets"
+          else
+            cp "$ASC_KEY_FILE" ~/private_keys/AuthKey_$KEY_ID.p8
+            echo "using committed credentials in ci/"
+          fi
+          # A .p8 that arrived mangled fails much later, with an error that says
+          # nothing about the key. Catch it here instead.
           grep -q "BEGIN PRIVATE KEY" ~/private_keys/AuthKey_$KEY_ID.p8 \
-            || { echo "::error::APP_STORE_CONNECT_KEY_P8 is not a PEM private key."; exit 1; }
+            || { echo "::error::the .p8 is not a PEM private key."; exit 1; }
 
       - name: Archive
         run: |
