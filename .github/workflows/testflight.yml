@@ -1,16 +1,20 @@
 name: testflight
 
-# Manual only, deliberately.
-#
-# This spends macOS runner minutes (billed at 10x on a private repo) and pushes a
-# build to real testers, neither of which should happen just because someone
-# pushed a commit. Run it from the Actions tab when you want a build to go out.
+# Manual only, deliberately. This pushes a build to real testers, which should not
+# follow from an ordinary commit.
 on:
   workflow_dispatch:
 
 concurrency:
   group: testflight
   cancel-in-progress: false
+
+env:
+  # Not a secret. A team id is embedded in every app Apple ships, and the bundle id
+  # is on the App Store listing. Keeping them here rather than in the secret list
+  # means fewer things to paste and fewer things to get wrong.
+  TEAM_ID: KJ9NJ2M7C6
+  BUNDLE_ID: com.drinkmellis.meowroom
 
 jobs:
   upload:
@@ -24,51 +28,29 @@ jobs:
       - name: Toolchain
         run: xcodebuild -version
 
-      - name: Authentication key
+      - name: Build number
         env:
-          S_KEY_P8: ${{ secrets.APP_STORE_CONNECT_KEY_P8 }}
-          S_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
-          S_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-          S_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APP_STORE_CONNECT_KEY_P8: ${{ secrets.APP_STORE_CONNECT_KEY_P8 }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
-          # Repository secrets win where they exist; ci/ is the fallback. Moving
-          # to secrets later is then just setting them — see ci/README.md.
-          . ci/credentials.env
-          KEY_ID="${S_KEY_ID:-$ASC_KEY_ID}"
-          echo "KEY_ID=$KEY_ID"                              >> "$GITHUB_ENV"
-          echo "ISSUER_ID=${S_ISSUER_ID:-$ASC_ISSUER_ID}"    >> "$GITHUB_ENV"
-          echo "TEAM_ID=${S_TEAM_ID:-$ASC_TEAM_ID}"          >> "$GITHUB_ENV"
-
-          mkdir -p ~/private_keys
-          if [ -n "$S_KEY_P8" ]; then
-            printf '%s\n' "$S_KEY_P8" > ~/private_keys/AuthKey_$KEY_ID.p8
-            echo "using repository secrets"
-          else
-            cp "$ASC_KEY_FILE" ~/private_keys/AuthKey_$KEY_ID.p8
-            echo "using committed credentials in ci/"
-          fi
-          # A .p8 that arrived mangled fails much later, with an error that says
-          # nothing about the key. Catch it here instead.
-          grep -q "BEGIN PRIVATE KEY" ~/private_keys/AuthKey_$KEY_ID.p8 \
-            || { echo "::error::the .p8 is not a PEM private key."; exit 1; }
+          # Asked before archiving, not after. App Store Connect rejects a build
+          # number it has seen before, and it does so at upload — which is ten
+          # minutes of archive spent to discover a one-line problem.
+          LATEST=$(python3 Tools/asc-preflight.py latest-build)
+          echo "BUILD=$((LATEST + 1))" >> "$GITHUB_ENV"
+          echo "building as build $((LATEST + 1)) (latest on Apple: $LATEST)"
 
       - name: Archive
         run: |
           set -o pipefail
-          # Archive without signing, and let the export step sign it.
+          # Unsigned, with the export step doing the signing.
           #
-          # Signing here instead fails outright on an account with no registered
-          # devices: archiving asks for an *iOS App Development* profile, and
-          # development profiles are built from a device list. The account has
-          # none and does not need any — the build is going to TestFlight, not to
-          # a cable. App Store distribution profiles carry no device list at all,
-          # so the export step can mint one from the API key with nothing else
-          # set up. Doing it in that order is what removes the need for a Mac.
-          #
-          # CURRENT_PROJECT_VERSION is overridden rather than committed: every
-          # upload needs a build number App Store Connect has not seen, and a
-          # duplicate is only rejected after the whole archive has been built.
-          # The run number is monotonic, so it cannot collide with itself.
+          # Signing here instead fails on an account with no registered devices:
+          # archiving asks for an iOS App Development profile, and development
+          # profiles are built from a device list. This account has none and needs
+          # none — the build is going to TestFlight, not to a cable. App Store
+          # distribution profiles carry no device list at all.
           xcodebuild archive \
             -project Meow.xcodeproj \
             -scheme Meow \
@@ -80,46 +62,80 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGN_ENTITLEMENTS="" \
             DEVELOPMENT_TEAM="$TEAM_ID" \
-            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            CURRENT_PROJECT_VERSION="$BUILD" \
             > "$RUNNER_TEMP/archive.log" 2>&1 || {
               echo "::group::archive errors"
               grep -E "error:" "$RUNNER_TEMP/archive.log" | sort -u | head -40
               echo "::endgroup::"
               exit 1; }
-          echo "archived build ${{ github.run_number }}"
+          echo "archived build $BUILD"
 
-      - name: Install the signing identity
+      - name: Signing identity and profile
+        env:
+          APP_STORE_CONNECT_KEY_P8: ${{ secrets.APP_STORE_CONNECT_KEY_P8 }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          P12_BASE64: ${{ secrets.APPLE_SIGNING_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.APPLE_SIGNING_P12_PASSWORD }}
         run: |
-          # Automatic signing asks Apple's cloud signing service to produce an
-          # identity, and this key is not permitted to use it — that is the
-          # "Cloud signing permission error", and the "no profiles were found"
-          # that follows is a symptom of it rather than a second problem. So the
-          # identity is supplied directly and signing is done manually.
-          . ci/credentials.env
+          # Manual signing, from our own certificate.
+          #
+          # Automatic signing asks Apple's cloud signing service for an identity,
+          # and this key is not permitted to use it — that is the "Cloud signing
+          # permission error", and the "no profiles were found" that follows is a
+          # symptom of it rather than a second problem. The certificate was minted
+          # from a CSR generated by Tools/asc-rotate.py, so we hold its private key
+          # and can supply the identity directly.
+          [ -n "$P12_BASE64" ] || { echo "::error::APPLE_SIGNING_P12_BASE64 is not set"; exit 1; }
+
           KC="$RUNNER_TEMP/build.keychain"
           KC_PASS="$(uuidgen)"
           security create-keychain -p "$KC_PASS" "$KC"
           security set-keychain-settings -lut 3600 "$KC"
           security unlock-keychain -p "$KC_PASS" "$KC"
-          security import "$ASC_P12_FILE" -k "$KC" -P "$ASC_P12_PASSWORD" \
+
+          echo "$P12_BASE64" | base64 --decode > "$RUNNER_TEMP/signing.p12"
+          security import "$RUNNER_TEMP/signing.p12" -k "$KC" -P "$P12_PASSWORD" \
             -T /usr/bin/codesign -T /usr/bin/security
+          rm -f "$RUNNER_TEMP/signing.p12"
+
           # Without this the private key prompts for permission, which on a
           # headless runner simply hangs until the job times out.
           security set-key-partition-list -S apple-tool:,apple:,codesign: \
             -s -k "$KC_PASS" "$KC" > /dev/null
           security list-keychains -d user -s "$KC" login.keychain-db
           security default-keychain -s "$KC"
-          echo "identities available to codesign:"
-          security find-identity -v -p codesigning "$KC"
 
-          PROFILES=~/Library/MobileDevice/Provisioning\ Profiles
+          # Read the identity back off the certificate rather than storing its name.
+          # The export options plist has to match it exactly, and a name that has
+          # drifted from the certificate fails at the very last step.
+          IDENTITY=$(security find-identity -v -p codesigning "$KC" \
+            | sed -n 's/.*"\(.*\)"/\1/p' | head -1)
+          [ -n "$IDENTITY" ] || { echo "::error::no codesigning identity in the p12"; exit 1; }
+          echo "IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+          echo "signing as: $IDENTITY"
+
+          # The profile comes from App Store Connect at build time rather than from
+          # a secret. It is not really secret — a copy ships inside every build —
+          # and fetching it means rotating the certificate needs nothing changed here.
+          PROFILES="$HOME/Library/MobileDevice/Provisioning Profiles"
           mkdir -p "$PROFILES"
-          cp "$ASC_PROFILE_FILE" "$PROFILES/meowroom.mobileprovision"
+          PROFILE_NAME=$(python3 Tools/asc-rotate.py profile "$PROFILES/meowroom.mobileprovision")
+          echo "PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
+          echo "profile: $PROFILE_NAME"
 
       - name: Export and upload
+        env:
+          APP_STORE_CONNECT_KEY_P8: ${{ secrets.APP_STORE_CONNECT_KEY_P8 }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
           set -o pipefail
-          . ci/credentials.env
+          mkdir -p ~/private_keys
+          printf '%s\n' "$APP_STORE_CONNECT_KEY_P8" > ~/private_keys/AuthKey_$APP_STORE_CONNECT_KEY_ID.p8
+          grep -q "BEGIN PRIVATE KEY" ~/private_keys/AuthKey_$APP_STORE_CONNECT_KEY_ID.p8 \
+            || { echo "::error::APP_STORE_CONNECT_KEY_P8 is not a PEM private key — check it pasted whole, BEGIN/END lines included"; exit 1; }
+
           {
             echo '<?xml version="1.0" encoding="UTF-8"?>'
             echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
@@ -129,28 +145,28 @@ jobs:
             echo "<key>teamID</key><string>$TEAM_ID</string>"
             echo "<key>uploadSymbols</key><true/>"
             echo "<key>signingStyle</key><string>manual</string>"
-            echo "<key>signingCertificate</key><string>$ASC_SIGNING_IDENTITY</string>"
+            echo "<key>signingCertificate</key><string>$IDENTITY</string>"
             echo "<key>provisioningProfiles</key><dict>"
-            echo "  <key>com.drinkmellis.meowroom</key><string>$ASC_PROFILE_NAME</string>"
+            echo "  <key>$BUNDLE_ID</key><string>$PROFILE_NAME</string>"
             echo "</dict>"
             echo '</dict></plist>'
           } > "$RUNNER_TEMP/ExportOptions.plist"
 
-          # No -allowProvisioningUpdates: everything it would go and fetch is
-          # already here, and asking for it puts cloud signing back in the path.
+          # No -allowProvisioningUpdates: everything it would fetch is already here,
+          # and asking for it puts cloud signing back in the path.
           xcodebuild -exportArchive \
             -archivePath "$RUNNER_TEMP/Meow.xcarchive" \
             -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
             -exportPath "$RUNNER_TEMP/export" \
-            -authenticationKeyPath ~/private_keys/AuthKey_$KEY_ID.p8 \
-            -authenticationKeyID "$KEY_ID" \
-            -authenticationKeyIssuerID "$ISSUER_ID" \
+            -authenticationKeyPath ~/private_keys/AuthKey_$APP_STORE_CONNECT_KEY_ID.p8 \
+            -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
+            -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" \
             > "$RUNNER_TEMP/export.log" 2>&1 || {
               echo "::group::export errors"
               grep -E "error:|Error Domain" "$RUNNER_TEMP/export.log" | sort -u | head -40
               echo "::endgroup::"
               exit 1; }
-          echo "uploaded to App Store Connect; processing takes 5-15 minutes"
+          echo "uploaded build $BUILD; Apple takes 5-15 minutes to process it"
 
       - name: Clean up the key
         if: always()

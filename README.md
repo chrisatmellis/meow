@@ -40,30 +40,48 @@ golden hour and night without waiting for them.
 
 ## Shipping a build
 
-```sh
-./Tools/testflight.sh          # from a Mac; ~10 minutes, then Apple takes 5-15 more
-```
+Run the `testflight` workflow from the Actions tab. It is manual-only on purpose:
+it pushes a build to real testers, which should not follow from an ordinary
+commit. It asks Apple what the last build number was, archives, signs, uploads,
+and takes about ten minutes; Apple then takes another five to fifteen to process
+the build before it appears in TestFlight.
 
-That is the whole thing. Everything it needs is committed in `ci/` — the App
-Store Connect API key, the distribution certificate, the provisioning profile —
-so there is nothing to install, nothing to configure, and no need to open Xcode.
-It asks Apple what the last build number was, archives, signs, and uploads.
-`ci/README.md` explains what is in there, why it is committed rather than kept
-in repository secrets, and how to rotate it.
+Run `preflight` first if anything about the credentials has changed. It checks
+the whole set on a free runner in about ten seconds and names whatever is wrong —
+a mangled `.p8`, the key's own id pasted where the issuer id belongs, a p12 in an
+encoding macOS cannot import, a missing app record. Each of those otherwise
+appears twenty minutes into an archive as an error mentioning none of them.
 
-The same steps run in CI via the `testflight` workflow, from the Actions tab.
-It is manual-only on purpose: it spends macOS minutes and pushes to real
-testers, neither of which should follow from an ordinary commit. If repository
-secrets (`APP_STORE_CONNECT_KEY_P8`, `APP_STORE_CONNECT_KEY_ID`,
-`APP_STORE_CONNECT_ISSUER_ID`, `APPLE_TEAM_ID`) are set they win; `ci/` is the
-fallback, so moving to secrets later is just setting them.
+`Tools/testflight.sh` does the same thing from a Mac, if you want a build without
+waiting on a runner.
 
-`./Tools/asc-preflight.py latest-build` reports the highest build number App
-Store Connect has seen, and the `preflight` workflow checks the whole credential
-set on a free runner in about ten seconds, naming whatever is wrong — a mangled
-`.p8`, the key's own id pasted where the issuer id belongs, a missing app
-record. Each of those otherwise appears twenty minutes into an archive as an
-error mentioning none of them.
+### Credentials
+
+Five repository secrets, and nothing in the repository:
+
+| Secret | What it is |
+| --- | --- |
+| `APP_STORE_CONNECT_KEY_P8` | The `.p8` file's contents, pasted whole, `BEGIN`/`END` lines included |
+| `APP_STORE_CONNECT_KEY_ID` | The 10-character Key ID shown beside the key |
+| `APP_STORE_CONNECT_ISSUER_ID` | The UUID at the top of the Integrations page — one per account, not per key |
+| `APPLE_SIGNING_P12_BASE64` | The signing certificate and its private key, base64 |
+| `APPLE_SIGNING_P12_PASSWORD` | The password that `.p12` was exported with |
+
+The team id and bundle id are in the workflow rather than here. Neither is
+secret: a team id is embedded in every app Apple ships.
+
+`Tools/asc-rotate.py` mints the certificate, and does it without a Mac — the
+private key is generated locally and Apple only ever sees a signing request, so
+the Mac's usual job of running Keychain Access to produce a CSR falls to openssl.
+The provisioning profile is fetched from App Store Connect at build time rather
+than stored, so rotating the certificate needs nothing else changed.
+
+These were committed in a `ci/` directory for a while, which was a deliberate
+trade: the repository was private, and it removed the need for a Mac at a point
+where that was the whole blocker. Going public ended the trade — a public
+repository has a public history, so a committed key is a published key whatever
+the current tree looks like — and the certificate and key that lived there have
+been revoked.
 
 ### Two things that are not obvious
 

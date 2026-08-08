@@ -2,17 +2,25 @@
 #
 # Archive and upload a build to TestFlight, from a Mac.
 #
-# Same steps as .github/workflows/testflight.yml, same committed credentials in
-# ci/, same order — so whichever one you run, a failure means the same thing and
-# ci/README.md explains it. This exists because GitHub Actions is currently
-# refusing to start any runner on this account (spending limit), and that blocks
-# the workflow but not the build.
+# Same steps as .github/workflows/testflight.yml, in the same order, so a failure
+# means the same thing in both places. CI is the normal path; this is for when you
+# want a build without waiting on a runner.
 #
 #   ./Tools/testflight.sh              # next build number after what is live
 #   ./Tools/testflight.sh 12           # a specific build number
 #
-# Everything it needs is in the repository. There is nothing to install, nothing
-# to configure in Xcode, and no need to open Xcode at all.
+# Needs the same five values the workflow gets from repository secrets, exported
+# into the environment:
+#
+#   APP_STORE_CONNECT_KEY_P8        the .p8 file's contents
+#   APP_STORE_CONNECT_KEY_ID        the 10-character key id
+#   APP_STORE_CONNECT_ISSUER_ID     the issuer UUID
+#   APPLE_SIGNING_P12_BASE64        base64 of the signing certificate
+#   APPLE_SIGNING_P12_PASSWORD      its password
+#
+# They are not in the repository. They used to be, which was a deliberate trade
+# while it was private; a public repository has a public history, so that trade is
+# off. Tools/asc-rotate.py mints fresh ones.
 #
 # Takes about ten minutes, most of it the archive. Apple then takes another five
 # to fifteen to process the build before it appears in TestFlight.
@@ -30,11 +38,16 @@ if [ "$(uname -s)" != "Darwin" ]; then
 fi
 command -v xcodebuild >/dev/null || { echo "error: xcodebuild not found. Install Xcode." >&2; exit 1; }
 
-# shellcheck source=/dev/null
-. ci/credentials.env
+TEAM_ID=KJ9NJ2M7C6
+BUNDLE_ID=com.drinkmellis.meowroom
+
+for v in APP_STORE_CONNECT_KEY_P8 APP_STORE_CONNECT_KEY_ID APP_STORE_CONNECT_ISSUER_ID \
+         APPLE_SIGNING_P12_BASE64 APPLE_SIGNING_P12_PASSWORD; do
+  [ -n "${!v:-}" ] || { echo "error: $v is not set. See the header of this script." >&2; exit 1; }
+done
 
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK" ~/private_keys/AuthKey_$ASC_KEY_ID.p8' EXIT
+trap 'rm -rf "$WORK" ~/private_keys/AuthKey_$APP_STORE_CONNECT_KEY_ID.p8' EXIT
 
 # --- Build number -----------------------------------------------------------
 #
@@ -56,9 +69,10 @@ echo "==> building as build $BUILD"
 
 # --- Authentication key -----------------------------------------------------
 mkdir -p ~/private_keys
-cp "$ASC_KEY_FILE" ~/private_keys/AuthKey_$ASC_KEY_ID.p8
-grep -q "BEGIN PRIVATE KEY" ~/private_keys/AuthKey_$ASC_KEY_ID.p8 \
-  || { echo "error: ci/ has a .p8 that is not a PEM private key." >&2; exit 1; }
+printf '%s\n' "$APP_STORE_CONNECT_KEY_P8" > ~/private_keys/AuthKey_$APP_STORE_CONNECT_KEY_ID.p8
+chmod 600 ~/private_keys/AuthKey_$APP_STORE_CONNECT_KEY_ID.p8
+grep -q "BEGIN PRIVATE KEY" ~/private_keys/AuthKey_$APP_STORE_CONNECT_KEY_ID.p8 \
+  || { echo "error: APP_STORE_CONNECT_KEY_P8 is not a PEM private key." >&2; exit 1; }
 
 # --- Archive ----------------------------------------------------------------
 #
@@ -77,7 +91,7 @@ xcodebuild archive \
   CODE_SIGNING_REQUIRED=NO \
   CODE_SIGN_IDENTITY="" \
   CODE_SIGN_ENTITLEMENTS="" \
-  DEVELOPMENT_TEAM="$ASC_TEAM_ID" \
+  DEVELOPMENT_TEAM="$TEAM_ID" \
   CURRENT_PROJECT_VERSION="$BUILD" \
   > "$WORK/archive.log" 2>&1 || {
     echo "--- archive failed ---" >&2
@@ -98,22 +112,32 @@ restore_keychain() {
   security list-keychains -d user -s login.keychain-db >/dev/null 2>&1 || true
   [ -n "$ORIGINAL_DEFAULT" ] && security default-keychain -s "$ORIGINAL_DEFAULT" >/dev/null 2>&1 || true
 }
-trap 'restore_keychain; rm -rf "$WORK" ~/private_keys/AuthKey_$ASC_KEY_ID.p8' EXIT
+trap 'restore_keychain; rm -rf "$WORK" ~/private_keys/AuthKey_$APP_STORE_CONNECT_KEY_ID.p8' EXIT
 
 security create-keychain -p "$KC_PASS" "$KC"
 security set-keychain-settings -lut 3600 "$KC"
 security unlock-keychain -p "$KC_PASS" "$KC"
-security import "$ASC_P12_FILE" -k "$KC" -P "$ASC_P12_PASSWORD" \
+echo "$APPLE_SIGNING_P12_BASE64" | base64 --decode > "$WORK/signing.p12"
+security import "$WORK/signing.p12" -k "$KC" -P "$APPLE_SIGNING_P12_PASSWORD" \
   -T /usr/bin/codesign -T /usr/bin/security
+rm -f "$WORK/signing.p12"
 # Without this the private key prompts for permission on first use.
 security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KC_PASS" "$KC" > /dev/null
 security list-keychains -d user -s "$KC" login.keychain-db
 security default-keychain -s "$KC"
 security find-identity -v -p codesigning "$KC"
 
+# Read the identity off the certificate rather than storing its name: a name that
+# has drifted from the certificate fails at the very last step.
+IDENTITY=$(security find-identity -v -p codesigning "$KC" | sed -n 's/.*"\(.*\)"/\1/p' | head -1)
+[ -n "$IDENTITY" ] || { echo "error: no codesigning identity in the p12" >&2; exit 1; }
+
+# The profile comes from App Store Connect, so rotating the certificate needs
+# nothing changed here.
 PROFILES="$HOME/Library/MobileDevice/Provisioning Profiles"
 mkdir -p "$PROFILES"
-cp "$ASC_PROFILE_FILE" "$PROFILES/meowroom.mobileprovision"
+PROFILE_NAME=$(python3 Tools/asc-rotate.py profile "$PROFILES/meowroom.mobileprovision")
+echo "profile: $PROFILE_NAME"
 
 # --- Export and upload ------------------------------------------------------
 cat > "$WORK/ExportOptions.plist" <<PLIST
@@ -122,12 +146,12 @@ cat > "$WORK/ExportOptions.plist" <<PLIST
 <plist version="1.0"><dict>
 <key>method</key><string>app-store-connect</string>
 <key>destination</key><string>upload</string>
-<key>teamID</key><string>$ASC_TEAM_ID</string>
+<key>teamID</key><string>$TEAM_ID</string>
 <key>uploadSymbols</key><true/>
 <key>signingStyle</key><string>manual</string>
-<key>signingCertificate</key><string>$ASC_SIGNING_IDENTITY</string>
+<key>signingCertificate</key><string>$IDENTITY</string>
 <key>provisioningProfiles</key><dict>
-  <key>com.drinkmellis.meowroom</key><string>$ASC_PROFILE_NAME</string>
+  <key>$BUNDLE_ID</key><string>$PROFILE_NAME</string>
 </dict>
 </dict></plist>
 PLIST
@@ -140,9 +164,9 @@ xcodebuild -exportArchive \
   -archivePath "$WORK/Meow.xcarchive" \
   -exportOptionsPlist "$WORK/ExportOptions.plist" \
   -exportPath "$WORK/export" \
-  -authenticationKeyPath ~/private_keys/AuthKey_$ASC_KEY_ID.p8 \
-  -authenticationKeyID "$ASC_KEY_ID" \
-  -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+  -authenticationKeyPath ~/private_keys/AuthKey_$APP_STORE_CONNECT_KEY_ID.p8 \
+  -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
+  -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" \
   > "$WORK/export.log" 2>&1 || {
     echo "--- export failed ---" >&2
     grep -E "error:|Error Domain" "$WORK/export.log" | sort -u | head -40 >&2

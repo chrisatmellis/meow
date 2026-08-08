@@ -1,11 +1,15 @@
 name: preflight
 
 # Checks the App Store Connect setup in about ten seconds, on a free runner,
-# before anything slow depends on it. Run this first after adding the secrets:
+# before anything slow depends on it. Run this first after setting the secrets:
 # every problem it catches would otherwise appear twenty minutes into an archive
 # on a macOS runner, as a signing or upload error that names none of the pieces.
 on:
   workflow_dispatch:
+
+env:
+  TEAM_ID: KJ9NJ2M7C6
+  BUNDLE_ID: com.drinkmellis.meowroom
 
 jobs:
   check:
@@ -16,68 +20,55 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The workflows source this file, so a value containing a space or a
-      # bracket that is not quoted gets parsed as a command and the job dies
-      # before building anything. That cost a macOS run to discover once.
-      - name: Check the credentials file parses
+      - name: Check the signing certificate
+        env:
+          P12_BASE64: ${{ secrets.APPLE_SIGNING_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.APPLE_SIGNING_P12_PASSWORD }}
         run: |
-          bash -c '
-            set -e
-            . ci/credentials.env
-            for v in ASC_KEY_ID ASC_ISSUER_ID ASC_TEAM_ID ASC_KEY_FILE \
-                     ASC_P12_FILE ASC_P12_PASSWORD ASC_PROFILE_FILE \
-                     ASC_PROFILE_NAME ASC_SIGNING_IDENTITY; do
-              [ -n "${!v}" ] || { echo "  ✗ $v is empty or failed to parse"; exit 1; }
-            done
-            for f in "$ASC_KEY_FILE" "$ASC_P12_FILE" "$ASC_PROFILE_FILE"; do
-              [ -f "$f" ] || { echo "  ✗ missing file: $f"; exit 1; }
-            done
-            echo "  ✓ ci/credentials.env parses and every file it names exists"
+          [ -n "$P12_BASE64" ] || { echo "  ✗ APPLE_SIGNING_P12_BASE64 is not set"; exit 1; }
+          [ -n "$P12_PASSWORD" ] || { echo "  ✗ APPLE_SIGNING_P12_PASSWORD is not set"; exit 1; }
+          echo "$P12_BASE64" | base64 --decode > "$RUNNER_TEMP/signing.p12" 2>/dev/null \
+            || { echo "  ✗ APPLE_SIGNING_P12_BASE64 is not valid base64 — check it pasted whole"; exit 1; }
 
-            # macOS security(1) cannot read a PKCS#12 in OpenSSL 3 defaults
-            # (AES-256/SHA-256) and reports it as "MAC verification failed ...
-            # (wrong password?)", which sends you looking at the password
-            # instead of the encoding. It needs the legacy SHA-1/3DES form.
-            mac=$(openssl pkcs12 -in "$ASC_P12_FILE" -passin pass:"$ASC_P12_PASSWORD" \
-                    -info -noout 2>&1 | grep -i "^MAC:" | head -1)
-            echo "  · p12 $mac"
-            case "$mac" in
-              *sha1*) echo "  ✓ p12 is in the legacy encoding macOS can import" ;;
-              *) echo "  ✗ p12 uses a MAC macOS cannot import; rebuild it with"
-                 echo "    -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES -macalg sha1"
-                 exit 1 ;;
-            esac
-          '
+          # macOS security(1) cannot read a PKCS#12 in OpenSSL 3 defaults
+          # (AES-256/SHA-256) and reports it as "MAC verification failed ...
+          # (wrong password?)", which sends you looking at the password instead of
+          # the encoding. It needs the legacy SHA-1/3DES form. This check exists
+          # because that misdiagnosis cost a macOS run once already.
+          mac=$(openssl pkcs12 -in "$RUNNER_TEMP/signing.p12" -passin pass:"$P12_PASSWORD" \
+                  -info -noout -legacy 2>&1 | grep -i "^MAC:" | head -1)
+          echo "  · p12 $mac"
+          case "$mac" in
+            *sha1*) echo "  ✓ p12 is in the legacy encoding macOS can import" ;;
+            "") echo "  ✗ could not open the p12 — the password is probably wrong"; exit 1 ;;
+            *) echo "  ✗ p12 uses a MAC macOS cannot import; regenerate with Tools/asc-rotate.py"
+               exit 1 ;;
+          esac
+
+          # And that the certificate inside is one Apple still trusts. A revoked
+          # certificate signs perfectly well locally and is rejected at upload.
+          expiry=$(openssl pkcs12 -in "$RUNNER_TEMP/signing.p12" -passin pass:"$P12_PASSWORD" \
+                     -nokeys -legacy 2>/dev/null | openssl x509 -noout -enddate | cut -d= -f2)
+          echo "  ✓ certificate expires $expiry"
 
       - name: Check App Store Connect setup
         env:
-          S_KEY_P8: ${{ secrets.APP_STORE_CONNECT_KEY_P8 }}
-          S_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
-          S_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-          S_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APP_STORE_CONNECT_KEY_P8: ${{ secrets.APP_STORE_CONNECT_KEY_P8 }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
-          # Repository secrets win where they exist; ci/ is the fallback. Moving
-          # to secrets later is then just setting them — see ci/README.md.
-          . ci/credentials.env
-          KEY_ID="${S_KEY_ID:-$ASC_KEY_ID}"
-          ISSUER_ID="${S_ISSUER_ID:-$ASC_ISSUER_ID}"
-          TEAM_ID="${S_TEAM_ID:-$ASC_TEAM_ID}"
-          if [ -n "$S_KEY_P8" ]; then
-            printf '%s\n' "$S_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
-            KEY_FILE="$RUNNER_TEMP/AuthKey.p8"
-            echo "using repository secrets"
-          else
-            KEY_FILE="$ASC_KEY_FILE"
-            echo "using committed credentials in ci/"
-          fi
-
+          printf '%s\n' "$APP_STORE_CONNECT_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
           python3 Tools/asc-preflight.py \
-            --key "$KEY_FILE" \
-            --key-id "$KEY_ID" \
-            --issuer "$ISSUER_ID" \
+            --key "$RUNNER_TEMP/AuthKey.p8" \
+            --key-id "$APP_STORE_CONNECT_KEY_ID" \
+            --issuer "$APP_STORE_CONNECT_ISSUER_ID" \
             --team "$TEAM_ID" \
-            --bundle com.drinkmellis.meowroom
+            --bundle "$BUNDLE_ID"
+
+          echo ""
+          echo "  · next build number will be $(($(python3 Tools/asc-preflight.py latest-build) + 1))"
+          echo "  · provisioning profile: $(python3 Tools/asc-rotate.py profile "$RUNNER_TEMP/p.mobileprovision")"
 
       - name: Clean up
         if: always()
-        run: rm -f "$RUNNER_TEMP/AuthKey.p8"
+        run: rm -f "$RUNNER_TEMP/AuthKey.p8" "$RUNNER_TEMP/signing.p12" "$RUNNER_TEMP/p.mobileprovision"

@@ -20,6 +20,7 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -68,6 +69,24 @@ def sign_jwt(key_path: str, key_id: str, issuer: str) -> str:
     return signing_input + "." + b64url(der_to_raw(proc.stdout))
 
 
+def request(method: str, path: str, token: str, body: dict | None = None):
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(
+        f"{API}/{path}", data=data, method=method,
+        headers={"Authorization": f"Bearer {token}",
+                 "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            raw = r.read()
+            return r.status, (json.loads(raw) if raw else {})
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode(errors="replace")
+        try:
+            return e.code, json.loads(raw)
+        except ValueError:
+            return e.code, {"raw": raw[:400]}
+
+
 def get(path: str, token: str):
     req = urllib.request.Request(f"{API}/{path}",
                                  headers={"Authorization": f"Bearer {token}"})
@@ -83,19 +102,44 @@ def get(path: str, token: str):
 
 
 def credentials():
-    """Reads ci/credentials.env, which is shell but only ever KEY="value"."""
-    here = os.path.dirname(os.path.abspath(__file__))
-    path = os.path.join(here, "..", "ci", "credentials.env")
-    values = {}
-    with open(path) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, _, v = line.partition("=")
-            values[k.strip()] = v.strip().strip('"').strip("'")
-    values["ASC_KEY_FILE"] = os.path.normpath(
-        os.path.join(here, "..", values.get("ASC_KEY_FILE", "")))
+    """The App Store Connect key, from the environment.
+
+    These used to be committed in `ci/`, which was a deliberate trade at the time —
+    the repository was private and it removed the need for a Mac. Going public ends
+    that trade: git history is public too, so a committed key is a published key
+    no matter what the current tree looks like.
+
+    `APP_STORE_CONNECT_KEY_P8` carries the key's text, because that is the form a
+    CI secret and a phone clipboard can both hold. It is written to a file only
+    because openssl signs from a file.
+    """
+    values = {
+        "ASC_KEY_ID": os.environ.get("APP_STORE_CONNECT_KEY_ID", ""),
+        "ASC_ISSUER_ID": os.environ.get("APP_STORE_CONNECT_ISSUER_ID", ""),
+    }
+
+    pem = os.environ.get("APP_STORE_CONNECT_KEY_P8", "")
+    if pem.strip():
+        # NamedTemporaryFile with delete=False: openssl needs a path, and the
+        # process may outlive any context manager we could wrap this in.
+        handle = tempfile.NamedTemporaryFile("w", suffix=".p8", delete=False)
+        handle.write(pem.replace("\\n", "\n"))
+        handle.close()
+        os.chmod(handle.name, 0o600)
+        values["ASC_KEY_FILE"] = handle.name
+    elif os.environ.get("ASC_KEY_FILE"):
+        values["ASC_KEY_FILE"] = os.environ["ASC_KEY_FILE"]
+    else:
+        raise SystemExit(
+            "No App Store Connect key in the environment.\n"
+            "  APP_STORE_CONNECT_KEY_P8        the .p8 file's contents\n"
+            "  APP_STORE_CONNECT_KEY_ID        the 10-character key id\n"
+            "  APP_STORE_CONNECT_ISSUER_ID     the issuer UUID\n"
+            "In CI these come from repository secrets; locally, export them.")
+
+    missing = [k for k, v in values.items() if not v]
+    if missing:
+        raise SystemExit(f"missing from the environment: {', '.join(sorted(missing))}")
     return values
 
 
@@ -128,7 +172,7 @@ def latest_build() -> int:
 
 def main():
     # One positional mode, so the common "what build number is next" question
-    # needs no flags at all — the answer is entirely in ci/credentials.env.
+    # needs no flags at all — it reads the key straight from the environment.
     if len(sys.argv) > 1 and sys.argv[1] == "latest-build":
         print(latest_build())
         return 0
