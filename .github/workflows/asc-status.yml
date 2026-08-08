@@ -10,6 +10,11 @@ name: asc-status
 # Free runner, about twenty seconds, reads only.
 on:
   workflow_dispatch:
+    inputs:
+      assign_build:
+        description: "Build number to hand to the tester groups (blank = report only)"
+        required: false
+        default: ""
 
 jobs:
   status:
@@ -25,4 +30,10 @@ jobs:
           APP_STORE_CONNECT_KEY_P8: ${{ secrets.APP_STORE_CONNECT_KEY_P8 }}
           APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-        run: python3 Tools/asc-preflight.py build-status
+        run: |
+          if [ -n "${{ inputs.assign_build }}" ]; then
+            echo "assigning build ${{ inputs.assign_build }} to the tester groups"
+            python3 Tools/asc-preflight.py assign-build "${{ inputs.assign_build }}"
+            echo ""
+          fi
+          python3 Tools/asc-preflight.py build-status

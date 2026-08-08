@@ -232,7 +232,57 @@ def build_status():
         print("  (none)")
 
 
+def assign_build(version: str, group_name: str | None = None):
+    """Gives a build to a beta group, which is what TestFlight's UI would do.
+
+    Worth having as a command because the UI does not always offer it. A group
+    with `hasAccessToAllBuilds` is meant to pick up new builds on its own, so App
+    Store Connect shows no per-build control for it — and when the automatic
+    association has not happened yet, there is then no way through the interface
+    to make it happen.
+    """
+    c = credentials()
+    token = sign_jwt(c["ASC_KEY_FILE"], c["ASC_KEY_ID"], c["ASC_ISSUER_ID"])
+
+    status, body = get("apps?limit=200", token)
+    app_id = next((a["id"] for a in body.get("data", [])
+                   if a["attributes"]["bundleId"] == BUNDLE_ID), None)
+    if app_id is None:
+        raise SystemExit(f"no app record for {BUNDLE_ID}")
+
+    status, body = get(f"builds?filter[app]={app_id}&limit=50", token)
+    build = next((b for b in body.get("data", [])
+                  if b["attributes"].get("version") == str(version)), None)
+    if build is None:
+        raise SystemExit(f"no build {version} on {BUNDLE_ID}")
+    build_id = build["id"]
+
+    status, body = get(f"betaGroups?filter[app]={app_id}&limit=50", token)
+    groups = body.get("data", [])
+    if group_name:
+        groups = [g for g in groups if g["attributes"].get("name") == group_name]
+    if not groups:
+        raise SystemExit("no matching beta group")
+
+    for g in groups:
+        name = g["attributes"].get("name")
+        status, resp = request("POST", f"betaGroups/{g['id']}/relationships/builds",
+                               token, {"data": [{"type": "builds", "id": build_id}]})
+        if status in (200, 201, 204):
+            print(f"  build {version} → {name!r}")
+        else:
+            # Already attached is a success for our purposes, not a failure.
+            detail = json.dumps(resp)
+            if "already" in detail.lower():
+                print(f"  build {version} was already on {name!r}")
+            else:
+                raise SystemExit(f"could not attach to {name!r} ({status}): {detail[:400]}")
+
+
 def main():
+    if len(sys.argv) > 2 and sys.argv[1] == "assign-build":
+        assign_build(sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else None)
+        return 0
     if len(sys.argv) > 1 and sys.argv[1] == "build-status":
         build_status()
         return 0
