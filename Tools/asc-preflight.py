@@ -170,7 +170,73 @@ def latest_build() -> int:
     return max(numbers, default=0)
 
 
+def build_status():
+    """What App Store Connect thinks of the recent builds, and of the test groups.
+
+    Written because "TestFlight will not let me add a group" is not an error
+    message — App Store Connect simply omits the control, so the reason has to be
+    asked for rather than read. `internalBuildState` is the field that actually
+    says why: PROCESSING, MISSING_EXPORT_COMPLIANCE, READY_FOR_BETA_TESTING and
+    so on.
+    """
+    c = credentials()
+    token = sign_jwt(c["ASC_KEY_FILE"], c["ASC_KEY_ID"], c["ASC_ISSUER_ID"])
+
+    status, body = get("apps?limit=200", token)
+    app_id = next((a["id"] for a in body.get("data", [])
+                   if a["attributes"]["bundleId"] == BUNDLE_ID), None)
+    if app_id is None:
+        raise SystemExit(f"no app record for {BUNDLE_ID}")
+
+    print("builds")
+    status, body = get(f"builds?filter[app]={app_id}&limit=5"
+                       f"&include=buildBetaDetail,betaGroups", token)
+    if status != 200:
+        raise SystemExit(f"builds returned {status}: {json.dumps(body)[:300]}")
+
+    included = {(i["type"], i["id"]): i for i in body.get("included", [])}
+    for b in body.get("data", []):
+        a = b["attributes"]
+        print(f"  build {a.get('version'):>4}  processing={a.get('processingState')}"
+              f"  expired={a.get('expired')}"
+              f"  encryption_declared={a.get('usesNonExemptEncryption')}")
+
+        detail_ref = b.get("relationships", {}).get("buildBetaDetail", {}).get("data")
+        if detail_ref:
+            d = included.get((detail_ref["type"], detail_ref["id"]), {}).get("attributes", {})
+            print(f"            internal={d.get('internalBuildState')}"
+                  f"  external={d.get('externalBuildState')}")
+
+        groups = b.get("relationships", {}).get("betaGroups", {}).get("data") or []
+        names = [included.get(("betaGroups", g["id"]), {}).get("attributes", {}).get("name", g["id"])
+                 for g in groups]
+        print(f"            groups={names or '(none)'}")
+
+    print("\ngroups")
+    status, body = get(f"betaGroups?filter[app]={app_id}&limit=50", token)
+    if not body.get("data"):
+        print("  (none) — there is no tester group to add a build to yet.")
+    for g in body.get("data", []):
+        a = g["attributes"]
+        s2, testers = get(f"betaGroups/{g['id']}/betaTesters?limit=200", token)
+        print(f"  {a.get('name')!r}  internal={a.get('isInternalGroup')}"
+              f"  allBuilds={a.get('hasAccessToAllBuilds')}"
+              f"  testers={len(testers.get('data', []))}")
+
+    print("\ntesters on the account")
+    status, body = get("betaTesters?limit=200", token)
+    for t in body.get("data", [])[:20]:
+        a = t["attributes"]
+        print(f"  {a.get('email')}  state={a.get('state')}")
+    if not body.get("data"):
+        print("  (none)")
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "build-status":
+        build_status()
+        return 0
+
     # One positional mode, so the common "what build number is next" question
     # needs no flags at all — it reads the key straight from the environment.
     if len(sys.argv) > 1 and sys.argv[1] == "latest-build":

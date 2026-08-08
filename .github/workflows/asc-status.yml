@@ -1,0 +1,28 @@
+name: asc-status
+
+# Asks App Store Connect what state the builds and tester groups are actually in.
+#
+# TestFlight does not explain itself. When a build cannot be given to a group,
+# App Store Connect omits the control rather than disabling it with a reason, so
+# the only way to find out why is to ask the API. `internalBuildState` is the
+# field that answers it.
+#
+# Free runner, about twenty seconds, reads only.
+on:
+  workflow_dispatch:
+
+jobs:
+  status:
+    name: build and tester state
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ask App Store Connect
+        env:
+          APP_STORE_CONNECT_KEY_P8: ${{ secrets.APP_STORE_CONNECT_KEY_P8 }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: python3 Tools/asc-preflight.py build-status
