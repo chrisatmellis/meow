@@ -1,4 +1,5 @@
 import Foundation
+import Metal
 import SceneKit
 import UIKit
 
@@ -11,12 +12,23 @@ enum RenderQuality {
         case low, medium, high
     }
 
+    /// Chosen from GPU capability, with memory used only to rule devices out.
+    ///
+    /// The old gate demanded 5.5 GB for `high`. An iPhone 13 has 4 GB, so the phone
+    /// this game is aimed at landed on `medium` — one fur shell, no depth of field —
+    /// and every choice made "for the high tier" was dead on arrival. 5.5 GB is a
+    /// Pro-only threshold, and it was measuring the wrong thing anyway: what decides
+    /// whether a room this small can afford 2048² shadows and 16 samples is the GPU,
+    /// not how many apps fit in the background.
+    ///
+    /// `.apple7` is the A14 family — iPhone 12 and up — which is also where the
+    /// deployment target sits. The memory floor stays, but only to exclude the 3 GB
+    /// devices where texture memory, not shading, is what runs out.
     static let tier: Tier = {
         let gigabytes = Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824
-        let cores = ProcessInfo.processInfo.processorCount
-        if gigabytes >= 5.5 && cores >= 6 { return .high }
-        if gigabytes >= 3.5 { return .medium }
-        return .low
+        if gigabytes < 3.5 { return .low }
+        if MTLCreateSystemDefaultDevice()?.supportsFamily(.apple7) == true { return .high }
+        return .medium
     }()
 
     static var shadowMapSize: CGSize {

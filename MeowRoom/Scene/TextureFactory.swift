@@ -106,6 +106,32 @@ enum TextureFactory {
         return cache[key] != nil
     }
 
+    /// Draws a primitive up to nine times so that anything crossing the canvas edge
+    /// reappears on the opposite side.
+    ///
+    /// None of these generators wrapped. Strokes and ellipses were simply clipped at
+    /// the boundary, so every tiled surface in the room carried a faint grid — the
+    /// floor at eight repeats across, the walls at three. It is the sort of artefact
+    /// that is invisible in a screenshot of the texture and unmistakable once it is
+    /// on a wall, and it is the single cheapest fidelity win available.
+    ///
+    /// The extra passes are skipped unless the primitive is actually near an edge,
+    /// which for a few thousand small marks means almost all of them draw once.
+    private static func wrapped(_ s: CGFloat, x: CGFloat, y: CGFloat, radius: CGFloat,
+                                _ draw: (CGFloat, CGFloat) -> Void) {
+        draw(0, 0)
+        let left = x - radius < 0, right = x + radius > s
+        let top = y - radius < 0, bottom = y + radius > s
+        if left { draw(s, 0) }
+        if right { draw(-s, 0) }
+        if top { draw(0, s) }
+        if bottom { draw(0, -s) }
+        if left && top { draw(s, s) }
+        if left && bottom { draw(s, -s) }
+        if right && top { draw(-s, s) }
+        if right && bottom { draw(-s, -s) }
+    }
+
     private static func render(_ size: Int, _ body: (CGContext, CGFloat) -> Void) -> UIImage {
         let s = CGFloat(size)
         let format = UIGraphicsImageRendererFormat.default()
@@ -188,9 +214,16 @@ enum TextureFactory {
             }
             ctx.restoreGState()
 
-            // --- Darker saddle along the spine for depth.
+            // --- Countershading along the spine.
+            //
+            // This used to be a 0.22 darkening at 0.55 alpha, and the comment said
+            // "for depth" — which is exactly the problem. Painted depth is a shadow
+            // from a light that does not exist: it stayed put while the sun crossed
+            // the room, and now the coat's normal and occlusion maps shade the same
+            // fur a second time. What is left is the part that is real, because a
+            // cat's dorsal fur genuinely does carry more pigment than its flanks.
             ctx.saveGState()
-            let spineColors = [UIColor(base.darkened(0.22), alpha: 0.55).cgColor,
+            let spineColors = [UIColor(base.darkened(0.10), alpha: 0.30).cgColor,
                                UIColor(base, alpha: 0.0).cgColor] as CFArray
             if let grad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
                                      colors: spineColors, locations: [0, 1]) {
@@ -557,8 +590,15 @@ enum TextureFactory {
                     ctx.setFillColor(UIColor(c).cgColor)
                     ctx.fill(CGRect(x: 0, y: y, width: s, height: h * 1.05))
                 }
-                // Cross-weave shadow lines.
-                ctx.setStrokeColor(UIColor(straw.darkened(0.30), alpha: 0.30).cgColor)
+                // The cross-weave shadow lines that used to be drawn here are gone.
+                // They are shading, not pigment — where a binding thread crosses a
+                // cord it pulls it down, and SurfaceMaps.tatami now carries that as
+                // an actual dip. Painting it as well would darken the same crossing
+                // twice, once from a light that is not there.
+                //
+                // What stays is the thread's own colour: hemp against rush, lighter
+                // rather than darker, and only just visible.
+                ctx.setStrokeColor(UIColor(straw.lightened(0.10), alpha: 0.12).cgColor)
                 ctx.setLineWidth(1)
                 for i in 0..<32 {
                     let x = CGFloat(i) / 32 * s
@@ -566,12 +606,15 @@ enum TextureFactory {
                     ctx.addLine(to: CGPoint(x: x, y: s))
                 }
                 ctx.strokePath()
-                // Speckled age.
+                // Speckled age. Pigment, so it stays.
                 for _ in 0..<1400 {
                     let x = CGFloat(rng.float(0, 1)) * s
                     let y = CGFloat(rng.float(0, 1)) * s
+                    let w = CGFloat(rng.float(1, 4))
                     ctx.setFillColor(UIColor(straw.darkened(Float(rng.float(0.05, 0.35))), alpha: 0.14).cgColor)
-                    ctx.fill(CGRect(x: x, y: y, width: CGFloat(rng.float(1, 4)), height: 1))
+                    wrapped(s, x: x, y: y, radius: w) { dx, dy in
+                        ctx.fill(CGRect(x: x + dx, y: y + dy, width: w, height: 1))
+                    }
                 }
             }
         }
@@ -649,9 +692,11 @@ enum TextureFactory {
                     let ang = CGFloat(rng.float(0, .pi * 2))
                     ctx.setStrokeColor(UIColor(RGBColor(hex: 0xD8CDB6), alpha: CGFloat(rng.float(0.08, 0.35))).cgColor)
                     ctx.setLineWidth(CGFloat(rng.float(0.5, 1.6)))
-                    ctx.move(to: CGPoint(x: x, y: y))
-                    ctx.addLine(to: CGPoint(x: x + cos(ang) * len, y: y + sin(ang) * len))
-                    ctx.strokePath()
+                    wrapped(s, x: x, y: y, radius: len) { dx, dy in
+                        ctx.move(to: CGPoint(x: x + dx, y: y + dy))
+                        ctx.addLine(to: CGPoint(x: x + cos(ang) * len + dx, y: y + sin(ang) * len + dy))
+                        ctx.strokePath()
+                    }
                 }
             }
         }
@@ -665,14 +710,20 @@ enum TextureFactory {
                 ctx.fill(CGRect(x: 0, y: 0, width: s, height: s))
                 let noise = ValueNoise(seed: 5)
                 var rng = SeededGenerator(seed: 6)
+                // Half the previous contrast. These marks were doing two jobs —
+                // colour variation and standing in for the tooth of the plaster —
+                // and the second job now belongs to the normal and occlusion maps.
+                // Left at full strength the wall reads as dirty rather than textured.
                 for _ in 0..<2600 {
                     let x = CGFloat(rng.float(0, 1)) * s
                     let y = CGFloat(rng.float(0, 1)) * s
                     let n = noise.fbm(Float(x) * 0.02, Float(y) * 0.02, octaves: 4)
-                    let c = n > 0 ? base.lightened(n * 0.10) : base.darkened(-n * 0.14)
+                    let c = n > 0 ? base.lightened(n * 0.05) : base.darkened(-n * 0.07)
                     ctx.setFillColor(UIColor(c, alpha: 0.5).cgColor)
                     let r = CGFloat(rng.float(1, 5))
-                    ctx.fillEllipse(in: CGRect(x: x, y: y, width: r, height: r))
+                    wrapped(s, x: x, y: y, radius: r) { dx, dy in
+                        ctx.fillEllipse(in: CGRect(x: x + dx, y: y + dy, width: r, height: r))
+                    }
                 }
             }
         }
@@ -683,7 +734,10 @@ enum TextureFactory {
             render(256) { ctx, s in
                 ctx.setFillColor(UIColor(color).cgColor)
                 ctx.fill(CGRect(x: 0, y: 0, width: s, height: s))
-                ctx.setStrokeColor(UIColor(color.darkened(0.16), alpha: 0.4).cgColor)
+                // Faint, because the weave itself is relief now. At the old 0.4
+                // these lines drew a shadow at every thread crossing regardless of
+                // where the light was, and the new normal map draws another.
+                ctx.setStrokeColor(UIColor(color.darkened(0.10), alpha: 0.15).cgColor)
                 ctx.setLineWidth(1)
                 let n = Int(48 * weave)
                 for i in 0..<n {
@@ -697,7 +751,9 @@ enum TextureFactory {
                     let x = CGFloat(rng.float(0, 1)) * s
                     let y = CGFloat(rng.float(0, 1)) * s
                     ctx.setFillColor(UIColor(color.lightened(0.12), alpha: 0.12).cgColor)
-                    ctx.fill(CGRect(x: x, y: y, width: 2, height: 2))
+                    wrapped(s, x: x, y: y, radius: 2) { dx, dy in
+                        ctx.fill(CGRect(x: x + dx, y: y + dy, width: 2, height: 2))
+                    }
                 }
             }
         }
@@ -733,7 +789,9 @@ enum TextureFactory {
                     let x = CGFloat(rng.float(0, 1)) * s
                     let y = CGFloat(rng.float(0, 1)) * s
                     ctx.setFillColor(UIColor(indigo.lightened(Float(rng.float(0.05, 0.2))), alpha: 0.18).cgColor)
-                    ctx.fill(CGRect(x: x, y: y, width: 2, height: 2))
+                    wrapped(s, x: x, y: y, radius: 2) { dx, dy in
+                        ctx.fill(CGRect(x: x + dx, y: y + dy, width: 2, height: 2))
+                    }
                 }
             }
         }
@@ -746,19 +804,26 @@ enum TextureFactory {
                 ctx.setFillColor(UIColor(rope).cgColor)
                 ctx.fill(CGRect(x: 0, y: 0, width: s, height: s))
                 var rng = SeededGenerator(seed: 55)
+                // These bands were the shadow between rope winds. The winds are
+                // now modelled as half-cylinders in the height field, which shades
+                // them from wherever the light actually is, so all that is left to
+                // paint is how much each length of cord has been bleached.
                 for i in 0..<80 {
                     let y = CGFloat(i) / 80 * s
-                    ctx.setFillColor(UIColor(rope.darkened(Float(rng.float(0.02, 0.25))), alpha: 0.6).cgColor)
+                    ctx.setFillColor(UIColor(rope.darkened(Float(rng.float(0.02, 0.10))), alpha: 0.35).cgColor)
                     ctx.fill(CGRect(x: 0, y: y, width: s, height: s / 80 * 0.55))
                 }
                 for _ in 0..<900 {
                     let x = CGFloat(rng.float(0, 1)) * s
                     let y = CGFloat(rng.float(0, 1)) * s
+                    let dx = CGFloat(rng.float(-6, 6)), dy = CGFloat(rng.float(-1, 1))
                     ctx.setStrokeColor(UIColor(rope.lightened(0.25), alpha: 0.25).cgColor)
                     ctx.setLineWidth(1)
-                    ctx.move(to: CGPoint(x: x, y: y))
-                    ctx.addLine(to: CGPoint(x: x + CGFloat(rng.float(-6, 6)), y: y + CGFloat(rng.float(-1, 1))))
-                    ctx.strokePath()
+                    wrapped(s, x: x, y: y, radius: 8) { ox, oy in
+                        ctx.move(to: CGPoint(x: x + ox, y: y + oy))
+                        ctx.addLine(to: CGPoint(x: x + dx + ox, y: y + dy + oy))
+                        ctx.strokePath()
+                    }
                 }
             }
         }
@@ -775,10 +840,15 @@ enum TextureFactory {
                     let x = CGFloat(rng.float(0, 1)) * s
                     let y = CGFloat(rng.float(0, 1)) * s
                     let r = CGFloat(rng.float(1, 3.2))
+                    // Granules differ in colour as well as in height, so this is
+                    // still pigment — but gentler, since the shape of each pellet
+                    // is now carried by the height field rather than implied here.
                     let dark = rng.float() < 0.5
-                    ctx.setFillColor(UIColor(dark ? g.darkened(Float(rng.float(0.05, 0.25)))
-                                             : g.lightened(Float(rng.float(0.02, 0.15))), alpha: 0.8).cgColor)
-                    ctx.fillEllipse(in: CGRect(x: x, y: y, width: r, height: r))
+                    ctx.setFillColor(UIColor(dark ? g.darkened(Float(rng.float(0.03, 0.15)))
+                                             : g.lightened(Float(rng.float(0.02, 0.10))), alpha: 0.8).cgColor)
+                    wrapped(s, x: x, y: y, radius: r) { dx, dy in
+                        ctx.fillEllipse(in: CGRect(x: x + dx, y: y + dy, width: r, height: r))
+                    }
                 }
             }
         }
@@ -968,7 +1038,9 @@ enum TextureFactory {
                     let r = CGFloat(rng.float(3, 12))
                     let c = rng.float() < 0.5 ? leaf.lightened(Float(rng.float(0.05, 0.3))) : leaf.darkened(Float(rng.float(0.05, 0.3)))
                     ctx.setFillColor(UIColor(c, alpha: 0.7).cgColor)
-                    ctx.fillEllipse(in: CGRect(x: x, y: y, width: r * 1.6, height: r))
+                    wrapped(s, x: x, y: y, radius: r * 1.6) { dx, dy in
+                        ctx.fillEllipse(in: CGRect(x: x + dx, y: y + dy, width: r * 1.6, height: r))
+                    }
                 }
             }
         }

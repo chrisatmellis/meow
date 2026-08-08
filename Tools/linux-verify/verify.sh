@@ -31,7 +31,7 @@ fi
 mkdir -p "$MODULES"
 
 echo "==> building framework stand-ins"
-for name in CoreGraphics QuartzCore UIKit SceneKit RealityKit AVFoundation UserNotifications SwiftUI; do
+for name in CoreGraphics QuartzCore UIKit Metal SceneKit RealityKit AVFoundation UserNotifications SwiftUI; do
   swiftc -emit-module -emit-library \
     -module-name "$name" \
     -emit-module-path "$MODULES/$name.swiftmodule" \
@@ -82,7 +82,7 @@ echo "==> compiling"
 cd "$STAGE"
 FILES=$(find MeowRoom -name '*.swift' | sort)
 if ! swiftc -swift-version 5 -O -DDEBUG -I "$MODULES" -L "$MODULES" \
-     -lCoreGraphics -lQuartzCore -lUIKit -lSceneKit -lRealityKit \
+     -lCoreGraphics -lQuartzCore -lUIKit -lMetal -lSceneKit -lRealityKit \
      -lAVFoundation -lUserNotifications -lSwiftUI \
      -Xlinker -rpath -Xlinker "$MODULES" \
      -o "$STAGE/meowverify" main.swift profile.swift render.swift $FILES 2>&1 \

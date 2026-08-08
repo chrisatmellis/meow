@@ -212,6 +212,12 @@ enum MeshBuilder {
     }
 
     /// A rounded, slightly squashed sphere. Used for skulls, muzzles, paws and cushions.
+    ///
+    /// The poles are capped rather than left open. `sinf(0)` is zero, so the first
+    /// and last rings collapse to a point — except that the radius was floored at
+    /// 0.6 mm to keep the loft well-formed, which left a 0.6 mm hole at each pole
+    /// ringed by degenerate slivers. On a 7 mm nose and on every paw that is a
+    /// visible pinprick that catches the light from inside the mesh.
     static func blob(radius: Float,
                      scaleX: Float = 1, scaleY: Float = 1, scaleZ: Float = 1,
                      rings ringCount: Int = 14,
@@ -227,7 +233,9 @@ enum MeshBuilder {
                                   radiusX: max(0.0006, r * radius * scaleX),
                                   radiusY: max(0.0006, r * radius * scaleY)))
         }
-        return loft(rings, segments: segments, capStart: false, capEnd: false, vRepeat: vSpan)
+        // Capped at both ends: the caps are the size of the floored radius, so they
+        // are two tiny fans and cost nothing, and the surface closes.
+        return loft(rings, segments: segments, capStart: true, capEnd: true, vRepeat: vSpan)
     }
 
     /// A flat quad in the XZ plane, e.g. a futon top or a rug.

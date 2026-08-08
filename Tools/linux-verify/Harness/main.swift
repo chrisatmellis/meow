@@ -239,7 +239,39 @@ section("mesh builder") {
     expect(outward > loftMesh.normals.count * 9 / 10,
            "lofted side faces point outward (\(outward)/\(loftMesh.normals.count))")
 
+    /// Every edge is shared by exactly two triangles — the mesh has no holes and no
+    /// faces stacked on top of each other.
+    ///
+    /// `blob` used to leave a hole at each pole: `sinf(0)` collapses the end rings
+    /// to a point, but the radius is floored at 0.6 mm to keep the loft well formed,
+    /// so what was actually there was a 0.6 mm aperture ringed by slivers. On a 7 mm
+    /// nose that is a pinprick lit from inside the head.
+    func watertight(_ mesh: MeshData, _ label: String) {
+        // Key on position, not index: the seam columns are separate vertices at the
+        // same place, so an index-keyed edge count would report the seam as a hole.
+        func key(_ i: Int32) -> String {
+            let p = mesh.positions[Int(i)]
+            return "\(Int((p.x * 1e5).rounded()))|\(Int((p.y * 1e5).rounded()))|\(Int((p.z * 1e5).rounded()))"
+        }
+        var edges: [String: Int] = [:]
+        var t = 0
+        while t + 2 < mesh.indices.count {
+            let k = [key(mesh.indices[t]), key(mesh.indices[t + 1]), key(mesh.indices[t + 2])]
+            for e in 0..<3 {
+                let a = k[e], b = k[(e + 1) % 3]
+                if a == b { continue }        // a sliver at a collapsed pole ring
+                edges[a < b ? "\(a)>\(b)" : "\(b)>\(a)", default: 0] += 1
+            }
+            t += 3
+        }
+        let open = edges.filter { $0.value != 2 }
+        expect(open.isEmpty, "\(label) is watertight (\(open.count) edges not shared by two faces)")
+    }
+
     validate(MeshBuilder.blob(radius: 0.05), "blob")
+    watertight(MeshBuilder.blob(radius: 0.05), "blob")
+    watertight(MeshBuilder.blob(radius: 0.004, scaleY: 0.8, rings: 8, segments: 10), "nose-sized blob")
+    watertight(MeshBuilder.tube(length: 0.2, radius: { _ in 0.01 }), "capped tube")
     validate(MeshBuilder.tube(length: 0.2, radius: { 0.01 + 0.01 * $0 }), "tube")
     validate(MeshBuilder.ear(length: 0.05, width: 0.03, thickness: 0.01, curl: 0.4), "ear")
     validate(MeshBuilder.strand(length: 0.05, thickness: 0.001, droop: 0.3), "strand")
