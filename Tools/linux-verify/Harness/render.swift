@@ -14,7 +14,13 @@ private struct Tri {
 }
 
 private func tessellate(_ geometry: SCNGeometry) -> ([SCNVector3], [Int32]) {
-    // Custom meshes carry their own vertices.
+    // Generated meshes: read the buffers the generators actually produced, rather
+    // than whatever the renderer made of them.
+    if let mesh = MeshSourceRegistry.mesh(for: geometry), !mesh.indices.isEmpty {
+        return (mesh.positions.map { SCNVector3(x: $0.x, y: $0.y, z: $0.z) }, mesh.indices)
+    }
+
+    // Anything realised outside the mesh layer still carries its own vertices.
     if let source = geometry.sources.first(where: { !$0.vertices.isEmpty }),
        let element = geometry.elements.first, !element.indices.isEmpty {
         return (source.vertices, element.indices)
@@ -109,7 +115,11 @@ private func tessellate(_ geometry: SCNGeometry) -> ([SCNVector3], [Int32]) {
              SCNVector3(x: w, y: h, z: 0), SCNVector3(x: -w, y: h, z: 0))
 
     default:
-        break
+        // Silently drawing nothing is how a missing shape hides: the picture just
+        // comes out without it and looks plausible. Say so instead.
+        FileHandle.standardError.write(
+            "render: no tessellation for \(type(of: geometry)) — it will be missing from the image\n"
+                .data(using: .utf8)!)
     }
     return (verts, idx)
 }
@@ -324,6 +334,13 @@ private func screenBounds(_ node: SCNNode,
 // MARK: - Entry point
 
 func runRender(outputDirectory: String) {
+    // Only the render pass needs the generators' raw buffers kept around.
+    MeshSourceRegistry.isRecording = true
+    defer {
+        MeshSourceRegistry.isRecording = false
+        MeshSourceRegistry.reset()
+    }
+
     let fm = FileManager.default
     try? fm.createDirectory(atPath: outputDirectory, withIntermediateDirectories: true)
 

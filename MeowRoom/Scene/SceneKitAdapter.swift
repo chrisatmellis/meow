@@ -8,6 +8,38 @@ import UIKit
 /// conversion here means the generators stay portable and the verification harness
 /// can rasterise the same buffers without a graphics framework present.
 
+#if DEBUG
+/// Remembers which raw buffers a realised geometry came from.
+///
+/// The offline renderer draws the real generated meshes, and it used to reach them
+/// by reading them back out of `SCNGeometry` — which meant looking at the cat
+/// depended on the renderer being present and on hand-written tessellation for
+/// every primitive type. Recording the source mesh instead lets it read the same
+/// buffers the generators produced.
+///
+/// Recording is off by default and bounded on purpose: the assertion suite builds
+/// hundreds of rigs and has no use for this, so only the render pass switches it on.
+enum MeshSourceRegistry {
+    static var isRecording = false
+    private static var table: [ObjectIdentifier: (SCNGeometry, MeshData)] = [:]
+
+    static func record(_ geometry: SCNGeometry, _ mesh: MeshData) {
+        guard isRecording else { return }
+        // The geometry is retained alongside the mesh so its identifier cannot be
+        // reused by a later allocation while the mapping is still live.
+        table[ObjectIdentifier(geometry)] = (geometry, mesh)
+    }
+
+    static func mesh(for geometry: SCNGeometry) -> MeshData? {
+        table[ObjectIdentifier(geometry)]?.1
+    }
+
+    static func reset() {
+        table.removeAll()
+    }
+}
+#endif
+
 extension MeshData {
     func geometry() -> SCNGeometry {
         normalsIfNeeded()
@@ -15,7 +47,11 @@ extension MeshData {
         let nSource = SCNGeometrySource(normals: normals.map { SCNVector3(x: $0.x, y: $0.y, z: $0.z) })
         let tSource = SCNGeometrySource(textureCoordinates: uvs.map { CGPoint(x: CGFloat($0.x), y: CGFloat($0.y)) })
         let element = SCNGeometryElement(indices: indices, primitiveType: .triangles)
-        return SCNGeometry(sources: [vSource, nSource, tSource], elements: [element])
+        let geometry = SCNGeometry(sources: [vSource, nSource, tSource], elements: [element])
+        #if DEBUG
+        MeshSourceRegistry.record(geometry, self)
+        #endif
+        return geometry
     }
 }
 
