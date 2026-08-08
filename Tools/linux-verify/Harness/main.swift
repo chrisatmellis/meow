@@ -170,6 +170,21 @@ section("mesh builder") {
                "\(label) indices are in range")
         expect(mesh.positions.allSatisfy { finite($0) }, "\(label) positions are finite")
         expect(mesh.normals.allSatisfy { abs($0.length - 1) < 1e-3 }, "\(label) normals are unit length")
+
+        // Vertices at the same place must face the same way. A closed loft keeps two
+        // vertex columns at the seam so the texture has somewhere to wrap, and each
+        // used to average only the triangles on its own side — a lighting crease down
+        // every tube in the game. This is the regression test for that.
+        var byPosition: [String: Vec3] = [:]
+        for (i, p) in mesh.positions.enumerated() {
+            let key = "\(Int((p.x * 1e4).rounded()))|\(Int((p.y * 1e4).rounded()))|\(Int((p.z * 1e4).rounded()))"
+            if let first = byPosition[key] {
+                expect(dot(first, mesh.normals[i]) > 0.9999,
+                       "\(label) has no shading seam at coincident vertices")
+            } else {
+                byPosition[key] = mesh.normals[i]
+            }
+        }
     }
 
     let mesh = MeshData()

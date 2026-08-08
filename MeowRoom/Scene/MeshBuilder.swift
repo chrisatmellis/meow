@@ -48,7 +48,7 @@ final class MeshData {
         addTriangle(a, c, d)
     }
 
-    /// Area-weighted vertex normals.
+    /// Area-weighted vertex normals, shared across coincident positions.
     func recomputeNormals() {
         for i in 0..<normals.count { normals[i] = .zero }
         var i = 0
@@ -61,8 +61,49 @@ final class MeshData {
             normals[ic] += n
             i += 3
         }
+        weldNormalsAcrossSeams()
         for j in 0..<normals.count {
             normals[j] = normals[j].normalized
+        }
+    }
+
+    /// Sums the normals of vertices that sit on top of each other, so both copies
+    /// end up facing the same way.
+    ///
+    /// A closed loft needs two vertex columns at the same place: the sweep starts at
+    /// angle 0 and ends at 2π, and the end column carries u = 1 where the start
+    /// carries u = 0, so the texture has somewhere to wrap. But each column only
+    /// borders the triangles on its own side, so each was averaging half the
+    /// surface, and the two halves disagreed — a hard lighting crease running the
+    /// length of every tube in the game: the torso, the neck, all four legs, all nine
+    /// tail segments.
+    ///
+    /// Merging the *vertices* would fix the shading and ruin the texture, because the
+    /// last facet would then run u from 1 back to 0 and mirror the coat across
+    /// itself. Merging only the normals keeps the seam invisible in both.
+    ///
+    /// Called before normalising, so this is a sum of area-weighted face normals and
+    /// stays area-weighted. Positions are quantised to a tenth of a millimetre, which
+    /// is far below anything the cat is modelled at and far above float drift.
+    func weldNormalsAcrossSeams(epsilon: Float = 1e-4) {
+        var groups: [Key: [Int]] = [:]
+        groups.reserveCapacity(positions.count)
+        for (i, p) in positions.enumerated() {
+            groups[Key(p, epsilon), default: []].append(i)
+        }
+        for (_, members) in groups where members.count > 1 {
+            var sum = Vec3.zero
+            for m in members { sum += normals[m] }
+            for m in members { normals[m] = sum }
+        }
+    }
+
+    private struct Key: Hashable {
+        let x: Int32, y: Int32, z: Int32
+        init(_ p: Vec3, _ epsilon: Float) {
+            x = Int32((p.x / epsilon).rounded())
+            y = Int32((p.y / epsilon).rounded())
+            z = Int32((p.z / epsilon).rounded())
         }
     }
 
