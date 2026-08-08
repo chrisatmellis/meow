@@ -120,7 +120,7 @@ final class LightingRig {
     }
 
     /// Total SceneKit intensity at full daylight, and the lux that corresponds to.
-    private static let noonIntensity: Float = 680
+    private static let noonIntensity: Float = 430
     private static let noonLux: Float = 2563
 
     /// How much of the budget's range reaches the lights.
@@ -132,7 +132,7 @@ final class LightingRig {
     /// light" of 263 at midday rendered at mean 126 and mean 67. Keeping the
     /// numbers in a range the tone mapper treats roughly linearly is what makes
     /// the budget's ratios survive to the screen.
-    private static let intensityGamma: Float = 0.75
+    private static let intensityGamma: Float = 0.65
 
     /// Lux to SceneKit intensity for a given budget. Compressive, so a moonlit
     /// room is dimmer than noon by a believable amount rather than by the full
@@ -210,7 +210,7 @@ final class LightingRig {
         // --- Backlit shoji paper. Its brightness is the sky outside and nothing
         // else: the flat floor this used to carry was what left the paper — and
         // the open half beside it — glowing at ten at night.
-        let glow = CGFloat(min(0.36, budget.sky * 0.0005))
+        let glow = CGFloat(min(0.28, budget.sky * 0.0004))
         for mat in room.shojiMaterials {
             mat.emission.intensity = glow
             mat.emission.contents = UIColor(sky.skyHorizonColor.lightened(0.35 * sky.daylight))
@@ -219,7 +219,7 @@ final class LightingRig {
         // --- Garden outside.
         // Outdoors is far brighter than the room it is seen from, so this runs
         // well past 1 in daylight and the window blows out, as it should.
-        let outdoor = CGFloat(min(0.78, 0.28 + budget.sky * 0.0007))
+        let outdoor = CGFloat(min(0.62, 0.28 + budget.sky * 0.0005))
         for mat in room.backdropMaterials {
             mat.emission.contents = TextureFactory.gardenBackdrop(sky: sky)
             mat.emission.intensity = outdoor
@@ -227,7 +227,7 @@ final class LightingRig {
 
         // --- Image-based lighting for believable PBR highlights.
         scene.lightingEnvironment.contents = TextureFactory.skyEnvironment(sky: sky)
-        scene.lightingEnvironment.intensity = CGFloat(min(1.2, budget.sky * 0.0013))
+        scene.lightingEnvironment.intensity = CGFloat(min(0.62, budget.sky * 0.0009))
         scene.background.contents = UIColor(sky.skyHorizonColor.darkened(0.4))
 
         // --- Paper lantern.
