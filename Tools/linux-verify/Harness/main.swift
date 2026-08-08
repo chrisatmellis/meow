@@ -920,6 +920,168 @@ section("realitykit shim") {
     }
 }
 
+section("height fields") {
+
+    func decode(_ b: UInt8) -> Float { Float(b) / 255 * 2 - 1 }
+
+    // The sign convention, pinned. This is the single most likely thing in the
+    // material pipeline to be inverted, and inverted normals do not look broken —
+    // they look like the light is coming from the wrong side, which is exactly the
+    // kind of wrongness that survives review and ships.
+    do {
+        let n = 32
+        var ramp = HeightField(size: n, fill: 0)
+        for y in 0..<n {
+            for x in 0..<n { ramp[x, y] = Float(x) / Float(n - 1) }
+        }
+        let map = ramp.normalMap(slopeScale: 4)
+        var allLeaning = true
+        // Skip the last column: a ramp is not periodic, so the wrap there is a cliff.
+        for y in 0..<n {
+            for x in 1..<(n - 1) {
+                if map[(y * n + x) * 4 + 0] >= 128 { allLeaning = false }
+            }
+        }
+        expect(allLeaning, "a surface rising along +u tilts its normal toward -u (R < 0.5)")
+
+        var down = HeightField(size: n, fill: 0)
+        for y in 0..<n {
+            for x in 0..<n { down[x, y] = Float(y) / Float(n - 1) }
+        }
+        let dmap = down.normalMap(slopeScale: 4, flipGreen: true)
+        expect(dmap[(8 * n + 8) * 4 + 1] > 128,
+               "with flipGreen the green channel points up the image, not down it")
+        let dflip = down.normalMap(slopeScale: 4, flipGreen: false)
+        expect(dflip[(8 * n + 8) * 4 + 1] < 128, "flipGreen actually flips green")
+    }
+
+    // Wellformedness: unit length, facing out, and averaging to flat.
+    do {
+        let n = 64
+        var f = HeightField(size: n, fill: 0.5)
+        f.addNoise(seed: 99, cells: 8, octaves: 3, amplitude: 0.25)
+        f.addGrain(seed: 7, cells: 32, stretch: 6, amplitude: 0.08, along: 0)
+        f.normalize()
+        let map = f.normalMap(slopeScale: 2)
+
+        var unit = true, facing = true
+        var sx: Float = 0, sy: Float = 0, sz: Float = 0
+        for i in 0..<(n * n) {
+            let x = decode(map[i * 4 + 0]), y = decode(map[i * 4 + 1]), z = decode(map[i * 4 + 2])
+            let len = sqrtf(x * x + y * y + z * z)
+            if abs(len - 1) > 0.01 { unit = false }
+            if z < 0.5 { facing = false }
+            sx += x; sy += y; sz += z
+        }
+        let count = Float(n * n)
+        expect(unit, "every baked normal is unit length")
+        expect(facing, "no baked normal leans past 60 degrees (B >= 0.5)")
+        expect(abs(sx / count) < 0.02 && abs(sy / count) < 0.02,
+               "relief is balanced — the mean normal has no lateral bias")
+        expect(sz / count > 0.9, "the mean normal points out of the surface")
+    }
+
+    // Tiling. This is what removes the visible grid from the floor and walls, and
+    // it only holds because the noise is periodic and the Sobel wraps.
+    do {
+        let n = 48
+        var f = HeightField(size: n, fill: 0.5)
+        f.addNoise(seed: 4242, cells: 6, octaves: 4, amplitude: 0.3)
+        var wraps = true
+        for y in 0..<n {
+            if abs(f[-1, y] - f[n - 1, y]) > 1e-6 { wraps = false }
+            if abs(f[n, y] - f[0, y]) > 1e-6 { wraps = false }
+        }
+        expect(wraps, "sampling wraps around the tile")
+
+        // The real test: the gradient across the seam must match the gradient
+        // anywhere else. If the noise did not tile, column 0 and column n-1 would
+        // be unrelated and the seam would bake as a ridge.
+        let map = f.normalMap(slopeScale: 3)
+        var seamSlope: Float = 0, interiorSlope: Float = 0
+        for y in 0..<n {
+            seamSlope += abs(decode(map[(y * n + 0) * 4 + 0]))
+            interiorSlope += abs(decode(map[(y * n + n / 2) * 4 + 0]))
+        }
+        expect(seamSlope < interiorSlope * 3,
+               "the tile seam is no steeper than the middle of the tile")
+
+        let shifted = HeightField.tileableNoise(6, 3.25, period: 6, seed: 1)
+        let same = HeightField.tileableNoise(0, 3.25, period: 6, seed: 1)
+        expect(abs(shifted - same) < 1e-6, "tileable noise repeats at exactly its period")
+    }
+
+    // Physical scaling. The same field on two differently-tiled surfaces must not
+    // bake to the same slope, or the denser tiling comes out flattened.
+    do {
+        let coarse = SurfaceRelief(surfaceMetres: 3.6, tile: 2, mapSize: 512, reliefMetres: 0.0010)
+        let dense = SurfaceRelief(surfaceMetres: 3.6, tile: 6, mapSize: 512, reliefMetres: 0.0010)
+        expect(dense.slopeScale > coarse.slopeScale * 2.9,
+               "tiling a texture more densely steepens its slopes proportionally")
+        expect(coarse.texelsPerMetre > 256, "the tatami-sized case clears the density floor")
+
+        let thin = SurfaceRelief(surfaceMetres: 3.6, tile: 2, mapSize: 512, reliefMetres: 0.0002)
+        expect(thin.slopeScale < coarse.slopeScale,
+               "shallower relief bakes to gentler slopes at the same tiling")
+
+        // Sanity on the units: one texel of the coarse floor is about 3.5 mm, and a
+        // 1 mm rush cord across it is a slope of roughly 0.28.
+        expect(abs(coarse.texelMetres - 3.6 / 1024) < 1e-6, "texel size is metres per repeat per texel")
+        expect(coarse.slopeScale > 0.2 && coarse.slopeScale < 0.4, "tatami slope lands near 0.28")
+    }
+
+    // Flat stays flat, and does not divide by zero on the way.
+    do {
+        var flat = HeightField(size: 8, fill: 0.3)
+        flat.normalize()
+        expect(flat.samples.allSatisfy { $0.isFinite }, "normalizing a flat field stays finite")
+        let map = flat.normalMap(slopeScale: 10)
+        expect(map[0] == 128 && map[1] == 128 && map[2] == 255,
+               "a flat field bakes to the flat normal")
+        let ao = flat.occlusionMap()
+        expect(ao.enumerated().allSatisfy { $0.offset % 4 == 3 || $0.element == 255 },
+               "a flat field has no cavity occlusion")
+    }
+
+    // Cavity: a groove must read darker than the plateau beside it.
+    do {
+        let n = 32
+        var f = HeightField(size: n, fill: 1)
+        for y in 0..<n { for x in 14...17 { f[x, y] = 0 } }
+        let ao = f.occlusionMap(radius: 6, strength: 1)
+        expect(ao[(16 * n + 15) * 4] < ao[(16 * n + 4) * 4],
+               "the floor of a groove is more occluded than the plateau")
+        expect(ao[(16 * n + 4) * 4] == 255, "flat ground away from the groove is unoccluded")
+    }
+
+    // Strokes and discs wrap rather than clipping at the edge — the reason tiled
+    // surfaces currently carry a grid is that the CG generators do not do this.
+    do {
+        let n = 32
+        var f = HeightField(size: n, fill: 0)
+        f.addStroke(x0: -4, y0: 8, x1: 4, y1: 8, width: 3, height: 1)
+        expect(f[n - 2, 8] > 0, "a stroke running off the left edge reappears on the right")
+        var d = HeightField(size: n, fill: 0)
+        d.addDisc(cx: 0, cy: 0, radius: 4, height: 1)
+        expect(d[n - 1, n - 1] > 0, "a disc at the origin wraps into the opposite corner")
+    }
+
+    // Roughness responds to relief, in the direction asked for.
+    do {
+        let n = 16
+        var f = HeightField(size: n, fill: 0.5)
+        f[4, 4] = 1.0
+        f[8, 8] = 0.0
+        let r = f.roughnessMap(base: 0.6, variation: 0.3)
+        expect(r[(4 * n + 4) * 4] < r[(8 * n + 8) * 4],
+               "raised parts are smoother than recesses at positive variation")
+        let inverted = f.roughnessMap(base: 0.6, variation: -0.3)
+        expect(inverted[(4 * n + 4) * 4] > inverted[(8 * n + 8) * 4],
+               "negative variation makes the peaks the rough ones")
+        expect(r.allSatisfy { $0 <= 255 }, "roughness stays in range")
+    }
+}
+
 // MARK: - Report
 
 print("")
