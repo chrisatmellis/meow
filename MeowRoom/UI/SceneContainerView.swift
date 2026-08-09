@@ -37,7 +37,10 @@ struct SceneContainerView: View {
             content.renderingEffects.motionBlur = .disabled
 
             content.add(controller.root)
-            content.subscribe(to: SceneEvents.Update.self) { event in
+            // Held by the controller. Whether the content retains it is not
+            // documented either way, and an unretained subscription is a frame
+            // loop that silently stops — a still room with a live HUD.
+            controller.frameLoop = content.subscribe(to: SceneEvents.Update.self) { event in
                 controller.update(deltaTime: Float(event.deltaTime))
             }
         }

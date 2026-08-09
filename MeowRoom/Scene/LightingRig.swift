@@ -143,23 +143,35 @@ final class LightingRig {
         var total: Float { sun + moon + ambient + lantern }
     }
 
-    /// Total SceneKit intensity at full daylight, and the lux that corresponds to.
-    /// Measured, not guessed: at 430 the room rendered at mean luma 182 with the
-    /// tatami blown to near-white and no detail left in it. A lit interior sits
-    /// closer to 110-120 — bright, but with the floor still made of something.
-    private static let noonIntensity: Float = 290
+    /// The lux the lights are actually given at full daylight, and the lux the
+    /// budget says is arriving.
+    ///
+    /// These are the same number now, and that is the point. Under SceneKit this
+    /// was 290 against 2563, because SceneKit's intensities are arbitrary and its
+    /// tone mapper saturates — the 290 was fitted to a screenshot and meant
+    /// nothing outside it. RealityKit's lights are in real lux, so the honest
+    /// starting position is to hand the budget straight over and compress only the
+    /// bottom end, which is what `intensityGamma` is for.
+    ///
+    /// Unmeasured, and knowingly so. The old numbers were fitted to a renderer
+    /// that is gone; carrying them across would have been carrying a fit for
+    /// somebody else's tone curve. This is the value the physics implies, which is
+    /// the right thing to take a screenshot of first.
     private static let noonLux: Float = 2563
+    private static let noonIntensity: Float = noonLux
 
     /// How much of the budget's range reaches the lights.
     ///
-    /// Not 1, because SceneKit is not a linear-light renderer: its tone mapper
-    /// saturates, so driving intensities to the tens of thousands buys nothing
-    /// and then needs a huge negative exposure to bring back, which crushes the
-    /// scene. Measured directly — two builds computing an identical "effective
-    /// light" of 263 at midday rendered at mean 126 and mean 67. Keeping the
-    /// numbers in a range the tone mapper treats roughly linearly is what makes
-    /// the budget's ratios survive to the screen.
+    /// Not 1, because the physical range is 88x between midnight and noon and no
+    /// display can show that. With no camera exposure to adapt with — RealityKit
+    /// has none — an uncompressed range means one end of the day is unreadable.
+    /// At 0.65 the room spans a little under four stops, which is enough for night
+    /// to read as night and little enough that it still reads as a room.
     private static let intensityGamma: Float = 0.65
+
+    /// What `budget.sky` reaches at full daylight, which is the anchor the
+    /// environment map's intensity is expressed against.
+    private static let noonSkyLux: Float = 663
 
     /// Lux to SceneKit intensity for a given budget. Compressive, so a moonlit
     /// room is dimmer than noon by a believable amount rather than by the full
@@ -207,9 +219,22 @@ final class LightingRig {
     /// value that varies with the sky rescales every emissive in the room and is
     /// what once made midnight brighter than midday. A constant cannot do that to
     /// the ordering; it only ever stops the whole day down together.
-    /// A multiplier on the lights, replacing what used to be a camera exposure
-    /// offset of -1.75 EV. Same amount of light: 2^-1.75 is 0.297.
-    static func exposure(for budget: LightBudget) -> Float { 0.297 }
+    /// A multiplier on the lights, where SceneKit had a camera exposure offset.
+    ///
+    /// One, deliberately. The -1.75 EV it replaces existed to pull back a room lit
+    /// by intensities that had been raised past where SceneKit's tone mapper
+    /// stopped responding — a compensation for a compensation, and both halves of
+    /// it belonged to a renderer that is gone. The lights are in lux now and the
+    /// budget is in lux, so the starting position is that the room is lit by
+    /// exactly as much light as the sky is delivering.
+    ///
+    /// It stays a constant and it stays here rather than moving to the camera,
+    /// because that is the part three earlier builds each got wrong in a different
+    /// way: an exposure that varies with the sky also rescales every emissive
+    /// surface — lantern paper, the feeder's LED, eye catchlights, the garden —
+    /// none of which are in the budget, and that is what once made midnight render
+    /// brighter than midday.
+    static func exposure(for budget: LightBudget) -> Float { 1.0 }
 
     static func exposure(sky: SkyState, lanternOn: Bool) -> Float {
         exposure(for: budget(sky: sky, lanternOn: lanternOn))
@@ -296,12 +321,15 @@ final class LightingRig {
             environmentCache = (key, made)
         }
         if let resource = environmentCache?.resource {
-            // The intensity is an exponent of two, not a multiplier, so the
-            // conversion from a linear share of the budget is a log.
-            let linear = max(0.02, min(0.85, lastBudget.sky * 0.0014) * exposure)
+            // An exponent of two applied to the environment as authored, so zero
+            // means "the sky, as drawn". The sky is drawn for the hour already, so
+            // what is left for this to say is how much of the day's light is
+            // arriving compared to noon — which makes an overcast dusk dimmer than
+            // a clear noon without redrawing anything.
+            let relative = max(0.004, lastBudget.sky / LightingRig.noonSkyLux) * exposure
             environment.components.set(ImageBasedLightComponent(
                 source: .single(resource),
-                intensityExponent: log2f(linear)))
+                intensityExponent: log2f(relative)))
         }
 
         // --- Dust motes only show when there is a beam to catch.

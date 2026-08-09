@@ -109,7 +109,7 @@ func runProfile() {
     }
 
     print("\n── light across the day ────────────────────────────────")
-    print("  hour      sun     sky    moon lantern  |    key    EV   lights")
+    print("  hour      sun     sky    moon lantern  |    key  gain   lights")
     var dayCal = Calendar(identifier: .gregorian)
     dayCal.timeZone = TimeZone(identifier: "UTC")!
     var lo = Float.infinity, hi = -Float.infinity
@@ -120,7 +120,7 @@ func runProfile() {
         let b = LightingRig.budget(sky: s, lanternOn: s.wantsLampLight)
         let screen = LightingRig.renderedBrightness(for: b)
         lo = min(lo, screen); hi = max(hi, screen)
-        print(String(format: "  %02d:00 %7.0f %7.0f %7.1f %7.0f  | %6.0f %+5.2f %8.0f",
+        print(String(format: "  %02d:00 %7.0f %7.0f %7.1f %7.0f  | %6.0f %5.2f %8.0f",
                      hour, b.sun, b.sky, b.moon, b.lantern,
                      b.key, LightingRig.exposure(for: b), screen))
     }

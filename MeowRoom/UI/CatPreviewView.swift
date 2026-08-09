@@ -18,6 +18,8 @@ final class CatPreviewController: NSObject, ObservableObject {
     private let pivot = Entity()
     let camera = PerspectiveCamera()
     private let environment = Entity()
+    /// Held for the same reason the game's is: see `GameSceneController.frameLoop`.
+    var frameLoop: EventSubscription?
 
     private var pendingAppearance: CatAppearance?
     private var lastRebuild: TimeInterval = 0
@@ -169,7 +171,7 @@ struct CatPreviewView: View {
         RealityView { content in
             content.camera = .virtual
             content.add(controller.root)
-            content.subscribe(to: SceneEvents.Update.self) { event in
+            controller.frameLoop = content.subscribe(to: SceneEvents.Update.self) { event in
                 controller.update(deltaTime: Float(event.deltaTime))
             }
         } update: { _ in

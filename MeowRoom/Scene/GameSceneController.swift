@@ -19,6 +19,12 @@ final class GameSceneController: NSObject {
 
     weak var viewModel: GameViewModel?
 
+    /// The frame-loop subscription, held here for the same reason a timer is: it
+    /// is not documented whether the view's content retains it, and an
+    /// unretained one is a frame loop that quietly stops — a still room with a
+    /// HUD that carries on updating.
+    var frameLoop: EventSubscription?
+
     private var skyRefresh: Float = 99
     /// The eased exposure the room is lit at.
     ///
