@@ -37,6 +37,9 @@
 // For `RealityView`, which is a SwiftUI view that RealityKit vends — so on Linux
 // the RealityKit stand-in has to be built after the SwiftUI one.
 import SwiftUI
+// For `MTLSamplerDescriptor`, which is how RealityKit configures a texture's
+// addressing mode.
+@_exported import Metal
 
 // MARK: - simd stand-ins
 //
@@ -783,16 +786,23 @@ public enum MaterialParameterTypes {
 
 public enum MaterialParameters {
     public struct Texture {
+        /// Wraps an `MTLSamplerDescriptor`, which is a class, so `modify` hands it
+        /// over by reference rather than as `inout`. Only the addressing mode
+        /// matters here: a tiled surface sampled with Metal's default clamp shows
+        /// one repeat and then a smear, which reads as a broken UV rather than as
+        /// a broken sampler.
         public struct Sampler {
-            /// The real type wraps an `MTLSamplerDescriptor` and is configured
-            /// through `modify`. Only the addressing mode matters here: a tiled
-            /// surface sampled with the default clamp shows one repeat and a
-            /// smear, which looks like a broken UV rather than a broken sampler.
-            public enum AddressMode { case clampToEdge, `repeat`, mirrorRepeat, clampToZero, clampToBorderColor }
-            public var addressModeU: AddressMode = .repeat
-            public var addressModeV: AddressMode = .repeat
+            public var descriptor = MTLSamplerDescriptor()
             public init() {}
-            public mutating func modify(_ body: (inout Sampler) -> Void) { body(&self) }
+            public init(_ descriptor: MTLSamplerDescriptor) { self.descriptor = descriptor }
+            @discardableResult
+            public func modify<R>(_ body: (MTLSamplerDescriptor) throws -> R) rethrows -> R {
+                try body(descriptor)
+            }
+            @discardableResult
+            public func access<R>(_ body: (MTLSamplerDescriptor) throws -> R) rethrows -> R {
+                try body(descriptor)
+            }
         }
 
         public var resource: TextureResource
@@ -845,6 +855,12 @@ public final class TextureResource {
     }
 
     public enum MipmapsMode { case none, allocateAll, allocateAndGenerateAll }
+
+    public struct Compression {
+        public static let `default` = Compression()
+        public static let none = Compression()
+        public init() {}
+    }
 
     /// What the pixels *mean*, which decides the colour space they are read in.
     /// A normal map read as sRGB is the classic silent disaster: it still looks
@@ -1001,13 +1017,36 @@ public struct UnlitMaterial: Material {
 // image before it can light anything.
 
 public final class EnvironmentResource {
+    public typealias Compression = TextureResource.Compression
+
+    public struct CreateOptions {
+        public enum SamplingQuality { case fast, normal, high, veryHigh }
+
+        public var samplingQuality: SamplingQuality
+        public var specularCubeDimension: Int?
+        public var compression: Compression
+
+        public init(samplingQuality: SamplingQuality,
+                    specularCubeDimension: Int? = nil,
+                    compression: Compression = .default) {
+            self.samplingQuality = samplingQuality
+            self.specularCubeDimension = specularCubeDimension
+            self.compression = compression
+        }
+    }
+
     public var name: String
     public init(name: String = "environment") { self.name = name }
 
     /// The path this game uses: the sky is drawn procedurally every few minutes,
     /// so it arrives as a `CGImage` and never touches the bundle.
-    public convenience init(equirectangular image: CGImage, withName name: String? = nil) throws {
-        self.init(name: name ?? "equirectangular")
+    ///
+    /// Deliberately the `options:` spelling. The `withName:` one is `async`, and
+    /// the sky is rebuilt from inside a synchronous frame loop — so taking the
+    /// convenient-looking initialiser would have compiled here, against a
+    /// stand-in that forgot to be async, and failed on device.
+    public convenience init(equirectangular image: CGImage, options: CreateOptions) throws {
+        self.init(name: "equirectangular")
     }
 
     public convenience init(named name: String, in bundle: Bundle? = nil) throws {

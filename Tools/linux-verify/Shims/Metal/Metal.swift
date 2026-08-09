@@ -17,3 +17,27 @@ public protocol MTLDevice: AnyObject {
 }
 
 public func MTLCreateSystemDefaultDevice() -> MTLDevice? { nil }
+
+// MARK: - Samplers
+//
+// RealityKit configures a texture's sampler by handing over a Metal descriptor,
+// so the one property the game sets has to live here rather than in a
+// RealityKit-shaped stand-in for it.
+
+public enum MTLSamplerAddressMode: Int {
+    case clampToEdge, mirrorClampToEdge, `repeat`, mirrorRepeat, clampToZero, clampToBorderColor
+}
+
+public enum MTLSamplerMinMagFilter: Int { case nearest, linear }
+public enum MTLSamplerMipFilter: Int { case notMipmapped, nearest, linear }
+
+open class MTLSamplerDescriptor {
+    open var sAddressMode: MTLSamplerAddressMode = .clampToEdge
+    open var tAddressMode: MTLSamplerAddressMode = .clampToEdge
+    open var rAddressMode: MTLSamplerAddressMode = .clampToEdge
+    open var minFilter: MTLSamplerMinMagFilter = .linear
+    open var magFilter: MTLSamplerMinMagFilter = .linear
+    open var mipFilter: MTLSamplerMipFilter = .linear
+    open var maxAnisotropy: Int = 1
+    public init() {}
+}

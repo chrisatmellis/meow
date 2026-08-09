@@ -90,7 +90,9 @@ final class CatPreviewController: NSObject, ObservableObject {
         root.addChild(camera)
 
         if let cg = TextureFactory.skyEnvironment(sky: WorldClock.sky()).cgImage,
-           let resource = try? EnvironmentResource(equirectangular: cg, withName: "studio") {
+           let resource = try? EnvironmentResource(
+               equirectangular: cg,
+               options: .init(samplingQuality: .normal, specularCubeDimension: 64)) {
             environment.components.set(ImageBasedLightComponent(source: .single(resource),
                                                                intensityExponent: log2f(0.28)))
             root.addChild(environment)

@@ -121,10 +121,10 @@ enum TextureBridge {
     static func tiling(_ image: UIImage,
                        semantic: TextureResource.Semantic) -> MaterialParameters.Texture? {
         guard let resource = resource(image, semantic: semantic) else { return nil }
-        var sampler = MaterialParameters.Texture.Sampler()
-        sampler.modify { s in
-            s.addressModeU = .repeat
-            s.addressModeV = .repeat
+        let sampler = MaterialParameters.Texture.Sampler()
+        sampler.modify { descriptor in
+            descriptor.sAddressMode = .repeat
+            descriptor.tAddressMode = .repeat
         }
         return MaterialParameters.Texture(resource, sampler: sampler)
     }

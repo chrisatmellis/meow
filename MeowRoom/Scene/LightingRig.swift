@@ -285,7 +285,14 @@ final class LightingRig {
         let image = TextureFactory.skyEnvironment(sky: sky)
         let key = ObjectIdentifier(image)
         if environmentCache?.key != key, let cg = image.cgImage,
-           let made = try? EnvironmentResource(equirectangular: cg, withName: "sky") {
+           let made = try? EnvironmentResource(
+               equirectangular: cg,
+               // The `withName:` initialiser is `async`, and this runs inside a
+               // synchronous frame loop. `options:` has a throwing form that does
+               // not, and it lets the quality be chosen besides — the sky is a
+               // smooth gradient, so a fast bake of it is indistinguishable from
+               // a slow one and this happens while the player is watching.
+               options: .init(samplingQuality: .fast, specularCubeDimension: 64)) {
             environmentCache = (key, made)
         }
         if let resource = environmentCache?.resource {
