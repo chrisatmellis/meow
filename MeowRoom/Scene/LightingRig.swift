@@ -2,7 +2,20 @@ import Foundation
 import SceneKit
 import UIKit
 
-/// Sun, moon, sky and bounce light, all driven by the device's real clock.
+/// One sun outside the room, one moon behind it, and sky. Nothing else.
+///
+/// There used to be two omni lights floating *inside* the room as well — a
+/// "bounce" about a metre above the tatami and a "window glow" beside the shoji —
+/// and between them they carried most of the daylight. They are gone, because in
+/// a room four metres across a light with a position always lights whatever it
+/// happens to be nearest, and every symptom chased through a long evening of
+/// tuning turned out to be one of them doing exactly that: a bright pool on the
+/// floor, a white patch on the paper, each "fixed" by moving a bulb to where it
+/// could do less obvious harm.
+///
+/// What replaces them is the sky itself — flat ambient plus the image-based
+/// environment — neither of which has a location, so neither can put a bright
+/// patch anywhere at all.
 final class LightingRig {
     let root = SCNNode()
 
@@ -11,10 +24,6 @@ final class LightingRig {
     private let moonNode = SCNNode()
     private let moon = SCNLight()
     private let ambient = SCNLight()
-    private let bounceNode = SCNNode()
-    private let bounce = SCNLight()
-    private let windowGlowNode = SCNNode()
-    private let windowGlow = SCNLight()
 
     init() {
         // --- Sun: the only shadow caster that matters.
@@ -25,7 +34,12 @@ final class LightingRig {
         sun.shadowSampleCount = RenderQuality.shadowSampleCount
         sun.shadowMapSize = RenderQuality.shadowMapSize
         sun.shadowColor = UIColor(white: 0, alpha: 0.55)
-        sun.orthographicScale = 3.2
+        // Wide enough to hold the whole room and its walls. With the interior
+        // fills gone, the sun's shadow is what makes the window an aperture: the
+        // walls block it, and the light that reaches the floor is the light that
+        // came through the opening. That only works if the walls are inside the
+        // shadow map.
+        sun.orthographicScale = 4.6
         sun.zNear = 0.2
         sun.zFar = 22
         sun.intensity = 0
@@ -47,38 +61,6 @@ final class LightingRig {
         ambientNode.light = ambient
         root.addChildNode(ambientNode)
 
-        // --- Warm bounce off the tatami, sitting low in the room.
-        bounce.type = .omni
-        bounce.intensity = 0
-        // Raised, and with a much gentler falloff, because of what it now carries.
-        //
-        // At 45 cm above the tatami holding 15% of the sun this was a plausible
-        // warm kick off the floor. Holding 55% it became a floodlight pointed
-        // straight down: the render came out with a bright pool in the middle of
-        // the room and the floor's texture washed out inside it, while the level
-        // as a whole measured fine. Bounced light does not have a hotspot — that
-        // is the one thing it is definitionally free of.
-        bounce.attenuationStartDistance = 2.0
-        bounce.attenuationEndDistance = 8
-        bounce.color = UIColor(red: 1.0, green: 0.90, blue: 0.72, alpha: 1)
-        bounceNode.light = bounce
-        bounceNode.position = SCNVector3(x: 0.1, y: 0.95, z: -0.5)
-        root.addChildNode(bounceNode)
-
-        // --- Soft light spilling in through the shoji, so the window reads as a source.
-        windowGlow.type = .omni
-        windowGlow.intensity = 0
-        windowGlow.attenuationStartDistance = 1.8
-        windowGlow.attenuationEndDistance = 7
-        windowGlowNode.light = windowGlow
-        // Nearly a metre in from the shoji, not a quarter of one.
-        //
-        // The point of this light is the room, but at 0.25 m the nearest surface to
-        // it by far was the paper itself, so the panels were lit from inside and
-        // came out white with their own texture washed off them. Backing it into
-        // the room lights the room.
-        windowGlowNode.position = SCNVector3(x: 0.2, y: 1.15, z: -RoomLayout.halfDepth + 0.95)
-        root.addChildNode(windowGlowNode)
     }
 
     // MARK: - Light budget
@@ -132,11 +114,9 @@ final class LightingRig {
         var sun: Float
         var moon: Float
         var ambient: Float
-        var windowGlow: Float
-        var bounce: Float
         var lantern: Float
 
-        var total: Float { sun + moon + ambient + windowGlow + bounce + lantern }
+        var total: Float { sun + moon + ambient + lantern }
     }
 
     /// Total SceneKit intensity at full daylight, and the lux that corresponds to.
@@ -166,25 +146,14 @@ final class LightingRig {
 
     static func intensities(for b: LightBudget) -> LightIntensities {
         let k = scale(b.key)
-        // The sun's share moved from the directional light to the soft one: 0.85/0.15
-        // to 0.45/0.55. Nothing about the budget changed, so the day/night ordering
-        // and the totals are exactly as they were — only the *character* of daylight
-        // is different, and that is the point.
+        // The sun keeps all of its own budget and the sky keeps all of its.
         //
-        // A room screened with paper does not get hard sunlight. Shoji is a diffuser;
-        // that is what it is for. Sending most of the sun through the omni fill makes
-        // the light arrive from the whole window rather than from a point 9 metres
-        // away, which is both what actually happens and what stops the room reading
-        // as though someone opened a skylight.
-        // The sky's share leans toward ambient now: 0.42/0.28/0.30 rather than
-        // 0.30/0.45/0.25. Ambient is the only source in the room with no position,
-        // so it is the only one that cannot put a bright patch anywhere, and
-        // daylight through paper is the case with least business having one.
-        return LightIntensities(sun: b.sun * 0.45 * k,
-                                moon: b.moon * 1.00 * k,
-                                ambient: (b.sky * 0.42 + b.lantern * 0.10) * k,
-                                windowGlow: b.sky * 0.28 * k,
-                                bounce: (b.sun * 0.55 + b.sky * 0.30 + b.lantern * 0.15) * k,
+        // There is nothing left to split it between: the two interior omni lights
+        // that used to take most of it are gone. What is left has exactly the shape
+        // a room has — one source outside, and sky everywhere.
+        return LightIntensities(sun: b.sun * k,
+                                moon: b.moon * k,
+                                ambient: (b.sky + b.lantern * 0.25) * k,
                                 lantern: b.lantern * 0.75 * k)
     }
 
@@ -227,9 +196,44 @@ final class LightingRig {
         intensities(for: budget).total
     }
 
+    /// How far beyond the shoji the arc sits. Deliberately small: the point is
+    /// that the light comes from outside, not that it comes from far to one side.
+    static let windowOffset: Float = 0.34
+
+    /// A direction on an arc that genuinely runs parallel to the window.
+    ///
+    /// The window is the -Z wall, so its plane is XY, and an arc parallel to it is
+    /// one at constant Z: the sun rises at +X, passes overhead, sets at -X, and
+    /// holds the same small distance beyond the glass the entire way. Its light
+    /// therefore rakes across the opening at every hour and never once travels down
+    /// the length of the room.
+    ///
+    /// The first attempt at this scaled the horizontal reach by `cos(elevation)`,
+    /// which seemed harmless and was not: at solar noon the X term vanishes, and
+    /// with nothing left but the offset the sun ends up square with the window.
+    /// In midsummer that is hidden, because the sun is overhead and its horizontal
+    /// bearing hardly matters — but in December the noon sun is low, and it lines
+    /// up exactly. The bug only existed in the season it would have been worst in.
+    ///
+    /// So the arc's *shape* is fixed and only its progress is real. Season and hour
+    /// still drive everything that reads as time of day — the length of the day,
+    /// the colour, the whole light budget — through `elevation`, which this does
+    /// not touch. What is given up is the sun sitting lower at noon in winter.
+    /// What is bought is that no hour of no month can put a bar of sunlight across
+    /// the floor, which is worth more here than the seasonal accuracy of an object
+    /// the player can never actually see.
+    static func arcDirection(azimuth: Float) -> SCNVector3 {
+        // Real azimuth is 0 at north and increases eastward, so a southern sun runs
+        // from roughly 90 degrees at sunrise to 270 at sunset. Clamped, because in
+        // midsummer at this latitude it begins and ends outside that.
+        let p = clamp(remap(azimuth, deg(90), deg(270), 0, 1))
+        let theta = p * .pi
+        return SCNVector3(x: cosf(theta), y: sinf(theta), z: -windowOffset).normalized
+    }
+
     func apply(sky: SkyState, scene: SCNScene, room: RoomNode, lanternOn: Bool) {
         // --- Sun placement.
-        let d = sky.sunDirection
+        let d = LightingRig.arcDirection(azimuth: sky.sunAzimuth)
         let sunPos = SCNVector3(x: d.x * 9, y: max(0.2, d.y * 9), z: d.z * 9)
         sunNode.position = sunPos
         sunNode.look(at: SCNVector3(x: 0, y: 0.6, z: -0.2))
@@ -242,7 +246,7 @@ final class LightingRig {
         sun.castsShadow = budget.sun > 30
 
         // --- Moon.
-        let m = sky.moonDirection
+        let m = LightingRig.arcDirection(azimuth: sky.moonAzimuth)
         moonNode.position = SCNVector3(x: m.x * 9, y: max(0.2, m.y * 9), z: m.z * 9)
         moonNode.look(at: SCNVector3(x: 0, y: 0.6, z: -0.2))
         moon.intensity = CGFloat(lit.moon)
@@ -250,25 +254,6 @@ final class LightingRig {
         // --- Ambient from the sky colour.
         ambient.color = UIColor(sky.ambientColor)
         ambient.intensity = CGFloat(lit.ambient)
-
-        // --- Bounce and window glow.
-        bounce.intensity = CGFloat(lit.bounce)
-        // Barely tinted, because this light is now doing most of the work.
-        //
-        // Mixing 45% toward tatami straw was reasonable while bounce carried 15%
-        // of the sun. It carries 55% now, and at that share the tint stopped
-        // reading as warmth off the floor and started reading as a green cast over
-        // the entire room — walls, ceiling, cat and all. A bounce light's colour
-        // has to get weaker as its share gets stronger, or it stops being bounce
-        // and becomes a colour filter.
-        // Back up from 0.16, which overcorrected. The green cast that prompted
-        // that cut was a product of this tint *and* a room rendering at mean 182;
-        // with the exposure fixed the room came out grey instead, the tatami
-        // reading as pale concrete rather than as straw. This is a room whose
-        // floor is dried rush — daylight in it should carry some of that.
-        bounce.color = UIColor(sky.sunColor.mixed(with: RGBColor(hex: 0xC9B383), 0.30))
-        windowGlow.intensity = CGFloat(lit.windowGlow)
-        windowGlow.color = UIColor(sky.skyHorizonColor.lightened(0.25))
 
         // --- Backlit shoji paper. Its brightness is the sky outside and nothing
         // else: the flat floor this used to carry was what left the paper — and
@@ -298,7 +283,11 @@ final class LightingRig {
 
         // --- Image-based lighting for believable PBR highlights.
         scene.lightingEnvironment.contents = TextureFactory.skyEnvironment(sky: sky)
-        scene.lightingEnvironment.intensity = CGFloat(min(0.45, budget.sky * 0.0007))
+        // The sky dome, and now the only fill with any sense of direction in it.
+        // Flat ambient alone would light every surface identically regardless of
+        // which way it faces, which is what makes a room read as a paper cut-out;
+        // this is what puts the shape back without putting a bulb in the room.
+        scene.lightingEnvironment.intensity = CGFloat(min(0.85, budget.sky * 0.0014))
         scene.background.contents = UIColor(sky.skyHorizonColor.darkened(0.4))
 
         // --- Paper lantern.

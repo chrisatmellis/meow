@@ -1134,6 +1134,64 @@ section("height fields") {
     }
 }
 
+section("sun arc") {
+    var cal = Calendar(identifier: .gregorian)
+    cal.timeZone = TimeZone(identifier: "UTC")!
+
+    // Sampled across a whole year, because the failure this guards against is
+    // seasonal: the real azimuth wanders far more in June than in December, and a
+    // constraint that only holds at the equinox holds for about a fortnight.
+    var samples: [(month: Int, hour: Int, dir: SCNVector3, elevation: Float)] = []
+    for month in [1, 4, 6, 9, 12] {
+        for hour in 0..<24 {
+            var comps = DateComponents()
+            comps.year = 2026; comps.month = month; comps.day = 21; comps.hour = hour
+            let sky = WorldClock.sky(at: cal.date(from: comps)!,
+                                     timeZone: TimeZone(identifier: "UTC")!)
+            let d = LightingRig.arcDirection(azimuth: sky.sunAzimuth)
+            samples.append((month, hour, d, sky.sunElevation))
+        }
+    }
+
+    for s in samples {
+        expect(finite(s.dir), "sun direction is finite at \(s.month)/\(s.hour):00")
+        expect(abs(s.dir.length - 1) < 1e-4, "sun direction is a unit vector")
+
+        // The whole point. The window is the -Z wall, so a sun with any meaningful
+        // +Z is behind the room, and one with a large -Z is square with the window
+        // and shining straight down it. It has to stay off to the side.
+        expect(s.dir.z < 0, "the sun is always outside the window at \(s.month)/\(s.hour):00 (z \(s.dir.z))")
+        expect(s.dir.z > -0.42,
+               "the sun never squares up with the window at \(s.month)/\(s.hour):00 (z \(s.dir.z))")
+
+        // Constant Z is what "parallel to the window" means, and it is the whole
+        // guarantee: if it holds, there is no hour at which the sun's light can
+        // travel down the length of the room.
+        expect(abs(s.dir.z - samples[0].dir.z) < 1e-4,
+               "the arc stays parallel to the window at \(s.month)/\(s.hour):00 (z \(s.dir.z))")
+    }
+
+    // And it is an arc: east in the morning, west in the evening.
+    for month in [1, 4, 6, 9, 12] {
+        let day = samples.filter { $0.month == month }
+        guard let morning = day.first(where: { $0.hour == 8 && $0.elevation > 0 }),
+              let evening = day.first(where: { $0.hour == 16 && $0.elevation > 0 }) else { continue }
+        expect(morning.dir.x > evening.dir.x,
+               "the sun travels east to west in month \(month) (\(morning.dir.x) → \(evening.dir.x))")
+    }
+
+    // Every light left in the room is either outside it or has no position at all,
+    // which is what stops any of them putting a bright patch on a nearby surface.
+    let rig = LightingRig()
+    var positioned = 0
+    for node in rig.root.childNodes where node.light != nil {
+        guard let type = node.light?.type else { continue }
+        if type == .omni || type == .spot { positioned += 1 }
+    }
+    expect(positioned == 0,
+           "no light sits inside the room (\(positioned) omni/spot lights found)")
+}
+
 section("mouth") {
     for breed in CatBreed.allCases {
         var a = BreedPresets.appearance(for: breed)
