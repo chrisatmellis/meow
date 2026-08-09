@@ -165,7 +165,7 @@ section("mesh builder") {
     /// The generators used to be checked only for "did not crash". Now that they
     /// return raw mesh data rather than an opaque geometry object, the harness can
     /// assert the buffers are actually well formed.
-    func validate(_ mesh: MeshData, _ label: String) {
+    func validate(_ mesh: MeshData, _ label: String, smooth: Bool = true) {
         mesh.normalsIfNeeded()
         expect(!mesh.positions.isEmpty, "\(label) has vertices")
         expect(mesh.indices.count % 3 == 0, "\(label) index count is a whole number of triangles")
@@ -181,14 +181,21 @@ section("mesh builder") {
         // vertex columns at the seam so the texture has somewhere to wrap, and each
         // used to average only the triangles on its own side — a lighting crease down
         // every tube in the game. This is the regression test for that.
-        var byPosition: [String: Vec3] = [:]
-        for (i, p) in mesh.positions.enumerated() {
-            let key = "\(Int((p.x * 1e4).rounded()))|\(Int((p.y * 1e4).rounded()))|\(Int((p.z * 1e4).rounded()))"
-            if let first = byPosition[key] {
-                expect(dot(first, mesh.normals[i]) > 0.9999,
-                       "\(label) has no shading seam at coincident vertices")
-            } else {
-                byPosition[key] = mesh.normals[i]
+        //
+        // Only for meshes that are smooth everywhere. A box's corner is three
+        // vertices at one point that must face three different ways, and welding
+        // those is the bug, not the fix — which is why the weld now works from
+        // seams the generator declares rather than from coincident positions.
+        if smooth {
+            var byPosition: [String: Vec3] = [:]
+            for (i, p) in mesh.positions.enumerated() {
+                let key = "\(Int((p.x * 1e4).rounded()))|\(Int((p.y * 1e4).rounded()))|\(Int((p.z * 1e4).rounded()))"
+                if let first = byPosition[key] {
+                    expect(dot(first, mesh.normals[i]) > 0.9999,
+                           "\(label) has no shading seam at coincident vertices")
+                } else {
+                    byPosition[key] = mesh.normals[i]
+                }
             }
         }
     }
@@ -277,6 +284,136 @@ section("mesh builder") {
     validate(MeshBuilder.strand(length: 0.05, thickness: 0.001, droop: 0.3), "strand")
     validate(MeshBuilder.quadXZ(width: 1, depth: 1), "quad")
     validate(MeshBuilder.loft([LoftRing(center: .zero, radiusX: 1, radiusY: 1)]), "degenerate loft")
+
+    // MARK: The primitives RealityKit does not generate
+
+    /// Every face points away from the centre of the shape.
+    ///
+    /// A single flipped quad is invisible in a triangle count and invisible in a
+    /// watertightness check — it shows up on device as one facet lit from the
+    /// wrong side, on a torus, at the top of a lantern. Checking the sign of
+    /// `dot(normal, position)` catches all of it in one line per shape, and it is
+    /// valid for anything star-shaped about its own origin, which every one of
+    /// these is except the tube's inner wall.
+    func facesOutward(_ mesh: MeshData, _ label: String, allowInward: Bool = false) {
+        mesh.normalsIfNeeded()
+        var wrong = 0
+        for (i, n) in mesh.normals.enumerated() {
+            let p = mesh.positions[i]
+            guard p.length > 1e-5 else { continue }     // a cap centre says nothing
+            if dot(n, p.normalized) < (allowInward ? -0.999 : 0.05) { wrong += 1 }
+        }
+        expect(wrong == 0, "\(label) has every face pointing outward (\(wrong) wrong)")
+    }
+
+    /// UVs stay inside the unit square, so a material's tile factor means what it
+    /// says. A primitive that quietly ran u past 1 would tile at a different pitch
+    /// to every other surface using the same factor.
+    func unitUVs(_ mesh: MeshData, _ label: String) {
+        let bad = mesh.uvs.filter { $0.x < -1e-4 || $0.x > 1.0001 || $0.y < -1e-4 || $0.y > 1.0001 }
+        expect(bad.isEmpty, "\(label) keeps its uvs in the unit square (\(bad.count) outside)")
+    }
+
+    for chamfer in [Float(0), 0.002, 0.02] {
+        let b = MeshBuilder.box(width: 0.4, height: 0.3, length: 0.2, chamfer: chamfer)
+        validate(b, "box(chamfer: \(chamfer))", smooth: false)
+        watertight(b, "box(chamfer: \(chamfer))")
+        facesOutward(b, "box(chamfer: \(chamfer))")
+        unitUVs(b, "box(chamfer: \(chamfer))")
+    }
+
+    // The chamfer is the point of generating boxes ourselves, so assert it does
+    // something: a plain box has six normals, a chamfered one has twenty-six —
+    // six faces, twelve bevels, eight corners — and those extra twenty are what
+    // catch a highlight along an edge that used to be perfectly dark.
+    func distinctNormals(_ mesh: MeshData) -> Int {
+        mesh.normalsIfNeeded()
+        var seen = Set<String>()
+        for n in mesh.normals {
+            seen.insert("\(Int((n.x * 100).rounded()))|\(Int((n.y * 100).rounded()))|\(Int((n.z * 100).rounded()))")
+        }
+        return seen.count
+    }
+    expect(distinctNormals(MeshBuilder.box(width: 0.4, height: 0.3, length: 0.2)) == 6,
+           "a square box has exactly six distinct normals")
+    expect(distinctNormals(MeshBuilder.box(width: 0.4, height: 0.3, length: 0.2, chamfer: 0.01)) == 26,
+           "a chamfered box has six faces, twelve bevels and eight corners")
+
+    // A chamfer cannot eat the box it is chamfering.
+    let overChamfered = MeshBuilder.box(width: 0.1, height: 0.1, length: 0.1, chamfer: 5)
+    watertight(overChamfered, "box with an absurd chamfer")
+    facesOutward(overChamfered, "box with an absurd chamfer")
+
+    let cyl = MeshBuilder.cylinder(radius: 0.05, height: 0.2)
+    validate(cyl, "cylinder", smooth: false)
+    watertight(cyl, "cylinder")
+    facesOutward(cyl, "cylinder")
+    unitUVs(cyl, "cylinder")
+    watertight(MeshBuilder.cylinder(radius: 0.002, height: 0.4), "hair-thin cylinder")
+
+    // The rim is a hard edge and has to stay one: the cap ring and the wall ring
+    // are separate vertices, so a teacup's lip is a lip rather than a bulge.
+    do {
+        var atRim: [Vec3] = []
+        for (i, p) in cyl.positions.enumerated() where abs(p.y - 0.1) < 1e-5 && p.length > 0.04 {
+            atRim.append(cyl.normals[i])
+        }
+        expect(atRim.contains { $0.y > 0.99 } && atRim.contains { abs($0.y) < 0.01 },
+               "the cylinder rim carries both the cap's normal and the wall's, unwelded")
+    }
+
+    let tube = MeshBuilder.pipe(innerRadius: 0.03, outerRadius: 0.05, height: 0.1)
+    validate(tube, "pipe", smooth: false)
+    watertight(tube, "pipe")
+    unitUVs(tube, "pipe")
+    do {
+        // The inner wall must face the axis, or the tube is a solid cylinder with
+        // an invisible second skin.
+        // The wall is only two rings tall, and its vertices share both position and
+        // radius with the annulus that closes the end — the normal is the only
+        // thing that tells them apart, so it is what gets counted.
+        var inward = 0, outward = 0, capward = 0
+        for (i, p) in tube.positions.enumerated() {
+            let radial = Vec3(x: p.x, y: 0, z: p.z)
+            guard abs(radial.length - 0.03) < 1e-4 else { continue }
+            let d = dot(tube.normals[i], radial.normalized)
+            if d < -0.99 { inward += 1 } else if d > 0.99 { outward += 1 }
+            if abs(tube.normals[i].y) > 0.99 { capward += 1 }
+        }
+        expect(inward > 0, "the pipe's inner wall faces the axis (\(inward) vertices)")
+        expect(outward == 0, "nothing at the inner radius faces outward (\(outward) vertices)")
+        expect(capward > 0, "the annulus at the inner radius faces along the axis (\(capward))")
+    }
+
+    let ring = MeshBuilder.torus(ringRadius: 0.06, pipeRadius: 0.0022)
+    validate(ring, "torus")
+    watertight(ring, "torus")
+    unitUVs(ring, "torus")
+    do {
+        // Outward on a torus means away from the pipe's own centre line, not away
+        // from the origin, so `facesOutward` cannot be used here.
+        var wrong = 0
+        for (i, p) in ring.positions.enumerated() {
+            let axisward = Vec3(x: p.x, y: 0, z: p.z).normalized * 0.06
+            let outFromPipe = (p - axisward).normalized
+            if dot(ring.normals[i], outFromPipe) < 0.5 { wrong += 1 }
+        }
+        expect(wrong == 0, "torus faces point away from the pipe centre line (\(wrong) wrong)")
+    }
+
+    // The lantern's ribs are the reason the tessellation rule exists: a 2.2 mm
+    // pipe at SceneKit's default 48 × 24 is 2,304 triangles per hoop, seven hoops,
+    // more than the whole cat. Sized for its own radius it is a fraction of that.
+    expect(ring.indices.count / 3 < 400,
+           "a lantern rib costs under 400 triangles (\(ring.indices.count / 3))")
+
+    let pl = MeshBuilder.plane(width: 0.5, height: 0.3)
+    validate(pl, "plane")
+    unitUVs(pl, "plane")
+    expect(pl.normals.allSatisfy { $0.z > 0.99 }, "a plane faces +Z, as SCNPlane does")
+
+    validate(MeshBuilder.sphere(radius: 0.004), "sphere")
+    watertight(MeshBuilder.sphere(radius: 0.004), "sphere")
 }
 
 // MARK: - Cat rigs for every breed

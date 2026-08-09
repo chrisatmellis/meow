@@ -33,6 +33,27 @@ struct Vec3: Equatable {
         let l = length
         return l > 1e-6 ? self / l : Vec3(x: 0, y: 0, z: 1)
     }
+
+    /// Axis access by index, so code that has to treat the three axes alike can say
+    /// so. A box's twelve edges are four edges repeated for each axis in turn; with
+    /// named components that is three copies of the same arithmetic, and three
+    /// chances to get one of them wrong.
+    subscript(axis: Int) -> Float {
+        get {
+            switch axis {
+            case 0: return x
+            case 1: return y
+            default: return z
+            }
+        }
+        set {
+            switch axis {
+            case 0: x = newValue
+            case 1: y = newValue
+            default: z = newValue
+            }
+        }
+    }
 }
 
 func + (l: Vec3, r: Vec3) -> Vec3 { Vec3(x: l.x + r.x, y: l.y + r.y, z: l.z + r.z) }

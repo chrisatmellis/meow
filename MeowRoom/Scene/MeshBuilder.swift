@@ -31,11 +31,22 @@ final class MeshData {
     private(set) var uvs: [Vec2] = []
     private(set) var indices: [Int32] = []
 
+    /// Pairs of vertices that are the same point on the surface wearing two
+    /// different texture coordinates. See `weldNormalsAcrossSeams`.
+    private var seams: [(Int32, Int32)] = []
+
     func addVertex(_ p: Vec3, uv: Vec2) -> Int32 {
         positions.append(p)
         normals.append(.zero)
         uvs.append(uv)
         return Int32(positions.count - 1)
+    }
+
+    /// Declares that two vertices are the same point on the surface, so they must
+    /// end up with the same normal however the triangles around them are split.
+    func linkSeam(_ a: Int32, _ b: Int32) {
+        guard a != b else { return }
+        seams.append((a, b))
     }
 
     func addTriangle(_ a: Int32, _ b: Int32, _ c: Int32) {
@@ -67,8 +78,8 @@ final class MeshData {
         }
     }
 
-    /// Sums the normals of vertices that sit on top of each other, so both copies
-    /// end up facing the same way.
+    /// Sums the normals of vertices that are the same point on the surface, so both
+    /// copies end up facing the same way.
     ///
     /// A closed loft needs two vertex columns at the same place: the sweep starts at
     /// angle 0 and ends at 2π, and the end column carries u = 1 where the start
@@ -82,28 +93,44 @@ final class MeshData {
     /// last facet would then run u from 1 back to 0 and mirror the coat across
     /// itself. Merging only the normals keeps the seam invisible in both.
     ///
+    /// This used to find those pairs by hashing positions, which was right for a room
+    /// made only of lofted curves and became wrong the moment it also had to contain
+    /// boxes. A cube's corner is three vertices at one point that must face three
+    /// different ways; hashing positions welds them and rounds the cube off. There is
+    /// no angle threshold that separates the two cases either — a six-sided whisker's
+    /// seam columns are a full 60° apart, further than the 45° of a chamfer that has
+    /// to stay sharp. So the generators say which vertices are seam twins instead of
+    /// leaving it to be guessed, and everything else keeps its own normal.
+    ///
     /// Called before normalising, so this is a sum of area-weighted face normals and
-    /// stays area-weighted. Positions are quantised to a tenth of a millimetre, which
-    /// is far below anything the cat is modelled at and far above float drift.
-    func weldNormalsAcrossSeams(epsilon: Float = 1e-4) {
-        var groups: [Key: [Int]] = [:]
-        groups.reserveCapacity(positions.count)
-        for (i, p) in positions.enumerated() {
-            groups[Key(p, epsilon), default: []].append(i)
-        }
-        for (_, members) in groups where members.count > 1 {
-            var sum = Vec3.zero
-            for m in members { sum += normals[m] }
-            for m in members { normals[m] = sum }
-        }
-    }
+    /// stays area-weighted.
+    func weldNormalsAcrossSeams() {
+        guard !seams.isEmpty else { return }
 
-    private struct Key: Hashable {
-        let x: Int32, y: Int32, z: Int32
-        init(_ p: Vec3, _ epsilon: Float) {
-            x = Int32((p.x / epsilon).rounded())
-            y = Int32((p.y / epsilon).rounded())
-            z = Int32((p.z / epsilon).rounded())
+        // Seam links are transitive: a pole vertex can be twinned with several
+        // others, so the groups are connected components, not pairs.
+        var parent = Array(0..<positions.count)
+        func find(_ i: Int) -> Int {
+            var r = i
+            while parent[r] != r { r = parent[r] }
+            var c = i
+            while parent[c] != c { let n = parent[c]; parent[c] = r; c = n }
+            return r
+        }
+        for (a, b) in seams {
+            let ra = find(Int(a)), rb = find(Int(b))
+            if ra != rb { parent[ra] = rb }
+        }
+
+        var groups: [Int: [Int]] = [:]
+        for (a, b) in seams {
+            for i in [Int(a), Int(b)] { groups[find(i), default: []].append(i) }
+        }
+        for (_, members) in groups {
+            var sum = Vec3.zero
+            var seen = Set<Int>()
+            for m in members where seen.insert(m).inserted { sum += normals[m] }
+            for m in seen { normals[m] = sum }
         }
     }
 
@@ -141,6 +168,8 @@ enum MeshBuilder {
                 let u = Float(s) / Float(segments) * uRepeat
                 row.append(mesh.addVertex(p, uv: Vec2(x: u, y: v)))
             }
+            // The two ends of the ring are the same point wearing u = 0 and u = 1.
+            mesh.linkSeam(row[0], row[segments])
             ringIndices.append(row)
         }
 
@@ -249,6 +278,297 @@ enum MeshBuilder {
         mesh.addQuad(a, d, c, b)   // normal points +Y
         mesh.recomputeNormals()
         return mesh
+    }
+
+    // MARK: - The shapes RealityKit will not generate
+    //
+    // `MeshResource` generates a box, a plane, a sphere, a cone, a cylinder and
+    // text. The room is built from twenty-seven boxes, nineteen cylinders, six
+    // tori and five hollow tubes, so the last two have nowhere to come from, and
+    // the rest arrive with SceneKit's tessellation baked in rather than sized for
+    // a room whose every dimension is known.
+    //
+    // Axes and winding deliberately match SceneKit's primitives — a box is
+    // width × height × length on X/Y/Z, a cylinder and a tube stand on Y, a torus
+    // lies in XZ, a plane faces +Z — so that every placement in `RoomBuilder`
+    // stays valid and this is a change of renderer rather than a re-layout of the
+    // room.
+
+    /// A box, optionally with its twelve edges chamfered.
+    ///
+    /// The chamfer is the reason this is worth generating rather than taking from
+    /// `MeshResource.generateBox`. The walls, the floor and the ceiling are the
+    /// largest surfaces in frame and they meet at perfect right angles, so no edge
+    /// in the room ever catches a highlight — the single cheapest thing that reads
+    /// as "untextured 3D". A two-millimetre chamfer gives every edge a sliver that
+    /// faces the light differently from both surfaces it joins.
+    ///
+    /// Each face, bevel strip and corner gets its own vertices and no seam links,
+    /// so every piece shades flat and the edges stay crisp.
+    static func box(width: Float, height: Float, length: Float,
+                    chamfer: Float = 0) -> MeshData {
+        let mesh = MeshData()
+        let hw = width * 0.5, hh = height * 0.5, hd = length * 0.5
+        let c = max(0, min(chamfer, min(hw, min(hh, hd)) * 0.9))
+
+        // Untouched faces, in the order SceneKit numbers them: +Z, +X, -Z, -X, +Y, -Y.
+        // Each is given as its centre, its two in-plane axes, and its half extents,
+        // which keeps the winding correct without six copies of the same quad code.
+        let faces: [(n: Vec3, u: Vec3, v: Vec3, eu: Float, ev: Float, d: Float)] = [
+            (Vec3(x: 0, y: 0, z: 1), Vec3(x: 1, y: 0, z: 0), Vec3(x: 0, y: 1, z: 0), hw, hh, hd),
+            (Vec3(x: 1, y: 0, z: 0), Vec3(x: 0, y: 0, z: -1), Vec3(x: 0, y: 1, z: 0), hd, hh, hw),
+            (Vec3(x: 0, y: 0, z: -1), Vec3(x: -1, y: 0, z: 0), Vec3(x: 0, y: 1, z: 0), hw, hh, hd),
+            (Vec3(x: -1, y: 0, z: 0), Vec3(x: 0, y: 0, z: 1), Vec3(x: 0, y: 1, z: 0), hd, hh, hw),
+            (Vec3(x: 0, y: 1, z: 0), Vec3(x: 1, y: 0, z: 0), Vec3(x: 0, y: 0, z: -1), hw, hd, hh),
+            (Vec3(x: 0, y: -1, z: 0), Vec3(x: 1, y: 0, z: 0), Vec3(x: 0, y: 0, z: 1), hw, hd, hh),
+        ]
+
+        /// The point on face `f` at signed in-plane fractions, inset by the chamfer.
+        func corner(_ f: (n: Vec3, u: Vec3, v: Vec3, eu: Float, ev: Float, d: Float),
+                    _ su: Float, _ sv: Float) -> Vec3 {
+            f.n * f.d + f.u * (su * (f.eu - c)) + f.v * (sv * (f.ev - c))
+        }
+
+        for f in faces {
+            let p = [corner(f, -1, -1), corner(f, 1, -1), corner(f, 1, 1), corner(f, -1, 1)]
+            let uv = [Vec2(x: 0, y: 1), Vec2(x: 1, y: 1), Vec2(x: 1, y: 0), Vec2(x: 0, y: 0)]
+            let i = (0..<4).map { mesh.addVertex(p[$0], uv: uv[$0]) }
+            mesh.addQuad(i[0], i[1], i[2], i[3])
+        }
+
+        if c > 0 {
+            // Twelve bevels and eight corner triangles, enumerated from the eight
+            // box corners rather than by hand: for each corner, the three points
+            // that replace it, one pushed out along each axis.
+            let hs = Vec3(x: hw, y: hh, z: hd)
+            func trio(_ s: Vec3) -> [Vec3] {
+                [Vec3(x: s.x * hs.x, y: s.y * (hs.y - c), z: s.z * (hs.z - c)),
+                 Vec3(x: s.x * (hs.x - c), y: s.y * hs.y, z: s.z * (hs.z - c)),
+                 Vec3(x: s.x * (hs.x - c), y: s.y * (hs.y - c), z: s.z * hs.z)]
+            }
+            let signs = [-1, 1].flatMap { x in [-1, 1].flatMap { y in [-1, 1].map { z in
+                Vec3(x: Float(x), y: Float(y), z: Float(z)) } } }
+
+            func addTri(_ a: Vec3, _ b: Vec3, _ c0: Vec3) {
+                let ia = mesh.addVertex(a, uv: Vec2(x: 0, y: 0))
+                let ib = mesh.addVertex(b, uv: Vec2(x: 1, y: 0))
+                let ic = mesh.addVertex(c0, uv: Vec2(x: 0.5, y: 1))
+                mesh.addTriangle(ia, ib, ic)
+            }
+            func addQuadFlat(_ a: Vec3, _ b: Vec3, _ c0: Vec3, _ d: Vec3) {
+                let ia = mesh.addVertex(a, uv: Vec2(x: 0, y: 0))
+                let ib = mesh.addVertex(b, uv: Vec2(x: 1, y: 0))
+                let ic = mesh.addVertex(c0, uv: Vec2(x: 1, y: 1))
+                let id = mesh.addVertex(d, uv: Vec2(x: 0, y: 1))
+                mesh.addQuad(ia, ib, ic, id)
+            }
+
+            // Corner triangles. Winding follows the sign of the octant so all eight
+            // face outward without a special case.
+            for s in signs {
+                let t = trio(s)
+                if s.x * s.y * s.z > 0 { addTri(t[0], t[1], t[2]) } else { addTri(t[0], t[2], t[1]) }
+            }
+
+            // Edge bevels: for each axis, the four edges running parallel to it.
+            // `along` indexes the axis the edge runs along; the other two axes carry
+            // the signs that pick which of the four.
+            for along in 0..<3 {
+                let a1 = (along + 1) % 3, a2 = (along + 2) % 3
+                for s1 in [Float(-1), 1] {
+                    for s2 in [Float(-1), 1] {
+                        var lo = Vec3.zero, hi = Vec3.zero
+                        lo[along] = -1; hi[along] = 1
+                        lo[a1] = s1; hi[a1] = s1
+                        lo[a2] = s2; hi[a2] = s2
+                        let tl = trio(lo), th = trio(hi)
+                        // The bevel joins the two faces normal to a1 and a2, so it
+                        // spans the a1-pushed and a2-pushed points at each end.
+                        let p = [tl[a1], tl[a2], th[a2], th[a1]]
+                        // With (e_along, e_a1, e_a2) a right-handed cycle, this
+                        // ordering's cross product comes out along s2·e_a1 + s1·e_a2,
+                        // which is the outward direction only when the two signs
+                        // agree. Otherwise it is the mirror of it.
+                        if s1 * s2 > 0 {
+                            addQuadFlat(p[0], p[1], p[2], p[3])
+                        } else {
+                            addQuadFlat(p[3], p[2], p[1], p[0])
+                        }
+                    }
+                }
+            }
+        }
+
+        mesh.recomputeNormals()
+        return mesh
+    }
+
+    /// A flat quad in the XY plane facing +Z, matching `SCNPlane`.
+    static func plane(width: Float, height: Float) -> MeshData {
+        let mesh = MeshData()
+        let hw = width * 0.5, hh = height * 0.5
+        let a = mesh.addVertex(Vec3(x: -hw, y: -hh, z: 0), uv: Vec2(x: 0, y: 1))
+        let b = mesh.addVertex(Vec3(x: hw, y: -hh, z: 0), uv: Vec2(x: 1, y: 1))
+        let c = mesh.addVertex(Vec3(x: hw, y: hh, z: 0), uv: Vec2(x: 1, y: 0))
+        let d = mesh.addVertex(Vec3(x: -hw, y: hh, z: 0), uv: Vec2(x: 0, y: 0))
+        mesh.addQuad(a, b, c, d)
+        mesh.recomputeNormals()
+        return mesh
+    }
+
+    /// A cylinder standing on Y, centred at the origin, matching `SCNCylinder`.
+    ///
+    /// The rim is a hard edge: the cap ring and the wall ring are separate vertices
+    /// with no seam link between them, so the wall shades smooth all the way round
+    /// while the lip stays a lip. Sharing them would round the rim off, which on a
+    /// teacup is the difference between porcelain and a balloon.
+    static func cylinder(radius: Float, height: Float,
+                         segments: Int? = nil,
+                         capTop: Bool = true, capBottom: Bool = true) -> MeshData {
+        let mesh = MeshData()
+        let n = max(3, segments ?? Tessellation.around(radius))
+        let hh = height * 0.5
+
+        var top: [Int32] = [], bottom: [Int32] = []
+        for s in 0...n {
+            let a = Float(s) / Float(n) * 2 * .pi
+            let x = cosf(a) * radius, z = -sinf(a) * radius
+            let u = Float(s) / Float(n)
+            top.append(mesh.addVertex(Vec3(x: x, y: hh, z: z), uv: Vec2(x: u, y: 0)))
+            bottom.append(mesh.addVertex(Vec3(x: x, y: -hh, z: z), uv: Vec2(x: u, y: 1)))
+        }
+        mesh.linkSeam(top[0], top[n])
+        mesh.linkSeam(bottom[0], bottom[n])
+        for s in 0..<n {
+            mesh.addQuad(top[s], bottom[s], bottom[s + 1], top[s + 1])
+        }
+
+        if capTop { addDisc(mesh, radius: radius, y: hh, segments: n, up: true) }
+        if capBottom { addDisc(mesh, radius: radius, y: -hh, segments: n, up: false) }
+
+        mesh.recomputeNormals()
+        return mesh
+    }
+
+    /// A hollow tube standing on Y, matching `SCNTube`: an outer wall, an inner
+    /// wall facing inward, and an annulus closing each end.
+    static func pipe(innerRadius: Float, outerRadius: Float, height: Float,
+                     segments: Int? = nil) -> MeshData {
+        let mesh = MeshData()
+        let n = max(3, segments ?? Tessellation.around(outerRadius))
+        let hh = height * 0.5
+
+        func wall(_ radius: Float, outward: Bool) {
+            var top: [Int32] = [], bottom: [Int32] = []
+            for s in 0...n {
+                let a = Float(s) / Float(n) * 2 * .pi
+                let x = cosf(a) * radius, z = -sinf(a) * radius
+                let u = Float(s) / Float(n)
+                top.append(mesh.addVertex(Vec3(x: x, y: hh, z: z), uv: Vec2(x: u, y: 0)))
+                bottom.append(mesh.addVertex(Vec3(x: x, y: -hh, z: z), uv: Vec2(x: u, y: 1)))
+            }
+            mesh.linkSeam(top[0], top[n])
+            mesh.linkSeam(bottom[0], bottom[n])
+            for s in 0..<n {
+                if outward {
+                    mesh.addQuad(top[s], bottom[s], bottom[s + 1], top[s + 1])
+                } else {
+                    mesh.addQuad(top[s + 1], bottom[s + 1], bottom[s], top[s])
+                }
+            }
+        }
+        wall(outerRadius, outward: true)
+        wall(innerRadius, outward: false)
+
+        for (y, up) in [(hh, true), (-hh, false)] {
+            var inner: [Int32] = [], outer: [Int32] = []
+            for s in 0...n {
+                let a = Float(s) / Float(n) * 2 * .pi
+                let cx = cosf(a), cz = -sinf(a)
+                let u = Float(s) / Float(n)
+                inner.append(mesh.addVertex(Vec3(x: cx * innerRadius, y: y, z: cz * innerRadius),
+                                            uv: Vec2(x: u, y: 0)))
+                outer.append(mesh.addVertex(Vec3(x: cx * outerRadius, y: y, z: cz * outerRadius),
+                                            uv: Vec2(x: u, y: 1)))
+            }
+            mesh.linkSeam(inner[0], inner[n])
+            mesh.linkSeam(outer[0], outer[n])
+            for s in 0..<n {
+                if up {
+                    mesh.addQuad(inner[s], outer[s], outer[s + 1], inner[s + 1])
+                } else {
+                    mesh.addQuad(inner[s + 1], outer[s + 1], outer[s], inner[s])
+                }
+            }
+        }
+
+        mesh.recomputeNormals()
+        return mesh
+    }
+
+    /// A torus lying in the XZ plane, matching `SCNTorus`.
+    ///
+    /// Both directions wrap, so the seam links form a cross: the last ring column
+    /// twins the first, the last pipe row twins the first, and the four vertices at
+    /// the corner are all one point — which the union of seam links resolves
+    /// without any of it being spelled out.
+    static func torus(ringRadius: Float, pipeRadius: Float,
+                      ringSegments: Int? = nil, pipeSegments: Int? = nil) -> MeshData {
+        let mesh = MeshData()
+        let sized = Tessellation.torus(ring: ringRadius, pipe: pipeRadius)
+        let rn = max(3, ringSegments ?? sized.ring)
+        let pn = max(3, pipeSegments ?? sized.pipe)
+
+        var grid: [[Int32]] = []
+        for i in 0...rn {
+            let theta = Float(i) / Float(rn) * 2 * .pi
+            let cx = cosf(theta), cz = -sinf(theta)
+            var row: [Int32] = []
+            for j in 0...pn {
+                let phi = Float(j) / Float(pn) * 2 * .pi
+                let r = ringRadius + cosf(phi) * pipeRadius
+                let p = Vec3(x: cx * r, y: sinf(phi) * pipeRadius, z: cz * r)
+                row.append(mesh.addVertex(p, uv: Vec2(x: Float(i) / Float(rn),
+                                                      y: Float(j) / Float(pn))))
+            }
+            mesh.linkSeam(row[0], row[pn])
+            grid.append(row)
+        }
+        for j in 0...pn { mesh.linkSeam(grid[0][j], grid[rn][j]) }
+
+        for i in 0..<rn {
+            for j in 0..<pn {
+                mesh.addQuad(grid[i][j], grid[i + 1][j], grid[i + 1][j + 1], grid[i][j + 1])
+            }
+        }
+
+        mesh.recomputeNormals()
+        return mesh
+    }
+
+    /// A sphere centred at the origin. `blob` already does this and is what the cat
+    /// uses; this is the room-side spelling, sized from its own radius.
+    static func sphere(radius: Float, segments: Int? = nil) -> MeshData {
+        let n = segments ?? Tessellation.sphere(radius)
+        return blob(radius: radius, rings: max(4, n / 2), segments: max(4, n))
+    }
+
+    /// A flat disc in the XZ plane. Used for cylinder and cone caps, where the rim
+    /// has to stay sharp, so it carries its own ring of vertices.
+    private static func addDisc(_ mesh: MeshData, radius: Float, y: Float,
+                                segments: Int, up: Bool) {
+        let centre = mesh.addVertex(Vec3(x: 0, y: y, z: 0), uv: Vec2(x: 0.5, y: 0.5))
+        var ring: [Int32] = []
+        for s in 0..<segments {
+            let a = Float(s) / Float(segments) * 2 * .pi
+            let cx = cosf(a), cz = -sinf(a)
+            ring.append(mesh.addVertex(Vec3(x: cx * radius, y: y, z: cz * radius),
+                                       uv: Vec2(x: 0.5 + cx * 0.5, y: 0.5 + cz * 0.5)))
+        }
+        for s in 0..<segments {
+            let a = ring[s], b = ring[(s + 1) % segments]
+            if up { mesh.addTriangle(centre, a, b) } else { mesh.addTriangle(centre, b, a) }
+        }
     }
 
     /// Thin strands (whiskers, sisal fibres) drawn as very skinny tapered tubes.
