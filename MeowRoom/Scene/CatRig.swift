@@ -21,6 +21,19 @@ struct LegRig {
     var gaitPhase: Float = 0
     /// Which way the middle joint folds.
     var bendSign: Float = 1
+
+    /// Where each bone points at rest, as the pitch that would take a bone lying
+    /// along -Y to it.
+    ///
+    /// The IK solves for a direction; a joint is given a rotation. Those are the
+    /// same number only if the bone rests pointing straight down, which is true of
+    /// a rig somebody built for the solver and false of a modelled cat — this one
+    /// carries its upper foreleg well forward of vertical. Solving as though it did
+    /// not left every leg off by that angle, which on a curled cat meant a hind
+    /// leg driven straight through the floor.
+    var restUpper: Float = 0
+    var restLower: Float = 0
+    var restPaw: Float = 0
 }
 
 /// Everything the animator needs to pose the cat.

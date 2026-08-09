@@ -222,13 +222,20 @@ final class CatAnimator {
         let cosK = clamp((u * u + l * l - d * d) / (2 * u * l), -1, 1)
         let interior = acosf(cosK)
 
-        let hipAngle = thetaAim + leg.bendSign * alpha
-        let kneeAngle = -leg.bendSign * (.pi - interior)
+        // Where each bone has to end up pointing, as a pitch off straight down.
+        let upperAim = thetaAim + leg.bendSign * alpha
+        let kneeBend = -leg.bendSign * (.pi - interior)
+        let lowerAim = upperAim + kneeBend
 
-        leg.hip.eulerAngles = SIMD3<Float>(x: hipAngle, y: 0, z: 0)
-        leg.knee.eulerAngles = SIMD3<Float>(x: kneeAngle, y: 0, z: 0)
+        // Turned into joint rotations by subtracting where the bone already
+        // points. Without that the solver is right about the direction and wrong
+        // about the angle by however far the modelled bone rests from vertical —
+        // which is most of a right angle on a foreleg.
+        leg.hip.eulerAngles = SIMD3<Float>(x: upperAim - leg.restUpper, y: 0, z: 0)
+        leg.knee.eulerAngles = SIMD3<Float>(x: kneeBend - (leg.restLower - leg.restUpper), y: 0, z: 0)
         // Keep the paw roughly flat on the floor.
-        leg.ankle.eulerAngles = SIMD3<Float>(x: -(hipAngle + kneeAngle) * 0.92, y: 0, z: 0)
+        leg.ankle.eulerAngles = SIMD3<Float>(x: -lowerAim * 0.92 - (leg.restPaw - leg.restLower),
+                                             y: 0, z: 0)
     }
 
     private func phaseOffsets(for pose: CatPose) -> [Float] {

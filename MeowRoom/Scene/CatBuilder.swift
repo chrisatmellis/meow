@@ -118,6 +118,14 @@ enum CatBuilder {
             let foot = shaped.position(pawJ)
             leg.restFoot = SIMD3<Float>(foot.x, -rig.bodyHeight, foot.z)
             leg.restHip = shaped.position(hipJ)
+            /// The pitch that takes a bone lying along -Y to this one.
+            func aim(_ from: Int, _ to: Int) -> Float {
+                let d = shaped.position(to) - shaped.position(from)
+                return atan2f(-d.z, -d.y)
+            }
+            leg.restUpper = aim(hipJ, kneeJ)
+            leg.restLower = aim(kneeJ, ankleJ)
+            leg.restPaw = aim(ankleJ, pawJ)
             // Diagonally opposite feet move together, which is what makes a walk
             // read as a trot rather than as a shuffle.
             leg.gaitPhase = (isFront == (leg.side < 0)) ? 0 : 0.5

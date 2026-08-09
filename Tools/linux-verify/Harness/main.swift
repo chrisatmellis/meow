@@ -1572,6 +1572,21 @@ section("modelled cat") {
                    "posing keeps the cat's \(axis) (\(ratio)× of \(restSize[i]) m)")
         }
 
+        // A standing cat stands on all four feet.
+        //
+        // Per paw, not off the silhouette: a leg swung to the wrong angle still
+        // leaves *something* near the floor, so the outline of the animal says
+        // almost nothing. The IK solves for a direction and a joint takes a
+        // rotation, and those are the same number only if the bone rests pointing
+        // straight down — which this model's forelegs do not, by most of a right
+        // angle. Solved as though they did, the paws end up nowhere near the
+        // ground they were aimed at.
+        for (i, leg) in rig.legs.enumerated() {
+            let paw = leg.paw.position(relativeTo: rig.body)
+            expect(abs(paw.y + rig.bodyHeight) < 0.035,
+                   "leg \(i)'s paw is on the floor (\(paw.y) m against \(-rig.bodyHeight) m)")
+        }
+
         /// Where the flesh a bone owns has ended up.
         func centre(_ roles: [CatMeshAsset.Role]) -> SIMD3<Float>? {
             let wanted = Set(roles.compactMap { shaped.joint($0) })
