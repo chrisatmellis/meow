@@ -73,8 +73,11 @@ final class CatRig {
     /// into the other after it has run.
     var skinnedBody: Entity?
     var skinJoints: [Entity] = []
-    /// Fur shells, bound to the same skeleton as the body they cover.
-    var skinnedShells: [Entity] = []
+    /// The surfaces the skeleton deforms: the coat, and a fur shell per layer.
+    var skins: [CatSkin] = []
+    /// The coat's live vertex buffer — posed, not modelled. The offline renderer
+    /// and the assertion suite read it to see what the phone will draw.
+    var skinMesh: MeshData?
     /// Where the chest joint sits at rest. The animator stretches the torso by
     /// moving it, rather than by scaling it: a joint's scale runs down the rest
     /// of the skeleton, so squashing the chest for a loaf would also squash the

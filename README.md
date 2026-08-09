@@ -224,6 +224,17 @@ the bulk a long coat adds — as radial displacement in the bone's own frame,
 blended by skin weight. The shaped skeleton becomes the new bind pose, so the
 mesh and the joints that drive it stay in agreement.
 
+The skinning is done on the CPU, in `CatSkin`, once a frame. RealityKit will do
+it — a `MeshResource.Skeleton`, per-vertex joint influences, a
+`SkeletalPosesComponent` — and that was the first implementation; on device the
+cat drew as a crumpled clump at the skeleton's origin, every vertex pulled toward
+one point, which is what a mesh looks like when the inverse bind matrices are
+applied and the joint transforms are not. The same pose through the same
+arithmetic here produces a cat. Two thousand vertices cost well under a tenth of a
+millisecond to blend, and doing it here buys something the GPU path cannot: the
+offline rasteriser draws the very same buffers, so a picture of the cat is a
+picture of what the phone draws.
+
 The mesh and the skeleton come out of `CatShape` in the game's body space — the
 cat facing +Z, hips at the origin, floor at `-bodyHeight` — and **every joint's
 rest pose is a translation, with no rotation at all**. That second part is not a

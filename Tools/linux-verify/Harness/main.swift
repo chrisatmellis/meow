@@ -1518,37 +1518,29 @@ section("modelled cat") {
     // is applied here exactly as the renderer applies it, and the result is
     // measured.
     do {
+        // The posed skin, read straight out of the buffers the renderer draws.
+        // Not a reimplementation of the skinning: `CatSkin` writes into the mesh
+        // the entity carries, so this is the production deformation, and a fault
+        // in it fails here rather than being papered over by a second, correct
+        // copy of the same arithmetic living in the test.
         let shaped = CatShape.shape(asset, to: a)
-        var world = [simd_float4x4](repeating: matrix_identity_float4x4,
-                                    count: shaped.jointCount)
-        for j in 0..<shaped.jointCount {
-            let local = rig.skinJoints[j].transform.matrix
-            let p = shaped.parents[j]
-            world[j] = p >= 0 ? world[p] * local : local
+        guard let skinnedMesh = rig.skinMesh else {
+            expect(false, "the rig exposes the surface it deforms")
+            return
         }
-        let skin = (0..<shaped.jointCount).map { world[$0] * shaped.inverseBind($0) }
+        let posed = skinnedMesh.positions.map { SIMD3<Float>($0.x, $0.y, $0.z) }
+        expect(posed.count == shaped.mesh.positions.count, "a posed vertex per modelled vertex")
+        expect(posed.allSatisfy { finite($0) }, "the posed skin is finite")
 
         let inf = shaped.influencesPerVertex
-        var posed = [SIMD3<Float>](repeating: .zero, count: shaped.mesh.positions.count)
-        var owner = [Int](repeating: -1, count: shaped.mesh.positions.count)
+        var owner = [Int](repeating: -1, count: posed.count)
         for v in 0..<posed.count {
-            let r = shaped.mesh.positions[v]
-            let p = SIMD4<Float>(r.x, r.y, r.z, 1)
-            var acc = SIMD4<Float>(repeating: 0)
-            var total: Float = 0
             var bestW: Float = 0
-            for k in 0..<inf {
-                let w = shaped.jointWeights[v * inf + k]
-                guard w > 0 else { continue }
-                let j = Int(shaped.jointIndices[v * inf + k])
-                acc += (skin[j] * p) * w
-                total += w
-                if w > bestW { bestW = w; owner[v] = j }
+            for k in 0..<inf where shaped.jointWeights[v * inf + k] > bestW {
+                bestW = shaped.jointWeights[v * inf + k]
+                owner[v] = Int(shaped.jointIndices[v * inf + k])
             }
-            posed[v] = total > 1e-5 ? SIMD3<Float>(acc.x, acc.y, acc.z) / total
-                                    : SIMD3<Float>(r.x, r.y, r.z)
         }
-        expect(posed.allSatisfy { finite($0) }, "the posed skin is finite")
 
         /// The bounding box of a set of points.
         func box(_ pts: [SIMD3<Float>]) -> (lo: SIMD3<Float>, hi: SIMD3<Float>) {

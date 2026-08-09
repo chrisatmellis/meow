@@ -136,13 +136,11 @@ enum CatBuilder {
         // --- The body surface, bound to those bones.
         let furMat = Materials.catFur(a, preview: preview)
         let body = Entity.make(shaped.mesh, furMat, name: "catBody")
-        if let model = (body as? ModelEntity)?.model,
-           let skinned = skinned(shaped, mesh: model.mesh) {
-            (body as? ModelEntity)?.model = ModelComponent(mesh: skinned, materials: [furMat])
-        }
         rig.body.addChild(body)
         rig.skinnedBody = body
         rig.skinJoints = joints
+        rig.skinMesh = shaped.mesh
+        if let skin = CatSkin(shaped, mesh: shaped.mesh, entity: body) { rig.skins.append(skin) }
         syncPose(rig)
 
         // --- Fur shells: offset copies of the same surface, for long coats.
@@ -156,18 +154,12 @@ enum CatBuilder {
                 // gives a centimetre of "fur" at the nose and none at the hips,
                 // and slides the shell's texture off the hairs painted underneath.
                 let node = Entity.make(shell, Materials.furShell(a, layer: i), name: "furShell")
-                // Bound to the same skeleton as the coat underneath. A shell is a
-                // copy of the body's vertices, one per vertex and in the same
-                // order, so it takes the same influences — and without them it
-                // would hang in the bind pose while the cat walked out of it.
-                if let model = (node as? ModelEntity)?.model,
-                   let skinnedShell = skinned(shaped, mesh: model.mesh) {
-                    (node as? ModelEntity)?.model =
-                        ModelComponent(mesh: skinnedShell,
-                                       materials: [Materials.furShell(a, layer: i)])
-                }
                 rig.body.addChild(node)
-                rig.skinnedShells.append(node)
+                // Skinned alongside the coat underneath. A shell is a copy of the
+                // body's vertices, one per vertex and in the same order, so it
+                // takes the same influences — and without them it would hang in
+                // the bind pose while the cat walked out of it.
+                if let skin = CatSkin(shaped, mesh: shell, entity: node) { rig.skins.append(skin) }
             }
         }
 
@@ -439,68 +431,13 @@ enum CatBuilder {
         return MeshBuilder.loft(rings.reversed(), segments: 16, capStart: false, capEnd: true)
     }
 
-    /// Rebuilds a mesh resource with the skeleton and per-vertex influences.
-    private static func skinned(_ shaped: CatShape.Shaped, mesh: MeshResource) -> MeshResource? {
-        var contents = mesh.contents
-        guard var model = contents.models.first, var part = model.parts.first else { return nil }
-
-        let joints = (0..<shaped.jointCount).map { j in
-            MeshResource.Skeleton.Joint(name: "joint\(j)",
-                               parentIndex: shaped.parents[j] >= 0 ? shaped.parents[j] : nil,
-                               // Skinning only ever evaluates `jointWorld ·
-                               // inverseBind`, so these two have to be inverses of
-                               // each other and are otherwise free. Both are the
-                               // joint's rest position and nothing else, which is
-                               // what leaves a joint's axes equal to the body's.
-                               inverseBindPoseMatrix: shaped.inverseBind(j),
-                               restPoseTransform: Transform(translation: shaped.restLocal(j)))
-        }
-
-        let n = shaped.influencesPerVertex
-        var influences: [MeshJointInfluence] = []
-        influences.reserveCapacity(shaped.mesh.positions.count * n)
-        for v in 0..<shaped.mesh.positions.count {
-            for k in 0..<n {
-                influences.append(MeshJointInfluence(
-                    jointIndex: Int(shaped.jointIndices[v * n + k]),
-                    weight: shaped.jointWeights[v * n + k]))
-            }
-        }
-
-        part.skeletonID = "cat"
-        // A mesh buffer, not a bare array — `MeshResource.JointInfluences` takes
-        // `MeshBuffers.JointInfluences`, and `Joint` lives under `Skeleton`. Both
-        // were spelled from the stand-in and both only exist the other way round.
-        part.jointInfluences = MeshResource.JointInfluences(
-            influences: MeshBuffers.JointInfluences(influences), influencesPerVertex: n)
-        model.parts = [part]
-        contents.models = [model]
-        contents.skeletons = [MeshResource.Skeleton(id: "cat", joints: joints)]
-        guard let out = try? MeshResource.generate(from: contents) else { return nil }
-        #if DEBUG
-        // Rebinding replaces the resource, and with it the registry entry the
-        // offline renderer looks its buffers up by — without this the cat renders
-        // as exactly zero triangles while reporting success.
-        MeshSourceRegistry.record(out, shaped.mesh)
-        #endif
-        return out
-    }
-
-    /// Hands the posed joint hierarchy to the skin. Called once a frame, after
-    /// the animator; reading the entities back rather than having the animator
-    /// write the pose directly is what keeps the animator ignorant of skinning.
+    /// Deforms the cat's surfaces to match its skeleton. Called once a frame,
+    /// after the animator; reading the joint entities back rather than having the
+    /// animator write the pose directly is what keeps the animator ignorant of
+    /// skinning.
     static func syncPose(_ rig: CatRig) {
-        guard let body = rig.skinnedBody, !rig.skinJoints.isEmpty else { return }
-        let pose = SkeletalPose(id: "cat", joints: rig.skinJoints.enumerated().map {
-            ("joint\($0.offset)", $0.element.transform)
-        })
-        body.components.set(SkeletalPosesComponent(poses: [pose]))
-        // The fur shells are the same vertices bound to the same skeleton, so
-        // they take the same pose. Without this they hang in the bind pose and
-        // the cat walks out of its own coat.
-        for shell in rig.skinnedShells {
-            shell.components.set(SkeletalPosesComponent(poses: [pose]))
-        }
+        guard !rig.skinJoints.isEmpty else { return }
+        for skin in rig.skins { skin.apply(rig.skinJoints) }
     }
 }
 

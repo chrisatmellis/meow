@@ -74,6 +74,14 @@ final class MeshData {
         positions = p
     }
 
+    /// Swaps the vertex normals, keeping everything else. Skinning produces both
+    /// at once — a rigid joint transform carries a normal as readily as a point —
+    /// so there is nothing to recompute afterwards.
+    func replaceNormals(_ n: [Vec3]) {
+        guard n.count == normals.count else { return }
+        normals = n
+    }
+
     func addVertex(_ p: Vec3, uv: Vec2) -> Int32 {
         positions.append(p)
         normals.append(.zero)
