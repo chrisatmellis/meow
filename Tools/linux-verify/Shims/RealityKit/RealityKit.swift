@@ -1253,10 +1253,23 @@ public struct RealityViewRenderingEffectMode: Equatable {
     private init() {}
 }
 
+/// Antialiasing and dynamic range each have their own type rather than sharing
+/// the mode above, and neither offers a "high" — the choice is 4x multisampling
+/// or nothing, and the display's own range or a forced standard one.
+public enum AntialiasingMode {
+    case none, multisample4X
+}
+
+public struct RealityViewDynamicRange: Equatable {
+    public static let `default` = RealityViewDynamicRange()
+    public static let standard = RealityViewDynamicRange()
+    private init() {}
+}
+
 public struct RealityViewRenderingEffects {
-    public var antialiasing = RealityViewRenderingEffectMode.default
+    public var antialiasing = AntialiasingMode.multisample4X
     public var depthOfField = RealityViewRenderingEffectMode.default
-    public var dynamicRange = RealityViewRenderingEffectMode.default
+    public var dynamicRange = RealityViewDynamicRange.default
     public var cameraGrain = RealityViewRenderingEffectMode.default
     public var motionBlur = RealityViewRenderingEffectMode.default
     public init() {}

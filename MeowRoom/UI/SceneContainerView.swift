@@ -34,8 +34,12 @@ struct SceneContainerView: View {
             // Depth of field and HDR survive the move off SceneKit's camera.
             // Bloom, vignette and colour fringing do not, and are not faked here.
             content.renderingEffects.depthOfField = RenderQuality.wantsDepthOfField ? .enabled : .disabled
-            content.renderingEffects.antialiasing = RenderQuality.wantsAntialiasing ? .enabled : .disabled
-            content.renderingEffects.dynamicRange = .enabled
+            // Antialiasing and dynamic range each have their own type rather than
+            // sharing the enabled/disabled one, and neither offers a "high": the
+            // choice is 4x multisampling or nothing, and the display's own range
+            // or a forced standard one. `.default` is the wide one.
+            content.renderingEffects.antialiasing = RenderQuality.wantsAntialiasing ? .multisample4X : .none
+            content.renderingEffects.dynamicRange = .default
             content.renderingEffects.cameraGrain = .disabled
             content.renderingEffects.motionBlur = .disabled
 
