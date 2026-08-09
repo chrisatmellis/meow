@@ -958,6 +958,169 @@ section("realitykit shim") {
     }
 }
 
+// MARK: - Euler angles across the renderer boundary
+
+// The port's single sharpest edge. SceneKit poses a node with three angles;
+// RealityKit poses an entity with a quaternion. The cat is authored in angles —
+// thirty-nine sites write them — so the conversion runs on every joint of every
+// frame, and if the composition order is wrong it is wrong *everywhere at once*,
+// in a way that reads as bad animation rather than bad maths.
+//
+// So it is pinned here against the thing it has to agree with: SceneKit itself.
+// Not a restatement of the formula in `EulerRotation` — that would only prove the
+// formula equals itself — but the actual `Rx · Ry · Rz` matrix product the
+// SceneKit shim builds, compared by where it sends probe vectors.
+section("euler convention") {
+
+    let probes = [SIMD3<Float>(1, 0, 0), SIMD3<Float>(0, 1, 0), SIMD3<Float>(0, 0, 1),
+                  SIMD3<Float>(0.37, -0.82, 0.44), SIMD3<Float>(-0.6, 0.2, 0.77)]
+
+    // Angles chosen to include every awkward case: single axis, two axes (where
+    // order first bites), all three, negatives, and past ±180°.
+    let cases: [SIMD3<Float>] = [
+        SIMD3<Float>(0, 0, 0),
+        SIMD3<Float>(0.7, 0, 0), SIMD3<Float>(0, 0.7, 0), SIMD3<Float>(0, 0, 0.7),
+        SIMD3<Float>(0.4, 0.9, 0), SIMD3<Float>(0.4, 0, 0.9), SIMD3<Float>(0, 0.4, 0.9),
+        SIMD3<Float>(0.3, -0.6, 1.1), SIMD3<Float>(-1.2, 0.45, -0.8),
+        SIMD3<Float>(2.9, -2.4, 1.7), SIMD3<Float>(-0.05, 0.02, -0.03),
+        SIMD3<Float>(deg(-75), deg(50), 0), SIMD3<Float>(deg(5), deg(-70), deg(12)),
+    ]
+
+    // 1. The quaternion agrees with SceneKit's matrix, vector for vector.
+    for e in cases {
+        let node = SCNNode()
+        node.simdEulerAngles = e
+        let m = node.localTransform          // t · Rx · Ry · Rz · s, both identity here
+        let q = EulerRotation.quaternion(e)
+        for p in probes {
+            let byMatrix = m.applyVector(p)
+            let byQuat = q.act(p)
+            expect(simd_length(byMatrix - byQuat) < 1e-4,
+                   "euler \(e) rotates \(p) the same way SceneKit does "
+                     + "(scenekit \(byMatrix), quaternion \(byQuat))")
+        }
+    }
+
+    // 2. Order is the thing being asserted, so prove the wrong order is visibly
+    //    wrong. Without this, a symmetric bug would sail through test 1.
+    let twoAxis = SIMD3<Float>(0.4, 0.9, 0)
+    let reversed = simd_quatf(angle: twoAxis.z, axis: SIMD3<Float>(0, 0, 1))
+        * simd_quatf(angle: twoAxis.y, axis: SIMD3<Float>(0, 1, 0))
+        * simd_quatf(angle: twoAxis.x, axis: SIMD3<Float>(1, 0, 0))
+    let probe = SIMD3<Float>(0, 0, 1)
+    expect(simd_length(EulerRotation.quaternion(twoAxis).act(probe) - reversed.act(probe)) > 0.05,
+           "Rz·Ry·Rx would be a different rotation, so the order under test is load-bearing")
+
+    // 3. One rotation whose answer can be read off by eye, as a check that the
+    //    whole chain is not self-consistently mirrored.
+    let quarterYaw = EulerRotation.quaternion(SIMD3<Float>(0, .pi / 2, 0))
+    expect(simd_length(quarterYaw.act(SIMD3<Float>(0, 0, 1)) - SIMD3<Float>(1, 0, 0)) < 1e-5,
+           "a +90° yaw takes +Z to +X")
+    let quarterPitch = EulerRotation.quaternion(SIMD3<Float>(.pi / 2, 0, 0))
+    // Right-hand rule about +X sends +Y to +Z and +Z to *minus* Y, which is worth
+    // stating out loud: the sign here is the one a person gets wrong by eye.
+    expect(simd_length(quarterPitch.act(SIMD3<Float>(0, 0, 1)) - SIMD3<Float>(0, -1, 0)) < 1e-5,
+           "a +90° pitch takes +Z to -Y")
+    expect(simd_length(quarterPitch.act(SIMD3<Float>(0, 1, 0)) - SIMD3<Float>(0, 0, 1)) < 1e-5,
+           "a +90° pitch takes +Y to +Z")
+
+    // 4. Decomposition inverts composition. Angles in the principal range come
+    //    back as themselves; anything else has to come back as the same rotation.
+    for e in cases {
+        let q = EulerRotation.quaternion(e)
+        let back = EulerRotation.angles(q)
+        let requantised = EulerRotation.quaternion(back)
+        for p in probes {
+            expect(simd_length(q.act(p) - requantised.act(p)) < 1e-4,
+                   "euler \(e) survives a round trip through the quaternion "
+                     + "(came back as \(back))")
+        }
+        if abs(e.x) < .pi / 2 && abs(e.y) < 1.5 && abs(e.z) < .pi / 2 {
+            expect(simd_length(back - e) < 1e-4, "euler \(e) round-trips to itself")
+        }
+    }
+
+    // 5. Gimbal lock resolves to a choice, not a NaN. Yaw at exactly ±90° makes
+    //    pitch and roll the same axis; only their sum survives, and the rotation
+    //    must still be reproduced.
+    for yaw in [Float.pi / 2, -Float.pi / 2] {
+        for (pitch, roll) in [(Float(0.6), Float(0.0)), (Float(0.0), Float(0.6)),
+                              (Float(0.35), Float(0.25)), (Float(-0.4), Float(0.9))] {
+            let e = SIMD3<Float>(pitch, yaw, roll)
+            let q = EulerRotation.quaternion(e)
+            let back = EulerRotation.angles(q)
+            expect(finite(back), "gimbal lock at yaw \(yaw) gives finite angles")
+            for p in probes {
+                expect(simd_length(EulerRotation.quaternion(back).act(p) - q.act(p)) < 1e-3,
+                       "locked pose \(e) still reproduces its rotation (as \(back))")
+            }
+        }
+    }
+
+    // 6. A whole hierarchy composes the same in both renderers. Test 1 covers one
+    //    joint; the cat is joints inside joints, and a convention that is right
+    //    locally can still be wrong once parents multiply through.
+    do {
+        let angles = [SIMD3<Float>(0.3, -0.5, 0.2),
+                      SIMD3<Float>(-0.7, 0.25, 0.9),
+                      SIMD3<Float>(1.1, 0.6, -0.4)]
+        let offsets = [SIMD3<Float>(0, 0.2, 0), SIMD3<Float>(0.1, 0, -0.05), SIMD3<Float>(0, 0.12, 0)]
+
+        var node = SCNNode(), root = node
+        var entity = Entity(), rootEntity = entity
+        for (i, e) in angles.enumerated() {
+            if i > 0 {
+                let n = SCNNode(); node.addChildNode(n); node = n
+                let c = Entity(); entity.addChild(c); entity = c
+            }
+            node.simdEulerAngles = e
+            node.simdPosition = offsets[i]
+            entity.eulerAngles = e
+            entity.position = offsets[i]
+        }
+        _ = root; _ = rootEntity
+
+        let sk = node.simdWorldPosition
+        let rk = entity.worldPosition
+        expect(simd_length(sk - rk) < 1e-4,
+               "three nested joints put the leaf in the same place (scenekit \(sk), realitykit \(rk))")
+    }
+
+    // 7. The angles an entity was posed with come back exactly, including past the
+    //    principal range where decomposition alone would silently rewrite them.
+    //    The wand drags by accumulating its own yaw, so a value that shifts on
+    //    read-back would drift the wand every frame.
+    do {
+        let e = SIMD3<Float>(2.9, -2.4, 1.7)
+        let entity = Entity()
+        entity.eulerAngles = e
+        expect(entity.eulerAngles == e, "an entity remembers the angles it was posed with")
+
+        // ...but not if someone went behind its back and set the quaternion.
+        entity.orientation = simd_quatf(angle: 0.5, axis: SIMD3<Float>(0, 1, 0))
+        let after = entity.eulerAngles
+        expect(abs(after.y - 0.5) < 1e-4 && abs(after.x) < 1e-4 && abs(after.z) < 1e-4,
+               "setting the orientation directly invalidates the remembered angles (got \(after))")
+    }
+
+    // 8. Accumulating a drag, the way the wand actually does it: read the angle,
+    //    add to it, write it back, a hundred times. Any read-back that is not
+    //    exact turns into visible drift over a gesture.
+    do {
+        let entity = Entity()
+        var expected = SIMD3<Float>(0, 0, 0)
+        for i in 0..<100 {
+            let d = Float(i % 7) * 0.01 - 0.03
+            entity.eulerAngles = SIMD3<Float>(entity.eulerAngles.x,
+                                              entity.eulerAngles.y + d,
+                                              entity.eulerAngles.z)
+            expected.y += d
+        }
+        expect(abs(entity.eulerAngles.y - expected.y) < 1e-5,
+               "a hundred incremental yaws do not drift (got \(entity.eulerAngles.y), want \(expected.y))")
+    }
+}
+
 section("height fields") {
 
     func decode(_ b: UInt8) -> Float { Float(b) / 255 * 2 - 1 }

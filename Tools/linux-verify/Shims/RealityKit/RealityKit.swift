@@ -385,10 +385,9 @@ open class Entity {
         return reference.worldMatrix.inverse * worldMatrix
     }
 
-    public var worldPosition: SIMD3<Float> {
-        let m = worldMatrix
-        return SIMD3<Float>(m[3].x, m[3].y, m[3].z)
-    }
+    // No `worldPosition` here on purpose. RealityKit does not have one — it wants
+    // `position(relativeTo: nil)` — and the game's spelling of it belongs in the
+    // app's own compatibility layer, where it can be wrong in only one place.
 
     public func position(relativeTo reference: Entity?) -> SIMD3<Float> {
         let m = transformMatrix(relativeTo: reference)
