@@ -172,7 +172,10 @@ public struct simd_quatf {
     /// (x, y, z, w) — the imaginary part first, as simd stores it.
     public var vector: SIMD4<Float>
 
-    public init() { vector = SIMD4<Float>(0, 0, 0, 1) }
+    /// All four lanes zero, which is what Apple's does — *not* the identity.
+    /// A zero quaternion is not a rotation, and code that assumes otherwise wants
+    /// to fail here rather than on a device.
+    public init() { vector = SIMD4<Float>(0, 0, 0, 0) }
     public init(vector: SIMD4<Float>) { self.vector = vector }
     public init(ix: Float, iy: Float, iz: Float, r: Float) { vector = SIMD4<Float>(ix, iy, iz, r) }
 
@@ -288,9 +291,11 @@ public struct Transform {
     public var rotation: simd_quatf
     public var translation: SIMD3<Float>
 
+    /// Apple's documented defaults: identity rotation, unit scale, no translation.
+    /// The identity is spelled out because `simd_quatf()` is not it.
     public init() {
         scale = SIMD3<Float>(1, 1, 1)
-        rotation = simd_quatf()
+        rotation = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
         translation = SIMD3<Float>(0, 0, 0)
     }
 

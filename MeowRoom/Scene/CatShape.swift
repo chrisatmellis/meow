@@ -203,7 +203,14 @@ enum CatShape {
         // longer thigh carry the shin, the paw and the toes with it instead of
         // leaving the leg in pieces.
         var localScale = [Float](repeating: 1, count: n)
-        var localTurn = [simd_quatf](repeating: simd_quatf(), count: n)
+        // Spelled out rather than `simd_quatf()`, which is not the identity: Apple's
+        // no-argument initialiser zeroes all four lanes, w included, and a zero
+        // quaternion is not a rotation. The stand-in this is compiled against
+        // offline returns the identity for it, so the difference cannot show up
+        // until the code is on a phone — which is the worst possible place for a
+        // rotation to quietly become something else.
+        var localTurn = [simd_quatf](repeating: simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0)),
+                                     count: n)
 
         let boneStretch = boneScales(asset, a)
         for j in 0..<n {
