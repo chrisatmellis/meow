@@ -35,26 +35,11 @@ enum CatBuilder {
         rig.torsoLength = a.torsoLength
         rig.torsoRadius = a.torsoRadius
 
-        // --- The frame.
-        //
-        // The model was authored facing +X with the floor at y = 0. The game's
-        // body space faces +Z, with its origin at the hips and the floor at
-        // -bodyHeight, because that is what the animator measures leg reach
-        // against. Turning +X into +Z is a quarter turn about Y, and only one of
-        // the two faces the cat forward — which settles handedness rather than
-        // leaving it to a naming convention.
-        let hipHeight = shaped.position(.hips)?.y ?? 0.2
-        rig.bodyHeight = hipHeight
-        let frame = Entity()
-        frame.eulerAngles = SIMD3<Float>(0, -.pi / 2, 0)
-        frame.position = SIMD3<Float>(0, -hipHeight, 0)
+        // `CatShape` has already put the mesh and the skeleton in body space —
+        // facing +Z, hips at y = 0, floor at -bodyHeight — so there is no frame
+        // entity here and nothing left to turn.
+        rig.bodyHeight = shaped.hipHeight
         rig.root.addChild(rig.body)
-        rig.body.addChild(frame)
-
-        /// A point on the model, in the game's body space.
-        func toBody(_ p: SIMD3<Float>) -> SIMD3<Float> {
-            SIMD3<Float>(-p.z, p.y - hipHeight, p.x)
-        }
 
         // --- One entity per bone, for the animator to pose.
         //
@@ -63,14 +48,18 @@ enum CatBuilder {
         // parented exactly as the skeleton is, means the animator can go on
         // writing `rig.head.eulerAngles` and never learn the difference. The pose
         // is copied across once a frame, after it has run.
-        var joints: [Entity] = (0..<shaped.jointCount).map { _ in Entity() }
+        //
+        // Each one starts at its offset from its parent and unrotated, which is
+        // what makes `eulerAngles.x` a pitch on every bone rather than a turn
+        // about whichever axis the exporter left that bone on.
+        let joints: [Entity] = (0..<shaped.jointCount).map { _ in Entity() }
         for j in 0..<shaped.jointCount {
             joints[j].name = "joint\(j)"
-            joints[j].transform = Transform(matrix: shaped.restLocal(j))
+            joints[j].position = shaped.restLocal(j)
             if shaped.parents[j] >= 0 {
                 joints[shaped.parents[j]].addChild(joints[j])
             } else {
-                frame.addChild(joints[j])
+                rig.body.addChild(joints[j])
             }
         }
         func bone(_ role: CatMeshAsset.Role) -> Entity? {
@@ -81,9 +70,17 @@ enum CatBuilder {
         rig.neck = bone(.neck) ?? rig.neck
         rig.head = bone(.head) ?? rig.head
         rig.jaw = bone(.jaw) ?? rig.jaw
-        rig.earL = bone(.earL) ?? rig.earL
-        rig.earR = bone(.earR) ?? rig.earR
+        // Left and right taken from where the ears are, not from the names they
+        // were exported with: the model's own sides come out mirrored once it
+        // faces the right way, and nothing symmetric ever shows it.
+        let ears = [bone(.earL), bone(.earR)].compactMap { $0 }
+        if ears.count == 2 {
+            let left = (shaped.position(shaped.joint(.earL)!).x > 0) ? ears[0] : ears[1]
+            rig.earL = left
+            rig.earR = left === ears[0] ? ears[1] : ears[0]
+        }
         rig.chestNode = bone(.chest) ?? rig.chestNode
+        rig.chestRest = rig.chestNode.position
         rig.bellyNode = bone(.spineBase) ?? rig.bellyNode
         rig.tailSegments = [bone(.tail0), bone(.tail1), bone(.tail2), bone(.tail3)]
             .compactMap { $0 }
@@ -114,12 +111,13 @@ enum CatBuilder {
             // name. The model's own left and right come out mirrored once it is
             // turned to face the right way, and a symmetric cat hides that
             // perfectly until it starts walking.
-            leg.side = toBody(shaped.position(hipJ)).x < 0 ? -1 : 1
+            leg.side = shaped.position(hipJ).x < 0 ? -1 : 1
             leg.upperLength = (shaped.position(kneeJ) - shaped.position(hipJ)).length
             leg.lowerLength = (shaped.position(ankleJ) - shaped.position(kneeJ)).length
             leg.pawLength = (shaped.position(pawJ) - shaped.position(ankleJ)).length
-            let foot = toBody(shaped.position(pawJ))
+            let foot = shaped.position(pawJ)
             leg.restFoot = SIMD3<Float>(foot.x, -rig.bodyHeight, foot.z)
+            leg.restHip = shaped.position(hipJ)
             // Diagonally opposite feet move together, which is what makes a walk
             // read as a trot rather than as a shuffle.
             leg.gaitPhase = (isFront == (leg.side < 0)) ? 0 : 0.5
@@ -134,7 +132,7 @@ enum CatBuilder {
            let skinned = skinned(shaped, mesh: model.mesh) {
             (body as? ModelEntity)?.model = ModelComponent(mesh: skinned, materials: [furMat])
         }
-        frame.addChild(body)
+        rig.body.addChild(body)
         rig.skinnedBody = body
         rig.skinJoints = joints
         syncPose(rig)
@@ -150,7 +148,18 @@ enum CatBuilder {
                 // gives a centimetre of "fur" at the nose and none at the hips,
                 // and slides the shell's texture off the hairs painted underneath.
                 let node = Entity.make(shell, Materials.furShell(a, layer: i), name: "furShell")
-                frame.addChild(node)
+                // Bound to the same skeleton as the coat underneath. A shell is a
+                // copy of the body's vertices, one per vertex and in the same
+                // order, so it takes the same influences — and without them it
+                // would hang in the bind pose while the cat walked out of it.
+                if let model = (node as? ModelEntity)?.model,
+                   let skinnedShell = skinned(shaped, mesh: model.mesh) {
+                    (node as? ModelEntity)?.model =
+                        ModelComponent(mesh: skinnedShell,
+                                       materials: [Materials.furShell(a, layer: i)])
+                }
+                rig.body.addChild(node)
+                rig.skinnedShells.append(node)
             }
         }
 
@@ -173,15 +182,11 @@ enum CatBuilder {
         guard let headJ = shaped.joint(.head) else { return }
         let head = joints[headJ]
 
-        // Everything below is placed in the model's own space, where forward is
-        // +X and up is +Y, and then converted into the skull bone's frame.
-        //
-        // Necessary because the bind pose is not the identity — some of these
-        // bones are turned most of the way round — so "put the nose a head-radius
-        // forward" means nothing until it is said in the right frame. Written the
-        // naive way, the whiskers grew out of the top of the head pointing
-        // backwards, which is exactly what a rotated frame looks like.
-        let toHead = Frame(shaped.bind[headJ])
+        // Everything below is placed in body space: forward is +Z, up is +Y, and
+        // +X is the cat's left. The joints have no rest orientation of their own,
+        // so a child hung on a bone is already in those axes and there is no
+        // frame conversion to get wrong — which there was, and which grew the
+        // whiskers out of the top of the skull pointing backwards.
 
         // How big the head actually came out — measured off the flesh the skull
         // and jaw carry, not off the gap between their joints. Those are very
@@ -194,23 +199,29 @@ enum CatBuilder {
         let headCentre = (headMin + headMax) * 0.5
         let hr = max(0.012, (headMax.y - headMin.y) * 0.5)
         /// Somewhere on the head, in fractions of its own box: +1 is the tip of
-        /// the nose, -1 the back of the skull, and the same for up and across.
+        /// the nose, -1 the back of the skull, and the same for up and across —
+        /// across being toward the cat's left.
         func onHead(_ forward: Float, _ up: Float, _ across: Float) -> SIMD3<Float> {
-            SIMD3<Float>(headCentre.x + (headMax.x - headMin.x) * 0.5 * forward,
+            SIMD3<Float>(headCentre.x + (headMax.x - headMin.x) * 0.5 * across,
                          headCentre.y + (headMax.y - headMin.y) * 0.5 * up,
-                         headCentre.z + (headMax.z - headMin.z) * 0.5 * across)
+                         headCentre.z + (headMax.z - headMin.z) * 0.5 * forward)
                 - shaped.position(headJ)
         }
-        let eyeR = hr * (0.30 + 0.16 * a.eyeSize)
-        // The model faces +X in its own space, so forward is +X and the cat's
-        // sides are ±Z — the frame turns the whole skeleton later.
-        for s in [Float(-1), 1] {
+        // `hr` is half the height of the whole head, jaw included — about 4.5 cm
+        // on an adult — so the fractions below are small. They used to be three
+        // times larger, inherited from a generated cat whose "head radius" was a
+        // parameter rather than a measurement, and produced a 3.5 cm eyeball on
+        // an 8 cm head: two spheres meeting in the middle of the muzzle.
+        let eyeR = hr * (0.12 + 0.07 * a.eyeSize)
+        // `side` is which way along X, so +1 is the cat's left.
+        for side in [Float(-1), 1] {
             let socket = Entity()
-            socket.position = toHead.point(onHead(0.44, 0.30,
-                                                   s * (0.30 + 0.34 * a.eyeSpacing)))
-            // Facing the model's +X, then tilted at the outer corner.
-            socket.orientation = toHead.rotation(
-                EulerRotation.quaternion(SIMD3<Float>(s * deg(mix(-6, 20, a.eyeTilt)), .pi / 2, 0)))
+            socket.position = onHead(0.44, 0.30, side * (0.30 + 0.34 * a.eyeSpacing))
+            // The eye is built around +Z, which is already where it looks, so all
+            // that is left is the tilt at the outer corner — a roll about the
+            // direction of sight.
+            socket.orientation = EulerRotation.quaternion(
+                SIMD3<Float>(0, 0, -side * deg(mix(-6, 20, a.eyeTilt))))
             head.addChild(socket)
 
             let ball = MeshBuilder.sphere(radius: eyeR, segments: 16)
@@ -221,7 +232,7 @@ enum CatBuilder {
             // The socket already faces the way the eye looks, so the cap — which
             // is built around +Z — needs no turn of its own.
             let iris = Entity.make(cap(radius: eyeR * 1.02, angle: deg(62)),
-                                   Materials.eye(a, right: s > 0), name: "iris")
+                                   Materials.eye(a, right: side < 0), name: "iris")
             socket.addChild(iris)
 
             // Lids, which are what actually blink. Fur-coloured caps a little
@@ -241,7 +252,7 @@ enum CatBuilder {
             default: break
             }
 
-            if s < 0 {
+            if side > 0 {
                 rig.eyeL = socket; rig.lidUpperL = upper; rig.lidLowerL = lower
             } else {
                 rig.eyeR = socket; rig.lidUpperR = upper; rig.lidLowerR = lower
@@ -255,38 +266,41 @@ enum CatBuilder {
         // emission per material, and one skinned surface is one material — so the
         // pieces that need to glow get generated as their own, sitting just inside
         // the ear and just on the tip of the muzzle.
-        for (role, s) in [(CatMeshAsset.Role.earL, Float(-1)), (.earR, 1)] {
+        for role in [CatMeshAsset.Role.earL, .earR] {
             guard let earJ = shaped.joint(role) else { continue }
             let ear = joints[earJ]
-            let earLen = shaped.parents[earJ] >= 0
-                ? (shaped.position(earJ) - shaped.position(shaped.parents[earJ])).length
-                : hr * 0.6
-            let inner = MeshBuilder.ear(length: earLen * 1.35, width: earLen * 0.62,
-                                        thickness: earLen * 0.10,
+            // Sized by how much ear stands above the joint, which is what an ear
+            // is. Measuring the bone instead gives the offset from the skull to
+            // the base of the ear — mostly sideways, and on this model nearly
+            // twice as long — so the inner ears came out as four-centimetre
+            // spikes growing out of the sides of the head.
+            let earPos = shaped.position(earJ)
+            let earLen = max(0.006, (headMax.y - earPos.y) * 1.25)
+            let inner = MeshBuilder.ear(length: earLen, width: earLen * 0.68,
+                                        thickness: earLen * 0.12,
                                         curl: a.earShape == .folded ? 1.4 * a.earFold : 0.12)
             let mat = Materials.skin(a.innerEarColor, gloss: 0.4)
             let node = Entity.make(inner, mat, name: "innerEar")
-            // The ear bone points up and out; the generated cone is built along
-            // +Z, so it is turned to follow the bone rather than the model's nose.
-            // The generated cone is built along +Z and the ear bone runs up and
-            // out, so it is turned to follow the bone in the bone's own frame.
-            let toEar = Frame(shaped.bind[earJ])
-            let up = shaped.parents[earJ] >= 0
-                ? (shaped.position(earJ) - shaped.position(shaped.parents[earJ])).normalized
-                : SIMD3<Float>(0, 1, 0)
-            node.orientation = toEar.aiming(up)
+            // The cone is built along +Z, and an ear stands up and leans a little
+            // outward. Aimed by direction rather than taken from the skeleton: the
+            // ear joint is a leaf, so it has no bone to point along.
+            let outward: Float = earPos.x < 0 ? -1 : 1
+            node.orientation = aiming(SIMD3<Float>(outward * 0.30, 1, 0.12).normalized)
+            // Just inside the ear it lines, rather than growing out of its back.
+            node.position = SIMD3<Float>(0, 0, earLen * 0.10)
             ear.addChild(node)
             rig.translucentParts.append(
                 TranslucentPart(entity: node, amount: 0.75,
                                 tint: a.innerEarColor.mixed(with: RGBColor(1.0, 0.30, 0.26), 0.6)))
         }
 
-        let nose = MeshBuilder.blob(radius: hr * (0.10 + 0.07 * a.noseSize),
+        // Wider than it is deep and flatter than either, which is a cat's nose:
+        // the blob's long axis is X, so it needs no turn of its own.
+        let nose = MeshBuilder.blob(radius: hr * (0.07 + 0.05 * a.noseSize),
                                     scaleX: 1.2, scaleY: 0.85, scaleZ: 0.8,
                                     rings: 8, segments: 12)
         let noseNode = Entity.make(nose, Materials.noseLeather(a.noseColor), name: "nose")
-        noseNode.position = toHead.point(onHead(0.94, -0.18, 0))
-        noseNode.orientation = toHead.rotation(EulerRotation.quaternion(SIMD3<Float>(0, .pi / 2, 0)))
+        noseNode.position = onHead(0.94, -0.18, 0)
         head.addChild(noseNode)
         rig.translucentParts.append(
             TranslucentPart(entity: noseNode, amount: 0.35,
@@ -296,30 +310,27 @@ enum CatBuilder {
         // can twitch them.
         guard a.whiskerLength > 0.01 else { return }
         let mat = Materials.whisker(a)
-        for s in [Float(-1), 1] {
+        for side in [Float(-1), 1] {
             let root = Entity()
-            root.position = toHead.point(onHead(0.74, -0.26, s * 0.42))
-            root.orientation = toHead.rotation(simd_quatf())
+            root.position = onHead(0.74, -0.26, side * 0.42)
             head.addChild(root)
             rig.whiskerRoots.append(root)
             for k in 0..<6 {
                 let t = Float(k) / 5
-                let length = hr * (1.5 + 2.2 * a.whiskerLength) * (0.72 + 0.4 * (1 - abs(t - 0.5) * 2))
+                let length = hr * (1.0 + 1.6 * a.whiskerLength) * (0.72 + 0.4 * (1 - abs(t - 0.5) * 2))
                 let strand = MeshBuilder.strand(length: length,
                                                 thickness: 0.0004 + 0.0009 * a.whiskerThickness,
                                                 droop: 0.25)
                 let w = Entity.make(strand, mat, name: "whisker")
-                // The strand is built along +Z, so it is aimed by turning it to
-                // the model's forward and then fanning it out and up.
-                // Aimed by direction rather than by Euler angles, because the
-                // angles do not compose the way they read here: `Rx · Ry · Rz`
-                // applies the yaw before the pitch, and once the yaw has swung a
-                // whisker onto the X axis a pitch *about* X cannot tilt it at all.
-                // The eyebrows were standing vertically off the skull for exactly
-                // that reason.
+                // The strand is built along +Z, and is aimed by direction rather
+                // than by Euler angles: the angles do not compose the way they
+                // read, since `Rx · Ry · Rz` applies the yaw before the pitch, so
+                // once the yaw has swung a whisker onto the X axis a pitch *about*
+                // X cannot tilt it at all. The eyebrows were standing vertically
+                // off the skull for exactly that reason.
                 let out = mix(0.30, 0.95, t)
-                w.orientation = toHead.aiming(SIMD3<Float>(
-                    x: 1 - out * 0.45, y: mix(0.34, -0.30, t), z: s * out).normalized)
+                w.orientation = aiming(SIMD3<Float>(
+                    x: side * out, y: mix(0.34, -0.30, t), z: 1 - out * 0.45).normalized)
                 root.addChild(w)
             }
             if a.eyebrowWhiskers > 0.05 {
@@ -329,11 +340,11 @@ enum CatBuilder {
                     let b = Entity.make(brow, mat, name: "whisker")
                     // Over the eye, not on top of the skull. Placed at 0.70 up
                     // they read as antennae rather than as eyebrows.
-                    b.position = toHead.point(onHead(0.52, 0.42, s * 0.34))
+                    b.position = onHead(0.52, 0.42, side * 0.34)
                     // Forward and up, fanning outward — an eyebrow whisker sweeps
                     // over the eye rather than standing on end.
-                    b.orientation = toHead.aiming(SIMD3<Float>(
-                        x: 0.94, y: 0.22 + Float(k) * 0.09, z: s * 0.26).normalized)
+                    b.orientation = aiming(SIMD3<Float>(
+                        x: side * 0.26, y: 0.22 + Float(k) * 0.09, z: 0.94).normalized)
                     head.addChild(b)
                 }
             }
@@ -348,87 +359,64 @@ enum CatBuilder {
         let neck = joints[neckJ]
         let r = a.torsoRadius * 0.62
 
-        let toNeck = Frame(shaped.bind[neckJ])
         let holder = Entity()
-        // A little back along the neck, and lying across it.
-        holder.position = toNeck.point(SIMD3<Float>(-r * 0.2, 0, 0))
-        holder.orientation = toNeck.rotation(simd_quatf())
+        // A little back along the neck, which runs forward.
+        holder.position = SIMD3<Float>(0, 0, -r * 0.2)
         neck.addChild(holder)
         rig.collarNode = holder
 
         switch a.collarStyle {
         case .bandana:
-            let cloth = MeshBuilder.blob(radius: r * 1.25, scaleX: 1.0, scaleY: 0.55, scaleZ: 0.9,
+            let cloth = MeshBuilder.blob(radius: r * 1.25, scaleX: 0.9, scaleY: 0.55, scaleZ: 1.0,
                                          rings: 8, segments: 14)
             let n = Entity.make(cloth, Materials.linen(a.collarColor,
                                                        key: "bandana-\(a.collarColor.hashValue)"))
-            n.position = SIMD3<Float>(r * 0.25, -r * 0.6, 0)
+            n.position = SIMD3<Float>(0, -r * 0.6, r * 0.25)
             holder.addChild(n)
         default:
+            // The torus is built in the XZ plane, so its hole faces up; the neck
+            // runs forward, so it is tipped a quarter turn to thread onto it.
             let band = MeshBuilder.torus(ringRadius: r, pipeRadius: r * 0.16)
             let mat = a.collarStyle == .ribbon
                 ? Materials.linen(a.collarColor, key: "ribbon-\(a.collarColor.hashValue)")
                 : Materials.pbr(color: a.collarColor, roughness: 0.5)
             let n = Entity.make(band, mat)
-            n.eulerAngles = SIMD3<Float>(0, 0, deg(90))
+            n.eulerAngles = SIMD3<Float>(deg(90), 0, 0)
             holder.addChild(n)
         }
 
         if a.collarHasBell || a.collarStyle == .bell {
             let bell = Entity.make(MeshBuilder.sphere(radius: r * 0.30),
                                    Materials.metal(a.bellColor, roughness: 0.18), name: "bell")
-            bell.position = SIMD3<Float>(r * 0.2, -r * 0.95, 0)
+            bell.position = SIMD3<Float>(0, -r * 0.95, r * 0.2)
             holder.addChild(bell)
         }
         if a.collarStyle == .charm {
             let tag = MeshBuilder.box(width: r * 0.42, height: r * 0.42,
                                       length: r * 0.05, chamfer: r * 0.08)
             let n = Entity.make(tag, Materials.metal(RGBColor(hex: 0xD9C07A), roughness: 0.2))
-            n.position = SIMD3<Float>(r * 0.28, -r * 0.95, 0)
+            n.position = SIMD3<Float>(0, -r * 0.95, r * 0.28)
             holder.addChild(n)
         }
     }
 
     // MARK: - Bits
 
-    /// Converts model-space placements into a bone's own frame.
+    /// Turns a mesh built along +Z to point along a direction.
     ///
-    /// The features hung off the skeleton — eyes, nose, whiskers, collar — are far
-    /// easier to describe in the model's axes, where forward is +X and up is +Y,
-    /// than in whatever orientation a bone's bind pose happens to have. This does
-    /// the conversion once so that every placement can be written the readable way.
-    private struct Frame {
-        let inverse: simd_float4x4
-
-        init(_ bind: simd_float4x4) { inverse = bind.inverse }
-
-        /// A point given relative to the bone's own position, in model axes.
-        func point(_ offsetInModelAxes: SIMD3<Float>) -> SIMD3<Float> {
-            let v = inverse * SIMD4<Float>(offsetInModelAxes, 0)
-            return SIMD3<Float>(v.x, v.y, v.z)
+    /// The shortest rotation taking one unit vector to another, built from the
+    /// half-way vector so it needs no trigonometry and has no quadrant to get
+    /// wrong. The antiparallel case has no shortest rotation — every axis
+    /// perpendicular to the pair works — so it picks one.
+    private static func aiming(_ direction: SIMD3<Float>) -> simd_quatf {
+        let d = direction.normalized
+        let z = SIMD3<Float>(0, 0, 1)
+        if dot(z, d) < -0.9999 {
+            return simd_quatf(angle: .pi, axis: SIMD3<Float>(1, 0, 0))
         }
-
-        /// A rotation expressed in model axes.
-        func rotation(_ r: simd_quatf) -> simd_quatf {
-            simd_quatf(inverse) * r
-        }
-
-        /// Turns a mesh built along +Z to point along a model-space direction.
-        ///
-        /// The shortest rotation taking one unit vector to another, built from the
-        /// half-way vector so it needs no trigonometry and has no quadrant to get
-        /// wrong. The antiparallel case has no shortest rotation — every axis
-        /// perpendicular to the pair works — so it picks one.
-        func aiming(_ direction: SIMD3<Float>) -> simd_quatf {
-            let d = direction.normalized
-            let z = SIMD3<Float>(0, 0, 1)
-            if dot(z, d) < -0.9999 {
-                return rotation(simd_quatf(angle: .pi, axis: SIMD3<Float>(1, 0, 0)))
-            }
-            let half = (z + d).normalized
-            let axis = cross(z, half)
-            return rotation(simd_quatf(ix: axis.x, iy: axis.y, iz: axis.z, r: dot(z, half)).normalized)
-        }
+        let half = (z + d).normalized
+        let axis = cross(z, half)
+        return simd_quatf(ix: axis.x, iy: axis.y, iz: axis.z, r: dot(z, half)).normalized
     }
 
     /// A spherical cap around +Z: an eye's iris, or a lid that closes over it.
@@ -451,12 +439,13 @@ enum CatBuilder {
         let joints = (0..<shaped.jointCount).map { j in
             MeshResource.Skeleton.Joint(name: "joint\(j)",
                                parentIndex: shaped.parents[j] >= 0 ? shaped.parents[j] : nil,
-                               // The shaped bind pose, inverted — the whole matrix,
-                               // because this skeleton's bind rotations are not the
-                               // identity and a translation-only inverse folds the
-                               // cat inside out on its first posed frame.
-                               inverseBindPoseMatrix: shaped.bind[j].inverse,
-                               restPoseTransform: Transform(matrix: shaped.restLocal(j)))
+                               // Skinning only ever evaluates `jointWorld ·
+                               // inverseBind`, so these two have to be inverses of
+                               // each other and are otherwise free. Both are the
+                               // joint's rest position and nothing else, which is
+                               // what leaves a joint's axes equal to the body's.
+                               inverseBindPoseMatrix: shaped.inverseBind(j),
+                               restPoseTransform: Transform(translation: shaped.restLocal(j)))
         }
 
         let n = shaped.influencesPerVertex
@@ -494,11 +483,16 @@ enum CatBuilder {
     /// write the pose directly is what keeps the animator ignorant of skinning.
     static func syncPose(_ rig: CatRig) {
         guard let body = rig.skinnedBody, !rig.skinJoints.isEmpty else { return }
-        body.components.set(SkeletalPosesComponent(poses: [
-            SkeletalPose(id: "cat", joints: rig.skinJoints.enumerated().map {
-                ("joint\($0.offset)", $0.element.transform)
-            })
-        ]))
+        let pose = SkeletalPose(id: "cat", joints: rig.skinJoints.enumerated().map {
+            ("joint\($0.offset)", $0.element.transform)
+        })
+        body.components.set(SkeletalPosesComponent(poses: [pose]))
+        // The fur shells are the same vertices bound to the same skeleton, so
+        // they take the same pose. Without this they hang in the bind pose and
+        // the cat walks out of its own coat.
+        for shell in rig.skinnedShells {
+            shell.components.set(SkeletalPosesComponent(poses: [pose]))
+        }
     }
 }
 

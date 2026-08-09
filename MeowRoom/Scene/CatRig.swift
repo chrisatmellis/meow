@@ -15,6 +15,8 @@ struct LegRig {
     var pawLength: Float = 0.03
     /// Rest position of the foot in body space.
     var restFoot = SIMD3<Float>.zero
+    /// Rest position of the hip in body space.
+    var restHip = SIMD3<Float>.zero
     /// Phase offset in the walk cycle, 0...1.
     var gaitPhase: Float = 0
     /// Which way the middle joint folds.
@@ -58,6 +60,13 @@ final class CatRig {
     /// into the other after it has run.
     var skinnedBody: Entity?
     var skinJoints: [Entity] = []
+    /// Fur shells, bound to the same skeleton as the body they cover.
+    var skinnedShells: [Entity] = []
+    /// Where the chest joint sits at rest. The animator stretches the torso by
+    /// moving it, rather than by scaling it: a joint's scale runs down the rest
+    /// of the skeleton, so squashing the chest for a loaf would also squash the
+    /// head that hangs off it.
+    var chestRest = SIMD3<Float>.zero
 
     /// Which part of the cat an entity belongs to.
     ///

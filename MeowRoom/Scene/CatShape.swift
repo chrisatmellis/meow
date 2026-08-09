@@ -38,14 +38,48 @@ enum CatShape {
 
     /// A cat, shaped. Everything downstream — the skinning, the rig, the
     /// animator — works from this and never sees the file it came from.
+    ///
+    /// ## Body space, and a skeleton with no orientation
+    ///
+    /// Two conversions happen on the way out of `shape`, and both are here rather
+    /// than in the builder because the mesh and the skeleton have to agree about
+    /// them exactly.
+    ///
+    /// **Into body space.** The model was authored facing +X with the floor at
+    /// y = 0. The game's body space faces +Z with its origin at the hips, because
+    /// that is what the animator measures against. The rotation used to sit on a
+    /// parent entity above the joints — which put the joints in the model's axes
+    /// while the animator was writing angles in the game's, so a pitch came out as
+    /// a roll. Rotating the vertices instead makes the two the same space.
+    ///
+    /// **Rest rotations discarded.** A joint here is a *point*: its rest transform
+    /// is the offset from its parent and nothing else. The file's bind rotations
+    /// are used while shaping — they are what a bone's stretch is measured along —
+    /// and then dropped, with the inverse bind matrices rebuilt to match so the
+    /// skin still lands exactly where it was.
+    ///
+    /// That matters more than it sounds. Skinning only ever evaluates
+    /// `jointWorld · inverseBind`, so any rest orientation is legal as long as the
+    /// two agree; what it decides is the frame an animated angle is *expressed*
+    /// in. With the file's rotations, `head.eulerAngles.x = pitch` meant "pitch
+    /// about whatever axis the exporter happened to leave the skull bone on" — a
+    /// different axis for every joint, none of them the animator's. Rotations
+    /// written straight onto a joint replaced its rest orientation as well, so the
+    /// first animated frame folded the skeleton into a heap at the origin: the cat
+    /// rendered as a ball of fur. Points have no orientation to lose, and a
+    /// rotation about X is a pitch on every bone in the animal.
     struct Shaped {
         var mesh: MeshData
-        /// The shaped bind pose, one world matrix per joint.
-        var bind: [simd_float4x4]
+        /// Where each joint sits at rest, in body space.
+        var rest: [SIMD3<Float>]
         var parents: [Int]
         var jointIndices: [UInt16]
         var jointWeights: [Float]
         var influencesPerVertex: Int
+        /// How far the hips ended up above the floor. Body space puts y = 0 at the
+        /// hips, so this is where the floor is, and it is the animator's
+        /// `bodyHeight`.
+        var hipHeight: Float
         private var roleJoints: [Int]
 
         func joint(_ role: CatMeshAsset.Role) -> Int? {
@@ -55,15 +89,28 @@ enum CatShape {
 
         var jointCount: Int { parents.count }
 
-        func position(_ j: Int) -> SIMD3<Float> {
-            SIMD3<Float>(bind[j][3].x, bind[j][3].y, bind[j][3].z)
-        }
+        func position(_ j: Int) -> SIMD3<Float> { rest[j] }
 
         func position(_ role: CatMeshAsset.Role) -> SIMD3<Float>? {
             joint(role).map { position($0) }
         }
 
-        /// The model-space box occupied by the flesh a set of bones carries.
+        /// A joint's rest offset from its parent — the whole of its rest pose.
+        func restLocal(_ j: Int) -> SIMD3<Float> {
+            let p = parents[j]
+            return p >= 0 ? rest[j] - rest[p] : rest[j]
+        }
+
+        /// Body space → the joint's own space at rest, which is the matrix the
+        /// renderer needs to skin against this rest pose. A translation, because
+        /// the rest pose is one.
+        func inverseBind(_ j: Int) -> simd_float4x4 {
+            var m = matrix_identity_float4x4
+            m[3] = SIMD4<Float>(-rest[j], 1)
+            return m
+        }
+
+        /// The body-space box occupied by the flesh a set of bones carries.
         ///
         /// Bones say where joints are, not how big the animal is around them, and
         /// the difference is large: this skull's bone sits roughly 3.6 cm from the
@@ -95,22 +142,16 @@ enum CatShape {
             return found ? (lo, hi) : nil
         }
 
-        /// A joint's transform relative to its parent, which is what the rig
-        /// hands the renderer as a rest pose.
-        func restLocal(_ j: Int) -> simd_float4x4 {
-            let p = parents[j]
-            return p >= 0 ? bind[p].inverse * bind[j] : bind[j]
-        }
-
-        init(mesh: MeshData, bind: [simd_float4x4], parents: [Int],
+        init(mesh: MeshData, rest: [SIMD3<Float>], parents: [Int],
              jointIndices: [UInt16], jointWeights: [Float],
-             influencesPerVertex: Int, roleJoints: [Int]) {
+             influencesPerVertex: Int, hipHeight: Float, roleJoints: [Int]) {
             self.mesh = mesh
-            self.bind = bind
+            self.rest = rest
             self.parents = parents
             self.jointIndices = jointIndices
             self.jointWeights = jointWeights
             self.influencesPerVertex = influencesPerVertex
+            self.hipHeight = hipHeight
             self.roleJoints = roleJoints
         }
     }
@@ -163,6 +204,8 @@ enum CatShape {
         for j in 0..<n {
             localScale[j] = boneStretch[j]
         }
+        // The model brought whiskers of its own, and the game grows better ones.
+        for j in vestigialWhiskers(asset) { localScale[j] = 0 }
         applyEarShape(asset, a, turn: &localTurn, stretch: &localScale)
         applyTailShape(asset, a, turn: &localTurn, stretch: &localScale)
 
@@ -201,17 +244,58 @@ enum CatShape {
         // --- 2. Carry the skin to the new skeleton.
         let mesh = reskin(asset, to: bind)
 
+        // The whisker cards are longer than the bone that carries them, so moving
+        // the bone only brings them part of the way in. Their flesh is drawn to
+        // the joint as well, which leaves a speck inside the skull.
+        let vestigial = vestigialWhiskers(asset)
+        if !vestigial.isEmpty {
+            let inf = asset.influencesPerVertex
+            var positions = mesh.positions
+            for v in 0..<positions.count {
+                var bestW: Float = 0
+                var best = -1
+                for k in 0..<inf where asset.jointWeights[v * inf + k] > bestW {
+                    bestW = asset.jointWeights[v * inf + k]
+                    best = Int(asset.jointIndices[v * inf + k])
+                }
+                guard best >= 0, vestigial.contains(best) else { continue }
+                let anchor = Vec3(x: bind[best][3].x, y: bind[best][3].y, z: bind[best][3].z)
+                positions[v] = anchor + (positions[v] - anchor) * 0.02
+            }
+            mesh.replacePositions(positions)
+        }
+
         // --- 3. Swell the flesh the bones cannot.
         inflate(asset, a, mesh: mesh, bind: bind)
+
+        // --- 4. Into body space, and throw the bind rotations away.
+        //
+        // A quarter turn about Y takes the model's +X to the game's +Z, and the
+        // hips drop to y = 0 so the animator can measure leg reach against a floor
+        // at -bodyHeight. Applied to the vertices rather than to a parent entity,
+        // because the joints have to end up in the same space as the mesh — see
+        // the note on `Shaped`.
+        let hipY = asset.joint(.hips).map { bind[$0][3].y } ?? 0.2
+        var positions = mesh.positions
+        for v in 0..<positions.count {
+            let p = positions[v]
+            positions[v] = Vec3(x: -p.z, y: p.y - hipY, z: p.x)
+        }
+        mesh.replacePositions(positions)
         mesh.recomputeNormals()
+
+        let rest = (0..<n).map { j in
+            SIMD3<Float>(-bind[j][3].z, bind[j][3].y - hipY, bind[j][3].x)
+        }
 
         var roles = [Int](repeating: -1, count: CatMeshAsset.Role.allCases.count)
         for role in CatMeshAsset.Role.allCases {
             roles[role.rawValue] = asset.joint(role) ?? -1
         }
-        return Shaped(mesh: mesh, bind: bind, parents: asset.parents,
+        return Shaped(mesh: mesh, rest: rest, parents: asset.parents,
                       jointIndices: asset.jointIndices, jointWeights: asset.jointWeights,
-                      influencesPerVertex: asset.influencesPerVertex, roleJoints: roles)
+                      influencesPerVertex: asset.influencesPerVertex,
+                      hipHeight: hipY, roleJoints: roles)
     }
 
     // MARK: - Bone lengths
@@ -253,6 +337,64 @@ enum CatShape {
         return s
     }
 
+    /// The joints carrying the model's own whiskers.
+    ///
+    /// It has some: a few flat cards either side of the muzzle, on two joints of
+    /// their own. They are meant to be drawn with an alpha texture of hairs, which
+    /// this game has no equivalent of — its whiskers are geometry, six a side,
+    /// grown to the length and thickness the player asked for and twitched by the
+    /// animator. So the modelled pair renders as two grey wings sticking out of the
+    /// cat's face, with the real whiskers passing through them.
+    ///
+    /// Folding them away is a bone scale of zero, which is the same mechanism that
+    /// shortens a Munchkin's legs: the cards travel back to the muzzle and end up
+    /// inside the skull. The file is untouched, which matters — it is the one thing
+    /// in the project that cannot be re-derived.
+    ///
+    /// Found by shape rather than by index. A whisker card is a joint with no role
+    /// in the rig, hanging off the skull, carrying almost no geometry, and reaching
+    /// further out to the side than the head itself does. Nothing else on a cat is
+    /// all four of those at once — and an index would be a promise about a file
+    /// that a re-export would quietly break.
+    private static func vestigialWhiskers(_ asset: CatMeshAsset) -> Set<Int> {
+        guard let head = asset.joint(.head) else { return [] }
+        var claimed = Set<Int>()
+        for role in CatMeshAsset.Role.allCases {
+            if let j = asset.joint(role) { claimed.insert(j) }
+        }
+
+        func descendsFromHead(_ j: Int) -> Bool {
+            var k = asset.parents[j]
+            while k >= 0 {
+                if k == head { return true }
+                k = asset.parents[k]
+            }
+            return false
+        }
+
+        // The model faces +X, so the cat's sides are ±Z: how far out to the side a
+        // bone's flesh reaches is the largest |z| among the vertices it owns.
+        let n = asset.influencesPerVertex
+        var count = [Int](repeating: 0, count: asset.jointCount)
+        var reach = [Float](repeating: 0, count: asset.jointCount)
+        for v in 0..<asset.mesh.positions.count {
+            var bestW: Float = 0
+            var best = -1
+            for k in 0..<n where asset.jointWeights[v * n + k] > bestW {
+                bestW = asset.jointWeights[v * n + k]
+                best = Int(asset.jointIndices[v * n + k])
+            }
+            guard best >= 0 else { continue }
+            count[best] += 1
+            reach[best] = max(reach[best], abs(asset.mesh.positions[v].z))
+        }
+
+        return Set((0..<asset.jointCount).filter {
+            !claimed.contains($0) && descendsFromHead($0)
+                && count[$0] > 0 && count[$0] <= 16 && reach[$0] > reach[head]
+        })
+    }
+
     private static func restLegHeight(_ asset: CatMeshAsset) -> Float {
         guard let hip = asset.joint(.hindHipL), let paw = asset.joint(.hindPawL) else { return 0.19 }
         return asset.restPositions[hip].y - asset.restPositions[paw].y
@@ -279,10 +421,18 @@ enum CatShape {
         // what a Scottish Fold actually is.
         let fold = a.earFold * 1.15
         let tilt = (a.earTilt - 0.5) * 0.9
-        for (role, side) in [(CatMeshAsset.Role.earL, Float(-1)), (.earR, 1)] {
+        for role in [CatMeshAsset.Role.earL, .earR] {
             guard let j = asset.joint(role) else { continue }
             stretch[j] = length
-            turn[j] = EulerRotation.quaternion(SIMD3<Float>(-fold, 0, side * tilt))
+            // Said in the model's axes, where forward is +X and the cat's sides
+            // are ±Z. So tipping an upright ear forward is a turn about Z, and
+            // splaying it outward is a turn about X — the other way round from
+            // how it reads, which is why the axes are named here rather than
+            // trusted. Which way is outward comes from where the ear actually is,
+            // not from its exported name: the model's own left and right come out
+            // mirrored, and a symmetric cat hides that completely.
+            let outward: Float = asset.restPositions[j].z < 0 ? -1 : 1
+            turn[j] = EulerRotation.quaternion(SIMD3<Float>(outward * tilt, 0, -fold))
         }
     }
 
@@ -298,7 +448,9 @@ enum CatShape {
             // the kink is on a Japanese Bobtail.
             if kink > 0.01 {
                 let t = Float(i) / Float(max(1, segments.count - 1))
-                turn[j] = EulerRotation.quaternion(SIMD3<Float>(kink * 0.9 * t * t, 0, 0))
+                // A turn about the model's Z, which is the cat's left-right axis —
+                // so the kink lifts the tail rather than swinging it sideways.
+                turn[j] = EulerRotation.quaternion(SIMD3<Float>(0, 0, -kink * 0.9 * t * t))
             }
         }
     }

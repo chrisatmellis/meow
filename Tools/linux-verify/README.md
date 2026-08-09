@@ -84,6 +84,12 @@ not reach the floor when the cat sat up), a tail that curled far enough to loop
 over the cat's own back, a single `tuck` value that folded the front legs of a
 sitting cat, and a head welded to the shoulders with no neck to lift it.
 
+It applies the skin. This is worth stating because it did not, and that is what
+let a skinning bug reach a device: with the cat drawn in its bind pose, every
+picture came out of the same still animal whatever the animator had done, and the
+bind pose is exactly the one pose that cannot show a skinning fault. The
+rasteriser now runs the same linear blend the GPU runs, so a "loaf" is a loaf.
+
 `reference/` holds three of these renders — the cat standing, the room from the
 player's seat, and the cat called over — to diff against after changing the rig
 or the layout.

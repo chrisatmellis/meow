@@ -224,9 +224,24 @@ the bulk a long coat adds — as radial displacement in the bone's own frame,
 blended by skin weight. The shaped skeleton becomes the new bind pose, so the
 mesh and the joints that drive it stay in agreement.
 
+The mesh and the skeleton come out of `CatShape` in the game's body space — the
+cat facing +Z, hips at the origin, floor at `-bodyHeight` — and **every joint's
+rest pose is a translation, with no rotation at all**. That second part is not a
+detail. Skinning only ever evaluates `jointWorld · inverseBind`, so any rest
+orientation is legal as long as the two agree; what it decides is the frame an
+animated angle is expressed in. Keeping the file's bind rotations meant
+`head.eulerAngles.x = pitch` turned the skull about whatever axis the exporter
+had left it on, and — because writing an angle *replaces* an entity's rotation
+rather than composing with it — threw the rest orientation away in the process.
+The first animated frame folded the whole skeleton into a heap: the cat rendered
+as a ball of fur. Joints that are points have no orientation to lose, and a
+rotation about X is a pitch on every bone in the animal.
+
 Eyes, whiskers, a collar, fur shells and the inner ears are still generated,
 because one closed surface cannot blink, and translucency is driven per material
-so the parts that glow when backlit have to be their own meshes.
+so the parts that glow when backlit have to be their own meshes. The model has
+whiskers of its own — a few flat cards meant for an alpha texture this game does
+not have — and `CatShape` folds them into the skull rather than draw two sets.
 
 ## A note on RealityKit
 

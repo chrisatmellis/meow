@@ -1451,6 +1451,48 @@ section("modelled cat") {
         expect(abs(fl.gaitPhase - fr.gaitPhase) > 0.4, "feet on the same end do not")
     }
 
+    // Nothing on the head may reach further out to the side than the head does.
+    //
+    // The model has whiskers of its own — two flat cards on joints of their own,
+    // meant for an alpha texture this game does not have — and drawn alongside the
+    // generated ones they read as grey wings sticking out of the cat's face. They
+    // are folded away by `CatShape`, and this is what says they stayed folded.
+    do {
+        let shaped = CatShape.shape(asset, to: a)
+        let n = shaped.influencesPerVertex
+        var reach = [Float](repeating: 0, count: shaped.jointCount)
+        for v in 0..<shaped.mesh.positions.count {
+            var bestW: Float = 0
+            var best = -1
+            for k in 0..<n where shaped.jointWeights[v * n + k] > bestW {
+                bestW = shaped.jointWeights[v * n + k]
+                best = Int(shaped.jointIndices[v * n + k])
+            }
+            if best >= 0 { reach[best] = max(reach[best], abs(shaped.mesh.positions[v].x)) }
+        }
+        guard let head = shaped.joint(.head) else { return }
+        var descendants: Set<Int> = [head]
+        for j in 0..<shaped.jointCount where shaped.parents[j] >= 0 {
+            if descendants.contains(shaped.parents[j]) { descendants.insert(j) }
+        }
+        for j in descendants.sorted() where reach[j] > 0 {
+            expect(reach[j] <= reach[head] * 1.02,
+                   "joint \(j)'s flesh stays inside the head's width "
+                   + "(\(reach[j]) m vs \(reach[head]) m)")
+        }
+    }
+
+    // The rest pose has to be orientation-free, because that is the whole of the
+    // contract between the modelled skeleton and an animator that writes pitch,
+    // yaw and roll. A joint that rests at an angle has that angle *replaced* the
+    // first time anything writes `eulerAngles`, not composed with.
+    for (i, j) in rig.skinJoints.enumerated() {
+        let q = j.orientation
+        expect(abs(abs(q.real) - 1) < 1e-5 && simd_length(q.imag) < 1e-5,
+               "joint \(i) rests unrotated (\(q.vector))")
+        expect(abs(j.scale.x - 1) < 1e-5, "joint \(i) rests unscaled")
+    }
+
     // It has to survive being animated, which is the only way to find out whether
     // the joints the animator addresses are the joints it thinks they are.
     let animator = CatAnimator(rig: rig)
@@ -1465,6 +1507,91 @@ section("modelled cat") {
     for (i, j) in rig.skinJoints.enumerated() {
         expect(finite(j.position), "joint \(i) has a finite position after 400 frames")
         expect(finite(j.eulerAngles), "joint \(i) has finite angles after 400 frames")
+    }
+
+    // ...and the skin has to survive it too, which is a different claim and the
+    // one that actually matters. Every check above passed while the cat was
+    // rendering as a ball of fur: the joints were finite, the roles were right,
+    // the mesh was whole — and the first posed frame folded the whole animal into
+    // a heap, because the pose was being written in a frame the animator did not
+    // know about. Nothing that only reads the rest pose can see that. So the skin
+    // is applied here exactly as the renderer applies it, and the result is
+    // measured.
+    do {
+        let shaped = CatShape.shape(asset, to: a)
+        var world = [simd_float4x4](repeating: matrix_identity_float4x4,
+                                    count: shaped.jointCount)
+        for j in 0..<shaped.jointCount {
+            let local = rig.skinJoints[j].transform.matrix
+            let p = shaped.parents[j]
+            world[j] = p >= 0 ? world[p] * local : local
+        }
+        let skin = (0..<shaped.jointCount).map { world[$0] * shaped.inverseBind($0) }
+
+        let inf = shaped.influencesPerVertex
+        var posed = [SIMD3<Float>](repeating: .zero, count: shaped.mesh.positions.count)
+        var owner = [Int](repeating: -1, count: shaped.mesh.positions.count)
+        for v in 0..<posed.count {
+            let r = shaped.mesh.positions[v]
+            let p = SIMD4<Float>(r.x, r.y, r.z, 1)
+            var acc = SIMD4<Float>(repeating: 0)
+            var total: Float = 0
+            var bestW: Float = 0
+            for k in 0..<inf {
+                let w = shaped.jointWeights[v * inf + k]
+                guard w > 0 else { continue }
+                let j = Int(shaped.jointIndices[v * inf + k])
+                acc += (skin[j] * p) * w
+                total += w
+                if w > bestW { bestW = w; owner[v] = j }
+            }
+            posed[v] = total > 1e-5 ? SIMD3<Float>(acc.x, acc.y, acc.z) / total
+                                    : SIMD3<Float>(r.x, r.y, r.z)
+        }
+        expect(posed.allSatisfy { finite($0) }, "the posed skin is finite")
+
+        /// The bounding box of a set of points.
+        func box(_ pts: [SIMD3<Float>]) -> (lo: SIMD3<Float>, hi: SIMD3<Float>) {
+            pts.reduce(into: (SIMD3<Float>(repeating: .infinity),
+                              SIMD3<Float>(repeating: -.infinity))) {
+                $0.0 = SIMD3<Float>(min($0.0.x, $1.x), min($0.0.y, $1.y), min($0.0.z, $1.z))
+                $0.1 = SIMD3<Float>(max($0.1.x, $1.x), max($0.1.y, $1.y), max($0.1.z, $1.z))
+            }
+        }
+        let rest = box(shaped.mesh.positions.map { SIMD3<Float>($0.x, $0.y, $0.z) })
+        let now = box(posed)
+        let restSize = rest.hi - rest.lo
+        let nowSize = now.hi - now.lo
+        // A standing cat is the same size as a cat. Collapsing the skeleton is
+        // what this is here to catch, so the floor matters more than the ceiling —
+        // but a fold that turns the animal inside out inflates the box instead, so
+        // both ends are named.
+        for (axis, i) in [("length", 2), ("height", 1), ("width", 0)] {
+            let ratio = nowSize[i] / max(1e-5, restSize[i])
+            expect(ratio > 0.6 && ratio < 1.6,
+                   "posing keeps the cat's \(axis) (\(ratio)× of \(restSize[i]) m)")
+        }
+
+        /// Where the flesh a bone owns has ended up.
+        func centre(_ roles: [CatMeshAsset.Role]) -> SIMD3<Float>? {
+            let wanted = Set(roles.compactMap { shaped.joint($0) })
+            var sum = SIMD3<Float>.zero
+            var count = 0
+            for v in 0..<posed.count where wanted.contains(owner[v]) {
+                sum += posed[v]; count += 1
+            }
+            return count > 0 ? sum / Float(count) : nil
+        }
+        if let nose = centre([.head, .jaw]), let tail = centre([.tail2, .tail3]),
+           let feet = centre([.forePawL, .forePawR, .hindPawL, .hindPawR]) {
+            expect(nose.z - tail.z > 0.12,
+                   "the head is still a cat's length ahead of the tail (\(nose.z - tail.z) m)")
+            expect(nose.y > feet.y + 0.05,
+                   "the head is still above the feet (\(nose.y - feet.y) m)")
+            expect(abs(nose.x) < 0.05, "the head is still on the midline (\(nose.x) m)")
+        } else {
+            expect(false, "the posed skin has a head, a tail and four feet")
+        }
     }
 }
 

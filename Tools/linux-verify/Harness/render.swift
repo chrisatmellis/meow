@@ -53,9 +53,54 @@ private func apply(_ m: simd_float4x4, _ p: SIMD3<Float>) -> SIMD3<Float> {
     return SIMD3<Float>(v.x, v.y, v.z)
 }
 
+/// Deforms an entity's vertices by whatever pose it is carrying.
+///
+/// Without this the renderer drew the cat's bind pose no matter what the animator
+/// had done — one still cat, in a heap of pictures labelled "sitting" and
+/// "walking". It looked right, which was worse than looking wrong: it is what let
+/// a skinning bug reach a device, since the bind pose is exactly the one pose that
+/// cannot show one. Ordinary linear blend skinning, the same arithmetic the GPU
+/// runs, over buffers the shim keeps verbatim.
+private func skinned(_ entity: Entity, _ verts: [SIMD3<Float>]) -> [SIMD3<Float>] {
+    guard let resource = (entity as? ModelEntity)?.model?.mesh,
+          let pose = entity.components[SkeletalPosesComponent.self]?.poses.first,
+          let part = resource.contents.models.first?.parts.first,
+          let influences = part.jointInfluences,
+          let skeleton = resource.contents.skeletons.first(where: { $0.id == part.skeletonID })
+            ?? resource.contents.skeletons.first
+    else { return verts }
+
+    let n = skeleton.joints.count
+    var world = [simd_float4x4](repeating: matrix_identity_float4x4, count: n)
+    for j in 0..<n {
+        let joint = skeleton.joints[j]
+        let local = (pose[joint.name] ?? joint.restPoseTransform).matrix
+        // Joints are stored parents-first, so one pass suffices.
+        world[j] = joint.parentIndex.map { world[$0] * local } ?? local
+    }
+    let skin = (0..<n).map { world[$0] * skeleton.joints[$0].inverseBindPoseMatrix }
+
+    let per = influences.influencesPerVertex
+    guard per > 0, influences.influences.count >= verts.count * per else { return verts }
+    var out = verts
+    for v in 0..<verts.count {
+        var acc = SIMD4<Float>(repeating: 0)
+        var total: Float = 0
+        for k in 0..<per {
+            let e = influences.influences[v * per + k]
+            guard e.weight > 0, e.jointIndex < n else { continue }
+            acc += (skin[e.jointIndex] * SIMD4<Float>(verts[v], 1)) * e.weight
+            total += e.weight
+        }
+        if total > 1e-5 { out[v] = SIMD3<Float>(acc.x, acc.y, acc.z) / total }
+    }
+    return out
+}
+
 private func gather(_ entity: Entity, into tris: inout [Tri], skipHidden: Bool = true) {
     if skipHidden && !entity.isEnabled { return }
-    if let (verts, idx) = tessellate(entity) {
+    if let (rest, idx) = tessellate(entity) {
+        let verts = skinned(entity, rest)
         let world = entity.worldMatrix
         // Approximate the material by its base colour's lightness.
         var shade: Float = 0.65
@@ -305,6 +350,10 @@ func runRender(outputDirectory: String) {
         motion.speed = pose.isLocomotion ? 0.6 : 0
         motion.eyeOpen = pose.isSleep ? 0.05 : 1
         for _ in 0..<300 { animator.update(dt: 1.0 / 60, motion: motion) }
+        // Without this the skin stays in its bind pose while the eyes, nose and
+        // whiskers follow the animated skeleton — a standing cat with its face
+        // floating above and behind it, in a picture labelled "loaf".
+        CatBuilder.syncPose(rig)
 
         shot("cat-\(label)-side", rig.root,
              eye: SIMD3<Float>(x: 0.95, y: 0.20, z: 0.05), target: SIMD3<Float>(x: 0, y: 0.16, z: 0),

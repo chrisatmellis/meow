@@ -111,9 +111,14 @@ final class CatAnimator {
                                            y: sway * 0.35,
                                            z: pose.bodyRoll + sway)
 
-        rig.chestNode.scale = SIMD3<Float>(x: pose.torsoHeight * 0.5 + 0.5,
-                                         y: pose.torsoHeight,
-                                         z: pose.torsoLength)
+        // Torso length, by moving the chest rather than scaling it. A loaf is a
+        // cat with its shoulders drawn back toward its hips, and moving the joint
+        // takes the neck and head along with it while leaving them their own size
+        // — where a scale on the chest would run down the skeleton and inflate
+        // the skull.
+        rig.chestNode.position = SIMD3<Float>(x: rig.chestRest.x,
+                                              y: rig.chestRest.y * pose.torsoHeight,
+                                              z: rig.chestRest.z * pose.torsoLength)
 
         // ---- Legs -------------------------------------------------------
         solveLegs(dt: dt, motion: motion, bodyY: bodyY, strideLength: strideLength)
@@ -150,8 +155,11 @@ final class CatAnimator {
         let stride = min(strideLength * 0.5, 0.02 + motion.speed * 0.055)
 
         for (i, leg) in rig.legs.enumerated() {
-            // Hip position in body space (unaffected by spine pitch/roll).
-            let hipInBody = rig.body.convert(position: leg.hip.position, from: rig.spine)
+            // Where the hip sits at rest, not where the spine's pitch has
+            // currently carried it: a foot on the floor stays on the floor while
+            // the body leans over it, and the IK below is what absorbs the
+            // difference.
+            let hipInBody = leg.restHip
             let baseOffset = leg.isFront ? pose.frontFoot : pose.hindFoot
 
             var footX = hipInBody.x + baseOffset.x * leg.side
@@ -189,8 +197,11 @@ final class CatAnimator {
             }
 
             let ankleTargetBody = SIMD3<Float>(x: footX, y: footY + leg.pawLength * 0.55, z: footZ)
-            let ankleTarget = rig.spine.convert(position: ankleTargetBody, from: rig.body)
-            solveTwoBone(leg, ankleTarget: ankleTarget)
+            // Solved in the hip's parent's space, which is the space the hip's own
+            // rotation is expressed in. Anywhere else and the answer is right for
+            // a body that is not leaning.
+            let parent = leg.hip.parent ?? rig.body
+            solveTwoBone(leg, ankleTarget: parent.convert(position: ankleTargetBody, from: rig.body))
         }
     }
 
@@ -252,7 +263,10 @@ final class CatAnimator {
             // Solve in spine space, not neck space: the neck's own rotation must not
             // feed back into the angle we are about to give it.
             let targetInSpine = rig.spine.convert(position: targetWorld, from: nil)
-            let d = targetInSpine - rig.neck.position
+            // The neck's own place in spine space, which is not `neck.position` —
+            // that is its offset from whatever bone the model hangs it from, and
+            // on a modelled skeleton that is rarely the spine itself.
+            let d = targetInSpine - rig.neck.position(relativeTo: rig.spine)
             let flat = sqrtf(d.x * d.x + d.z * d.z)
             if flat > 1e-4 || abs(d.y) > 1e-4 {
                 let yaw = min(max(atan2f(d.x, d.z), -deg(78)), deg(78))
@@ -293,8 +307,8 @@ final class CatAnimator {
         let swaySpeed: Float = 1.1 + agitation * 5.0 + motion.speed * 1.6
         let swayAmp: Float = 0.05 + agitation * 0.30 + tailFlickImpulse * 0.28
 
-        // Negative X lifts the tail, because tailPitch sits inside the root's 180° yaw.
-        rig.tailPitch.eulerAngles = SIMD3<Float>(x: -(deg(30) + pose.tailBasePitch),
+        // The tail runs backwards, along -Z, so a positive pitch about X lifts it.
+        rig.tailPitch.eulerAngles = SIMD3<Float>(x: deg(30) + pose.tailBasePitch,
                                                y: 0,
                                                z: pose.tailSide * 0.4)
 
@@ -325,15 +339,20 @@ final class CatAnimator {
 
         let pin = motion.earPin
         let base = pose.earPitch
-        let a = rig.appearance
-        let tilt = deg(mix(-8, 30, a.earTilt))
 
+        // Only what moves. How far apart the ears sit, how far out they splay and
+        // how far a fold tips them over are all shape, applied once when the cat
+        // is built — repeating any of it here would double it, and a constant
+        // pitch on top of a bone that already points where it should is what lays
+        // a cat's ears flat for the rest of the game.
+        //
+        // An ear bone points up, so a negative pitch about X lays it back.
         for (idx, ear) in [rig.earL, rig.earR].enumerated() {
-            let side: Float = idx == 0 ? -1 : 1
+            let side: Float = idx == 0 ? 1 : -1      // +1 is the cat's left
             let twitch = (idx == 0 ? earTwitch : earTwitch * 0.6) * 0.18
-            ear.eulerAngles = SIMD3<Float>(x: deg(-72) + base + pin * deg(46) + twitch,
-                                         y: side * (deg(24) + pin * deg(28)),
-                                         z: side * (tilt + pin * deg(20)))
+            ear.eulerAngles = SIMD3<Float>(x: base - pin * deg(46) + twitch,
+                                         y: 0,
+                                         z: -side * pin * deg(20))
         }
     }
 
