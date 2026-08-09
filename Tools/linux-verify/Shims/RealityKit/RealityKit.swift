@@ -14,6 +14,23 @@
 // Matrices are column-major with a `columns` tuple, exactly as `simd` has them.
 // A row-major stand-in would typecheck, run, and then transpose every joint on
 // device — which is the failure mode this whole file exists to avoid.
+//
+// The material, lighting and view surface was checked the same way on 2026-08-09,
+// and three of the port plan's stated losses turned out not to be losses:
+//
+//   RealityViewRenderingEffects has depthOfField, dynamicRange, antialiasing,
+//     cameraGrain, motionBlur and customPostProcessing — so depth of field and
+//     HDR survive the port, and bloom and vignette are reachable in Metal rather
+//     than gone.
+//   PhysicallyBasedMaterial has subsurfaceColor / subsurfaceWeight /
+//     subsurfaceRadius — real subsurface scattering, which is what `Translucency`
+//     has been faking with driven emission.
+//   PhysicallyBasedMaterial.textureCoordinateTransform (iOS 15) gives per-material
+//     tiling, so the room's tile factors do not have to be baked into UVs.
+//
+// Confirmed as stated: no torus and no tube in MeshResource (generate is limited
+// to box, plane, sphere, cone, cylinder and text), no ambient light, and
+// ImageBasedLightComponent is iOS 18.
 @_exported import Foundation
 @_exported import CoreGraphics
 @_exported import UIKit
@@ -296,8 +313,6 @@ public struct Transform {
 }
 
 // MARK: - Components
-
-public protocol Component {}
 
 public struct ComponentSet {
     private var storage: [ObjectIdentifier: Any] = [:]
@@ -719,28 +734,127 @@ public struct SkeletalPosesComponent: Component {
 }
 
 // MARK: - Materials
+//
+// Checked against Apple's published declarations rather than memory, symbol by
+// symbol, on 2026-08-09. The pieces that differ most from what one would guess:
+//
+//   PhysicallyBasedMaterial.Texture      = MaterialParameters.Texture       iOS 15
+//   .TextureCoordinateTransform          = MaterialParameterTypes...        iOS 15
+//     — so per-material tiling is real and does not need baking into UVs
+//   Blending is an *enum*: .opaque / .transparent(opacity:)                 iOS 15
+//   TextureResource(image:withName:options:)                               (generate(from:) is deprecated)
+//   .subsurfaceColor / .subsurfaceWeight / .subsurfaceRadius exist          — real SSS, not an emission hack
+//   .clearcoat / .clearcoatRoughness / .sheen / .ambientOcclusion exist
+//
+// The scalar wrappers are `ExpressibleByFloatLiteral` in the real framework, so
+// `material.roughness = 0.8` compiles there. They are here too, or the port
+// would be written against a stricter API than the one it ships on and would
+// then not compile on device — the exact failure this file exists to prevent.
 
 public protocol Material {}
 
-public struct TextureResource {
-    public var identifier: String
-    public init(identifier: String = "") { self.identifier = identifier }
+public protocol Component {
+    static func registerComponent()
+}
 
-    public static func generate(from image: CGImage, options: CreateOptions) throws -> TextureResource {
-        TextureResource(identifier: "cgimage")
+public extension Component {
+    /// RealityKit requires this once per custom component type before use, and
+    /// provides a default. Registration has nothing to observe off-device.
+    static func registerComponent() {}
+}
+
+public enum MaterialParameterTypes {
+    public struct TextureCoordinateTransform {
+        public var offset: SIMD2<Float>
+        public var scale: SIMD2<Float>
+        public var rotation: Float
+        public init(offset: SIMD2<Float> = SIMD2<Float>(0, 0),
+                    scale: SIMD2<Float> = SIMD2<Float>(1, 1),
+                    rotation: Float = 0) {
+            self.offset = offset
+            self.scale = scale
+            self.rotation = rotation
+        }
+    }
+}
+
+public enum MaterialParameters {
+    public struct Texture {
+        public struct Sampler {
+            /// The real type wraps an `MTLSamplerDescriptor` and is configured
+            /// through `modify`. Only the addressing mode matters here: a tiled
+            /// surface sampled with the default clamp shows one repeat and a
+            /// smear, which looks like a broken UV rather than a broken sampler.
+            public enum AddressMode { case clampToEdge, `repeat`, mirrorRepeat, clampToZero, clampToBorderColor }
+            public var addressModeU: AddressMode = .repeat
+            public var addressModeV: AddressMode = .repeat
+            public init() {}
+            public mutating func modify(_ body: (inout Sampler) -> Void) { body(&self) }
+        }
+
+        public var resource: TextureResource
+        public var sampler = Sampler()
+        public var uvIndex: Int = 0
+
+        public init(_ resource: TextureResource) { self.resource = resource }
+        public init(_ resource: TextureResource, sampler: Sampler) {
+            self.resource = resource
+            self.sampler = sampler
+        }
+    }
+}
+
+public final class TextureResource {
+    public var identifier: String
+    public var width: Int
+    public var height: Int
+    public var semantic: Semantic?
+
+    public init(identifier: String = "", width: Int = 1, height: Int = 1, semantic: Semantic? = nil) {
+        self.identifier = identifier
+        self.width = width
+        self.height = height
+        self.semantic = semantic
+    }
+
+    /// The current spelling. `generate(from:withName:options:)` still exists and
+    /// is deprecated, which is worth remembering when reading older samples.
+    public convenience init(image: CGImage, withName name: String? = nil,
+                            options: CreateOptions) throws {
+        self.init(identifier: name ?? "cgimage",
+                  width: image.width, height: image.height,
+                  semantic: options.semantic)
+    }
+
+    public static func generate(from image: CGImage, withName name: String? = nil,
+                                options: CreateOptions) throws -> TextureResource {
+        try TextureResource(image: image, withName: name, options: options)
     }
 
     public struct CreateOptions {
         public var semantic: Semantic?
+        public var mipmapsMode: MipmapsMode = .allocateAndGenerateAll
         public init(semantic: Semantic?) { self.semantic = semantic }
+        public init(semantic: Semantic?, mipmapsMode: MipmapsMode) {
+            self.semantic = semantic
+            self.mipmapsMode = mipmapsMode
+        }
     }
 
+    public enum MipmapsMode { case none, allocateAll, allocateAndGenerateAll }
+
+    /// What the pixels *mean*, which decides the colour space they are read in.
+    /// A normal map read as sRGB is the classic silent disaster: it still looks
+    /// like a normal map, just with every slope wrong by the gamma curve.
     public enum Semantic {
         case color, normal, raw, scalar, hdrColor
     }
 }
 
 public struct PhysicallyBasedMaterial: Material {
+    public typealias Texture = MaterialParameters.Texture
+    public typealias TextureCoordinateTransform = MaterialParameterTypes.TextureCoordinateTransform
+
     public struct BaseColor {
         public var tint: UIColor
         public var texture: Texture?
@@ -750,12 +864,9 @@ public struct PhysicallyBasedMaterial: Material {
         }
     }
 
-    public struct Texture {
-        public var resource: TextureResource
-        public init(_ resource: TextureResource) { self.resource = resource }
-    }
-
-    public struct Roughness {
+    /// A scalar that a texture may override. All of RealityKit's single-channel
+    /// material parameters share this shape, so they share an implementation.
+    public struct Scalar: ExpressibleByFloatLiteral {
         public var scale: Float
         public var texture: Texture?
         public init(floatLiteral value: Float) { scale = value; texture = nil }
@@ -763,16 +874,29 @@ public struct PhysicallyBasedMaterial: Material {
             self.scale = scale
             self.texture = texture
         }
+        public init(_ value: Float) { scale = value; texture = nil }
     }
 
-    public struct Metallic {
-        public var scale: Float
+    public typealias Roughness = Scalar
+    public typealias Metallic = Scalar
+    public typealias Specular = Scalar
+    public typealias Clearcoat = Scalar
+    public typealias ClearcoatRoughness = Scalar
+    public typealias SubsurfaceWeight = Scalar
+    public typealias SubsurfaceRadius = Scalar
+    public typealias AnisotropyLevel = Scalar
+    public typealias AnisotropyAngle = Scalar
+
+    public struct AmbientOcclusion {
         public var texture: Texture?
-        public init(floatLiteral value: Float) { scale = value; texture = nil }
-        public init(scale: Float = 0, texture: Texture? = nil) {
-            self.scale = scale
-            self.texture = texture
-        }
+        public init(texture: Texture? = nil) { self.texture = texture }
+        public init(_ texture: Texture?) { self.texture = texture }
+    }
+
+    public struct Normal {
+        public var texture: Texture?
+        public init(texture: Texture? = nil) { self.texture = texture }
+        public init(_ texture: Texture?) { self.texture = texture }
     }
 
     public struct EmissiveColor {
@@ -784,36 +908,68 @@ public struct PhysicallyBasedMaterial: Material {
         }
     }
 
-    public struct Blending {
-        public static func transparent(opacity: Opacity) -> Blending { Blending() }
-        public static let opaque = Blending()
-        public init() {}
+    /// The colour light takes on once it has been through the surface. On a cat
+    /// this is the ears, the nose leather and the toe webbing — thin tissue over
+    /// blood — and RealityKit models it properly, which the SceneKit build had to
+    /// fake with emission.
+    public struct SubsurfaceColor {
+        public var tint: UIColor
+        public var texture: Texture?
+        public init(tint: UIColor = .white, texture: Texture? = nil) {
+            self.tint = tint
+            self.texture = texture
+        }
     }
 
-    public struct Opacity {
-        public var scale: Float
-        public init(floatLiteral value: Float) { scale = value }
-        public init(scale: Float) { self.scale = scale }
+    public struct SheenColor {
+        public var tint: UIColor
+        public var texture: Texture?
+        public init(tint: UIColor = .white, texture: Texture? = nil) {
+            self.tint = tint
+            self.texture = texture
+        }
     }
+
+    public struct Opacity: ExpressibleByFloatLiteral {
+        public var scale: Float
+        public var texture: Texture?
+        public init(floatLiteral value: Float) { scale = value; texture = nil }
+        public init(scale: Float, texture: Texture? = nil) {
+            self.scale = scale
+            self.texture = texture
+        }
+    }
+
+    public enum Blending {
+        case opaque
+        case transparent(opacity: Opacity)
+    }
+
+    public enum FaceCulling { case none, front, back }
+    public enum TriangleFillMode { case fill, lines }
 
     public var baseColor = BaseColor()
     public var roughness = Roughness(scale: 0.5)
     public var metallic = Metallic(scale: 0)
+    public var normal = Normal()
+    public var ambientOcclusion = AmbientOcclusion()
+    public var specular = Specular(scale: 0.5)
+    public var clearcoat = Clearcoat(scale: 0)
+    public var clearcoatRoughness = ClearcoatRoughness(scale: 0)
+    public var sheen: SheenColor?
     public var emissiveColor = EmissiveColor()
     public var emissiveIntensity: Float = 0
+    public var subsurfaceColor = SubsurfaceColor()
+    public var subsurfaceWeight = SubsurfaceWeight(scale: 0)
+    public var subsurfaceRadius = SubsurfaceRadius(scale: 0)
     public var blending = Blending.opaque
     public var opacityThreshold: Float?
     public var faceCulling: FaceCulling = .back
-    public var normal = Normal()
-
-    public struct Normal {
-        public var texture: Texture?
-        public init(texture: Texture? = nil) { self.texture = texture }
-    }
-
-    public enum FaceCulling {
-        case none, front, back
-    }
+    public var triangleFillMode: TriangleFillMode = .fill
+    public var readsDepth = true
+    public var writesDepth = true
+    public var textureCoordinateTransform = TextureCoordinateTransform()
+    public var secondaryTextureCoordinateTransform = TextureCoordinateTransform()
 
     public init() {}
 }
@@ -832,6 +988,53 @@ public struct SimpleMaterial: Material {
 public struct UnlitMaterial: Material {
     public var color: UIColor
     public init(color: UIColor = .white) { self.color = color }
+}
+
+// MARK: - Image-based lighting
+//
+// RealityKit has no ambient light. What SceneKit spelled as one number is an
+// environment map here, which is strictly better — a room lit by a window is not
+// lit equally from every direction — but it does mean the sky has to become an
+// image before it can light anything.
+
+public final class EnvironmentResource {
+    public var name: String
+    public init(name: String = "environment") { self.name = name }
+
+    /// The path this game uses: the sky is drawn procedurally every few minutes,
+    /// so it arrives as a `CGImage` and never touches the bundle.
+    public convenience init(equirectangular image: CGImage, withName name: String? = nil) throws {
+        self.init(name: name ?? "equirectangular")
+    }
+
+    public convenience init(named name: String, in bundle: Bundle? = nil) throws {
+        self.init(name: name)
+    }
+}
+
+public struct ImageBasedLightComponent: Component {
+    public enum Source {
+        case single(EnvironmentResource)
+        case blend(EnvironmentResource, EnvironmentResource, Float)
+    }
+
+    public var source: Source
+    /// A power-of-two exponent, not a multiplier: RealityKit scales the
+    /// environment by `pow(2, intensityExponent)`.
+    public var intensityExponent: Float
+    public var inheritsRotation = false
+
+    public init(source: Source, intensityExponent: Float = 0) {
+        self.source = source
+        self.intensityExponent = intensityExponent
+    }
+}
+
+/// Points an entity at the entity carrying the image-based light. Without one,
+/// nothing receives it — which is easy to miss, because the scene still renders.
+public struct ImageBasedLightReceiverComponent: Component {
+    public var imageBasedLight: Entity
+    public init(imageBasedLight: Entity) { self.imageBasedLight = imageBasedLight }
 }
 
 // MARK: - Lights and cameras
@@ -888,9 +1091,16 @@ public struct SpotLightComponent: Component {
 }
 
 public struct PerspectiveCameraComponent: Component {
+    /// Which axis `fieldOfViewInDegrees` describes. RealityKit defaults to
+    /// vertical and derives the other from the aspect ratio; SceneKit's camera in
+    /// this game was pinned horizontal, because a room framed by its width is the
+    /// thing that has to stay put when the phone changes shape.
+    public enum FieldOfViewOrientation { case horizontal, vertical }
+
     public var near: Float
     public var far: Float
     public var fieldOfViewInDegrees: Float
+    public var fieldOfViewOrientation: FieldOfViewOrientation = .vertical
 
     public init(near: Float = 0.01, far: Float = 100, fieldOfViewInDegrees: Float = 60) {
         self.near = near

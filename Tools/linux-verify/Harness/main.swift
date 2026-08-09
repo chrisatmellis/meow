@@ -933,6 +933,28 @@ section("realitykit shim") {
     entity.components.remove(DirectionalLightComponent.self)
     expect(entity.components[DirectionalLightComponent.self] == nil, "component removal works")
 
+    // The scalar material parameters take float literals in the real framework,
+    // so `material.roughness = 0.8` compiles there. If it does not compile here,
+    // the port is being written against a stricter API than the one it ships on
+    // and the device build finds out first.
+    var pbr = PhysicallyBasedMaterial()
+    pbr.roughness = 0.8
+    pbr.metallic = 0.0
+    pbr.clearcoat = 0.9
+    expect(pbr.roughness.scale == 0.8 && pbr.clearcoat.scale == 0.9,
+           "float literals assign to scalar material parameters")
+    expect(pbr.roughness.texture == nil, "a scalar assigned by literal carries no texture")
+
+    // Transparency is an enum with a payload, not a `transparency` scalar. The
+    // shape matters: it is impossible to set an opacity without also declaring
+    // the material transparent, which is the mistake SceneKit let you make.
+    pbr.blending = .transparent(opacity: 0.75)
+    if case let .transparent(opacity) = pbr.blending {
+        expect(opacity.scale == 0.75, "transparent blending carries its opacity")
+    } else {
+        expect(false, "blending stays transparent once set")
+    }
+
     // A skinned part carries its influences and its skeleton binding.
     var part = MeshResource.Part(id: "body", materialIndex: 0)
     part.positions = [SIMD3<Float>(0, 0, 0), SIMD3<Float>(1, 0, 0)]
