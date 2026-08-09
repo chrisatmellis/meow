@@ -1,36 +1,45 @@
 import Foundation
-import SceneKit
+import RealityKit
 import QuartzCore
 import UIKit
 
-/// Owns the SceneKit scene and drives it from the simulation every frame.
-final class GameSceneController: NSObject, SCNSceneRendererDelegate {
+/// Owns the scene and drives it from the simulation every frame.
+final class GameSceneController: NSObject {
 
-    let scene = SCNScene()
+    /// Everything in the world hangs off this, and `RealityView` adds it to its
+    /// content. There is no scene object to own: RealityKit's scene belongs to the
+    /// view, so the controller owns a root entity instead.
+    let root = Entity()
     private(set) var brain: CatBrain
     private var rig: CatRig
     private var animator: CatAnimator
     private var room: RoomNode
     private let lighting = LightingRig()
-    private let cameraNode = SCNNode()
+    private let camera = PerspectiveCamera()
 
     weak var viewModel: GameViewModel?
 
-    private var lastTime: TimeInterval = 0
     private var skyRefresh: Float = 99
-    /// Exposure eases toward this rather than snapping. The sun moves slowly
-    /// enough not to matter, but the lantern switching itself on at dusk is a
-    /// step change in the room's light, and the camera should adapt to it the
-    /// way an eye does rather than cutting.
-    private var exposureTarget: Float = 0
+    /// The eased exposure the room is lit at.
+    ///
+    /// SceneKit had a camera exposure offset, which is where this used to live and
+    /// is the one thing the port genuinely loses: RealityKit's camera has no
+    /// exposure at all, because its lights are in real photometric units and the
+    /// answer is meant to be that you light the room correctly. So the easing
+    /// stays and the destination changes — `LightingRig` folds it into the light
+    /// intensities instead. The lantern coming on at dusk is still a step change
+    /// in the room's light, and the room should adapt to it the way an eye does
+    /// rather than cutting.
+    private var exposure: Float = 1
+    private var exposureTarget: Float = 1
     private var sky: SkyState = WorldClock.sky()
     private var hudRefresh: Float = 0
 
     // Wand
-    private let wandRoot = SCNNode()
-    private let wandAnchor = SCNNode()
-    private var lureNode = SCNNode()
-    private var stringNode = SCNNode()
+    private let wandRoot = Entity()
+    private let wandAnchor = Entity()
+    private var lureNode = Entity()
+    private var stringNode = Entity()
     private var lurePosition = SIMD3<Float>(x: 0, y: 0.2, z: 0.2)
     private var lureVelocity = SIMD3<Float>.zero
     private(set) var wandActive = false
@@ -43,7 +52,7 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
     private var bellTimer: Float = 0
 
     // Props
-    private var treatNode: SCNNode?
+    private var treatNode: Entity?
     private var teacupFalling = false
 
     var appearance: CatAppearance { rig.appearance }
@@ -62,65 +71,53 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
     // MARK: - Scene assembly
 
     private func buildScene() {
-        scene.rootNode.addChildNode(room.root)
-        scene.rootNode.addChildNode(lighting.root)
-        scene.rootNode.addChildNode(rig.root)
+        root.addChild(room.root)
+        root.addChild(lighting.root)
+        root.addChild(rig.root)
 
-        let camera = SCNCamera()
+        // The cat is what gets touched, and the two toys, and nothing else. Under
+        // SceneKit every surface in the room answered a hit test and the code then
+        // discarded all but the cat; here the room simply never answers.
+        rig.root.enableInput()
+        room.toyMouse?.enableInput()
+        room.toyBall?.enableInput()
+
         // Portrait phones are narrow: pin the field of view to the horizontal axis so
-        // the whole room fits, instead of a keyhole view of the far wall.
-        camera.projectionDirection = .horizontal
-        camera.fieldOfView = 54
-        camera.zNear = 0.02
-        camera.zFar = 40
-        camera.wantsHDR = true
-        camera.wantsExposureAdaptation = false
-        // Bloom, kept on a short leash.
+        // the whole room fits, instead of a keyhole view of the far wall. RealityKit
+        // defaults to vertical and derives the other axis from the aspect ratio,
+        // which is the opposite of what a fixed room wants.
+        var lens = PerspectiveCameraComponent()
+        lens.fieldOfViewOrientation = .horizontal
+        lens.fieldOfViewInDegrees = 54
+        lens.near = 0.02
+        lens.far = 40
+        // What used to be twelve lines of camera post-processing is now split in
+        // two. Depth of field, HDR and antialiasing are view-level rendering
+        // effects and are set where the view is made. Bloom, vignette, colour
+        // fringing, screen-space AO and the saturation lift have no equivalent —
+        // `customPostProcessing` could carry them in Metal, and that is a separate
+        // piece of work rather than something to smuggle into a port.
         //
-        // At threshold 0.95 and radius 10 this was the single biggest cause of the
-        // room looking washed out. The window legitimately reaches white, and bloom
-        // then spread that white across the entire frame as a milky veil — walls,
-        // floor and ceiling all lifted toward grey, with the contrast gone. A
-        // threshold above 1 means only genuinely over-range highlights bloom, which
-        // is what bloom is for.
-        camera.bloomIntensity = 0.06
-        camera.bloomThreshold = 1.15
-        camera.bloomBlurRadius = 6
-        exposureTarget = Float(LightingRig.exposureOffset(sky: sky, lanternOn: sky.wantsLampLight))
-        camera.exposureOffset = CGFloat(exposureTarget)
-        camera.motionBlurIntensity = 0.0
-        camera.wantsDepthOfField = RenderQuality.wantsDepthOfField
-        camera.focusDistance = 2.6
-        camera.fStop = 8.0
-        camera.focalBlurSampleCount = 8
-        camera.screenSpaceAmbientOcclusionIntensity = RenderQuality.ambientOcclusionIntensity
-        camera.screenSpaceAmbientOcclusionRadius = 0.22
-        camera.screenSpaceAmbientOcclusionDepthThreshold = 0.05
-        // Chromatic aberration reads as softness at this strength, and softness on
-        // top of a bright window reads as haze.
-        camera.colorFringeStrength = 0.25
-        camera.vignettingIntensity = 0.45
-        camera.vignettingPower = 1.2
-        // Tone mapping desaturates as it compresses, and it compresses hardest at
-        // the top — so the brighter a surface, the greyer it comes out. Measured:
-        // at midday the tatami rendered rgb(168,167,164), a neutral grey, from an
-        // albedo of (201,179,131) that is anything but; the same floor at night,
-        // sitting low on the curve, came out rgb(119,97,69) and looked like straw.
-        // Pairing a filmic curve with a saturation lift is the standard remedy for
-        // exactly this, and it is the only one that treats the actual cause.
-        camera.saturation = 1.22
-        camera.contrast = 0.05
+        // The saturation lift is the loss worth naming: it existed because
+        // SceneKit's tone curve desaturates as it compresses, so the brighter a
+        // surface the greyer it came out. Measured, the tatami rendered
+        // rgb(168,167,164) at midday — a neutral grey from an albedo that is
+        // anything but — and rgb(119,97,69) at night from the same material.
+        // Whether RealityKit's tone mapping does the same thing is a question for
+        // a screenshot, not for a guess, so nothing is compensating for it yet.
+        exposureTarget = LightingRig.exposure(sky: sky, lanternOn: sky.wantsLampLight)
+        exposure = exposureTarget
 
-        cameraNode.camera = camera
-        cameraNode.simdPosition = RoomLayout.cameraPosition
-        cameraNode.simdEulerAngles = SIMD3<Float>(x: RoomLayout.cameraPitch, y: 0, z: 0)
-        scene.rootNode.addChildNode(cameraNode)
+        camera.camera = lens
+        camera.position = RoomLayout.cameraPosition
+        camera.eulerAngles = SIMD3<Float>(x: RoomLayout.cameraPitch, y: 0, z: 0)
+        root.addChild(camera)
 
         buildWand()
         Haptics.prepare()
 
         // The cat starts wherever the brain decided.
-        rig.root.simdPosition = brain.motion.position
+        rig.root.position = brain.motion.position
     }
 
     /// A bell on the collar rings whenever the cat lands or bolts.
@@ -160,33 +157,31 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
     // MARK: - Wand
 
     private func buildWand() {
-        wandRoot.simdPosition = SIMD3<Float>(x: 0.20, y: -0.30, z: -0.22)
-        wandRoot.simdEulerAngles = SIMD3<Float>(x: deg(-38), y: deg(-16), z: deg(18))
-        cameraNode.addChildNode(wandRoot)
+        wandRoot.position = SIMD3<Float>(x: 0.20, y: -0.30, z: -0.22)
+        wandRoot.eulerAngles = SIMD3<Float>(x: deg(-38), y: deg(-16), z: deg(18))
+        camera.addChild(wandRoot)
 
-        let stick = SCNCylinder(radius: 0.006, height: 0.62)
-        let stickNode = SCNNode.make(stick, Materials.pbr(diffuse: UIColor(RGBColor(hex: 0x6B4A2E)), roughness: 0.6))
-        stickNode.simdPosition = SIMD3<Float>(x: 0, y: 0.31, z: 0)
-        wandRoot.addChildNode(stickNode)
+        let stick = MeshBuilder.cylinder(radius: 0.006, height: 0.62)
+        let stickNode = Entity.make(stick, Materials.pbr(color: RGBColor(hex: 0x6B4A2E), roughness: 0.6))
+        stickNode.position = SIMD3<Float>(x: 0, y: 0.31, z: 0)
+        wandRoot.addChild(stickNode)
 
-        let grip = SCNCylinder(radius: 0.0085, height: 0.10)
-        let gripNode = SCNNode.make(grip, Materials.linen(RGBColor(hex: 0x3A3A42), key: "grip"))
-        gripNode.simdPosition = SIMD3<Float>(x: 0, y: 0.05, z: 0)
-        wandRoot.addChildNode(gripNode)
+        let grip = MeshBuilder.cylinder(radius: 0.0085, height: 0.10)
+        let gripNode = Entity.make(grip, Materials.linen(RGBColor(hex: 0x3A3A42), key: "grip"))
+        gripNode.position = SIMD3<Float>(x: 0, y: 0.05, z: 0)
+        wandRoot.addChild(gripNode)
 
-        wandAnchor.simdPosition = SIMD3<Float>(x: 0, y: 0.63, z: 0)
-        wandRoot.addChildNode(wandAnchor)
+        wandAnchor.position = SIMD3<Float>(x: 0, y: 0.63, z: 0)
+        wandRoot.addChild(wandAnchor)
 
         // The lure lives in world space so it can trail behind the wand tip.
         let feather = MeshBuilder.blob(radius: 0.030, scaleX: 0.45, scaleY: 0.45, scaleZ: 1.9, rings: 8, segments: 10)
-        lureNode = SCNNode.make(feather, Materials.linen(RGBColor(hex: 0xC0563F), key: "feather"))
-        lureNode.castsShadow = true
-        scene.rootNode.addChildNode(lureNode)
+        lureNode = Entity.make(feather, Materials.linen(RGBColor(hex: 0xC0563F), key: "feather"))
+        root.addChild(lureNode)
 
-        let string = SCNCylinder(radius: 0.0012, height: 1.0)
-        stringNode = SCNNode.make(string, Materials.pbr(diffuse: UIColor(white: 0.9, alpha: 1), roughness: 0.8))
-        stringNode.castsShadow = false
-        scene.rootNode.addChildNode(stringNode)
+        let string = MeshBuilder.cylinder(radius: 0.0012, height: 1.0)
+        stringNode = Entity.make(string, Materials.pbr(color: RGBColor(repeating: 0.9), roughness: 0.8))
+        root.addChild(stringNode)
 
         setWand(active: false)
     }
@@ -197,7 +192,7 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
         lureNode.isHidden = !active
         stringNode.isHidden = !active
         if active {
-            lurePosition = wandAnchor.simdWorldPosition
+            lurePosition = wandAnchor.worldPosition
             lurePosition.y = max(0.06, lurePosition.y - 0.55)
             lureVelocity = .zero
         }
@@ -207,14 +202,14 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
     /// Swings the wand from a drag on screen.
     func moveWand(dx: Float, dy: Float) {
         guard wandActive else { return }
-        let yaw = clamp(wandRoot.simdEulerAngles.y - dx * 0.9, deg(-70), deg(50))
-        let pitch = clamp(wandRoot.simdEulerAngles.x - dy * 0.9, deg(-75), deg(5))
-        wandRoot.simdEulerAngles = SIMD3<Float>(x: pitch, y: yaw, z: wandRoot.simdEulerAngles.z)
+        let yaw = clamp(wandRoot.eulerAngles.y - dx * 0.9, deg(-70), deg(50))
+        let pitch = clamp(wandRoot.eulerAngles.x - dy * 0.9, deg(-75), deg(5))
+        wandRoot.eulerAngles = SIMD3<Float>(x: pitch, y: yaw, z: wandRoot.eulerAngles.z)
     }
 
     private func updateWand(dt: Float) {
         guard wandActive else { return }
-        let anchor = wandAnchor.simdWorldPosition
+        let anchor = wandAnchor.worldPosition
 
         // Damped spring toward a point hanging below the wand tip.
         let rest = SIMD3<Float>(x: anchor.x, y: anchor.y - 0.60, z: anchor.z)
@@ -225,20 +220,22 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
         lurePosition += lureVelocity * dt
         lurePosition.y = max(0.045, lurePosition.y)
 
-        lureNode.simdPosition = lurePosition
+        lureNode.position = lurePosition
         let dir = (lurePosition - anchor).normalized
         // Aim the feather's +Z axis down the string.
-        lureNode.simdEulerAngles = SIMD3<Float>(x: -asinf(clamp(dir.y, -1, 1)),
+        lureNode.eulerAngles = SIMD3<Float>(x: -asinf(clamp(dir.y, -1, 1)),
                                           y: atan2f(dir.x, dir.z),
                                           z: 0)
 
         // Stretch the string between the tip and the lure.
         let mid = (anchor + lurePosition) * 0.5
         let len = (lurePosition - anchor).length
-        stringNode.simdPosition = mid
-        stringNode.simdScale = SIMD3<Float>(x: 1, y: max(0.01, len), z: 1)
-        stringNode.simdLook(at: lurePosition, up: SIMD3<Float>(0, 1, 0),
-                            localFront: SIMD3<Float>(0, 1, 0))
+        stringNode.position = mid
+        stringNode.scale = SIMD3<Float>(x: 1, y: max(0.01, len), z: 1)
+        stringNode.look(at: lurePosition, from: mid, upVector: SIMD3<Float>(0, 1, 0), relativeTo: nil)
+        // `look` aims -Z; a cylinder stands on +Y, so tip it a quarter turn.
+        stringNode.orientation = stringNode.orientation
+            * simd_quatf(angle: -.pi / 2, axis: SIMD3<Float>(1, 0, 0))
 
         brain.setWand(active: true, tip: lurePosition)
     }
@@ -254,11 +251,11 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
         let spot = SIMD3<Float>(x: RoomLayout.playerLapSpot.x + Float.random(in: -0.25...0.25),
                               y: 0.02,
                               z: RoomLayout.playerLapSpot.z + Float.random(in: -0.15...0.15))
-        treatNode?.removeFromParentNode()
+        treatNode?.removeFromParent()
         let treat = MeshBuilder.blob(radius: 0.014, scaleX: 1.0, scaleY: 0.7, scaleZ: 1.3, rings: 6, segments: 8)
-        let n = SCNNode.make(treat, Materials.pbr(diffuse: UIColor(RGBColor(hex: 0xB5763C)), roughness: 0.8))
-        n.simdPosition = spot
-        scene.rootNode.addChildNode(n)
+        let n = Entity.make(treat, Materials.pbr(color: RGBColor(hex: 0xB5763C), roughness: 0.8))
+        n.position = spot
+        root.addChild(n)
         treatNode = n
         brain.dropTreat(at: spot)
         CatVoice.shared.play(.bell)
@@ -290,11 +287,10 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
 
     // MARK: - Touch handling
 
-    /// A tap: greet the cat, or bat at whatever was touched.
-    func handleTap(at point: CGPoint, in view: SCNView) {
-        let hits = view.hitTest(point, options: [SCNHitTestOption.searchMode: SCNHitTestSearchMode.all.rawValue])
-        if let hit = hits.first(where: { isCatNode($0.node) }) {
-            let zone = petZone(for: hit)
+    /// A tap on an entity, resolved by the view's gesture.
+    func handleTap(on entity: Entity, at worldPoint: SIMD3<Float>) {
+        if isCatEntity(entity) {
+            let zone = petZone(entity: entity, worldPoint: worldPoint)
             if brain.canBePet {
                 brain.beginPetting(zone: zone)
                 brain.updatePetting(zone: zone, intensity: 0.3)
@@ -307,24 +303,21 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
             return
         }
         // Tapping a toy nudges it, which the cat notices.
-        if let hit = hits.first, let name = hit.node.name, name.hasPrefix("toy") {
-            brain.startle(intensity: 0.2)
-        }
+        if named(entity, prefix: "toy") { brain.startle(intensity: 0.2) }
     }
 
-    func beginPan(at point: CGPoint, in view: SCNView) {
+    func beginPan(at point: CGPoint, on entity: Entity?, worldPoint: SIMD3<Float>) {
         lastPetPoint = point
         petSpeed = 0
         strokeDistance = 0
         guard !wandActive else { return }
-        let hits = view.hitTest(point, options: nil)
-        if let hit = hits.first(where: { isCatNode($0.node) }), brain.canBePet {
-            pettingActive = true
-            brain.beginPetting(zone: petZone(for: hit))
-        }
+        guard let entity, isCatEntity(entity), brain.canBePet else { return }
+        pettingActive = true
+        brain.beginPetting(zone: petZone(entity: entity, worldPoint: worldPoint))
     }
 
-    func updatePan(at point: CGPoint, translationDelta: CGPoint, in view: SCNView) {
+    func updatePan(at point: CGPoint, translationDelta: CGPoint,
+                   on entity: Entity?, worldPoint: SIMD3<Float>) {
         if wandActive {
             moveWand(dx: Float(translationDelta.x) * 0.012, dy: Float(translationDelta.y) * 0.012)
             return
@@ -334,17 +327,16 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
         lastPetPoint = point
         petSpeed = approach(petSpeed, Float(d) * 0.06, rate: 8, dt: 1.0 / 60.0)
 
-        let hits = view.hitTest(point, options: nil)
-        if let hit = hits.first(where: { isCatNode($0.node) }) {
-            brain.updatePetting(zone: petZone(for: hit), intensity: min(1, petSpeed))
-            strokeDistance += Float(d)
-            if strokeDistance > 55 {
-                strokeDistance = 0
-                Haptics.petStroke(intensity: petSpeed)
-            }
-        } else {
-            // Hand slipped off the cat.
-            endPan()
+        guard let entity, isCatEntity(entity) else {
+            endPan()          // hand slipped off the cat
+            return
+        }
+        brain.updatePetting(zone: petZone(entity: entity, worldPoint: worldPoint),
+                            intensity: min(1, petSpeed))
+        strokeDistance += Float(d)
+        if strokeDistance > 55 {
+            strokeDistance = 0
+            Haptics.petStroke(intensity: petSpeed)
         }
     }
 
@@ -355,8 +347,8 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
         }
     }
 
-    private func isCatNode(_ node: SCNNode) -> Bool {
-        var n: SCNNode? = node
+    private func isCatEntity(_ entity: Entity) -> Bool {
+        var n: Entity? = entity
         while let current = n {
             if current === rig.root { return true }
             n = current.parent
@@ -364,13 +356,26 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
         return false
     }
 
-    /// Works out which part of the cat was touched from the hit position.
-    private func petZone(for hit: SCNHitTestResult) -> PetZone {
-        if let name = hit.node.name {
-            if name.hasPrefix("ear") { return .head }
-            if name.hasPrefix("tail") { return .tail }
+    /// Whether an entity or any of its ancestors is named with this prefix.
+    ///
+    /// Walking up matters now in a way it did not before: a hit used to land on
+    /// whatever node carried the geometry, and a gesture lands on whichever
+    /// ancestor carries the collision shape, which is usually a level or two up.
+    private func named(_ entity: Entity, prefix: String) -> Bool {
+        var n: Entity? = entity
+        while let current = n {
+            if current.name.hasPrefix(prefix) { return true }
+            n = current.parent
         }
-        let local = rig.spine.simdConvertPosition(SIMD3<Float>(hit.worldCoordinates.x, hit.worldCoordinates.y, hit.worldCoordinates.z), from: nil)
+        return false
+    }
+
+    /// Works out which part of the cat was touched from where the touch landed.
+    private func petZone(entity: Entity, worldPoint: SIMD3<Float>) -> PetZone {
+        if named(entity, prefix: "ear") { return .head }
+        if named(entity, prefix: "tail") { return .tail }
+
+        let local = rig.spine.convert(position: worldPoint, from: nil)
         let L = rig.torsoLength
         let R = rig.torsoRadius
 
@@ -386,38 +391,57 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
     // MARK: - Cat rebuild (used when the player edits their cat)
 
     func applyAppearance(_ appearance: CatAppearance, personality: CatPersonality) {
-        rig.root.removeFromParentNode()
+        rig.root.removeFromParent()
         rig = CatBuilder.build(appearance)
         animator = CatAnimator(rig: rig)
         brain.appearance = appearance
         brain.personality = personality
-        scene.rootNode.addChildNode(rig.root)
-        rig.root.simdPosition = brain.motion.position
+        root.addChild(rig.root)
+        rig.root.enableInput()
+        rig.root.position = brain.motion.position
     }
 
     // MARK: - Props
 
+    /// The teacup's fall, as state rather than as an action.
+    ///
+    /// `SCNAction` has no RealityKit equivalent, and for one prop that is no loss:
+    /// the frame loop is already running and already has `dt`, so the tween lives
+    /// where every other moving thing in the room lives instead of in a parallel
+    /// animation system that only one object uses.
+    private var teacupFall: Float = 0
+
     private func knockTeacup() {
-        guard let cup = room.teacup, !teacupFalling else { return }
+        guard room.teacup != nil, !teacupFalling else { return }
         teacupFalling = true
-        let fall = SCNAction.group([
-            SCNAction.move(by: SCNVector3(x: 0.18, y: -RoomLayout.tableTop, z: 0.10), duration: 0.55),
-            SCNAction.rotateBy(x: CGFloat(deg(120)), y: CGFloat(deg(40)), z: CGFloat(deg(90)), duration: 0.55)
-        ])
-        fall.timingMode = .easeIn
-        let restore = SCNAction.sequence([
-            SCNAction.wait(duration: 6),
-            SCNAction.fadeOut(duration: 0.4),
-            SCNAction.run { [weak self] node in
-                node.simdPosition = SIMD3<Float>(x: RoomLayout.tableCenter.x + 0.20,
-                                           y: RoomLayout.tableTop + 0.043,
-                                           z: RoomLayout.tableCenter.z - 0.10)
-                node.simdEulerAngles = .zero
-                self?.teacupFalling = false
-            },
-            SCNAction.fadeIn(duration: 0.4)
-        ])
-        cup.runAction(SCNAction.sequence([fall, restore]))
+        teacupFall = 0
+    }
+
+    private static let teacupRest = SIMD3<Float>(x: RoomLayout.tableCenter.x + 0.20,
+                                                 y: RoomLayout.tableTop + 0.043,
+                                                 z: RoomLayout.tableCenter.z - 0.10)
+
+    private func updateTeacup(dt: Float) {
+        guard teacupFalling, let cup = room.teacup else { return }
+        teacupFall += dt
+
+        let fallTime: Float = 0.55
+        if teacupFall <= fallTime {
+            // Ease in, because it is falling: the old action said `.easeIn` and a
+            // squared ramp is what that is.
+            let t = teacupFall / fallTime
+            let e = t * t
+            cup.position = Self.teacupRest
+                + SIMD3<Float>(x: 0.18, y: -RoomLayout.tableTop, z: 0.10) * e
+            cup.eulerAngles = SIMD3<Float>(x: deg(120), y: deg(40), z: deg(90)) * e
+            return
+        }
+        // Six seconds on the floor, then it is quietly back on the table.
+        if teacupFall > fallTime + 6 {
+            cup.position = Self.teacupRest
+            cup.eulerAngles = .zero
+            teacupFalling = false
+        }
     }
 
     private func updateRoomProps(dt: Float) {
@@ -425,15 +449,15 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
 
         if let food = room.foodPile {
             let level = max(0.02, state.feederFood)
-            food.simdScale = SIMD3<Float>(x: 1, y: level, z: 1)
-            food.simdPosition = SIMD3<Float>(x: RoomLayout.feederBowl.x,
+            food.scale = SIMD3<Float>(x: 1, y: level, z: 1)
+            food.position = SIMD3<Float>(x: RoomLayout.feederBowl.x,
                                        y: 0.006 + 0.015 * level,
                                        z: RoomLayout.feederBowl.z)
             food.isHidden = state.feederFood < 0.02
         }
         if let water = room.waterSurface {
             let level = max(0.02, state.fountainWater)
-            water.simdPosition = SIMD3<Float>(x: RoomLayout.fountainBase.x - 0.20,
+            water.position = SIMD3<Float>(x: RoomLayout.fountainBase.x - 0.20,
                                         y: 0.012 + 0.048 * level,
                                         z: RoomLayout.fountainBase.z)
             water.isHidden = state.fountainWater < 0.02
@@ -443,17 +467,21 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
             stream.isHidden = !on
             if on {
                 // Cheap shimmer.
-                stream.simdScale = SIMD3<Float>(x: 1 + sinf(Float(CACurrentMediaTime()) * 22) * 0.12, y: 1, z: 1)
+                stream.scale = SIMD3<Float>(x: 1 + sinf(Float(CACurrentMediaTime()) * 22) * 0.12, y: 1, z: 1)
             }
         }
-        if let litter = room.litterSurface, let mat = litter.geometry?.firstMaterial {
-            mat.diffuse.intensity = CGFloat(0.55 + 0.45 * state.litterCleanliness)
+        if let litter = room.litterSurface {
+            // Soiled litter is darker. SceneKit dimmed the diffuse channel's
+            // intensity; RealityKit tints the base colour instead, which is the
+            // same idea said in the place it belongs.
+            let v = CGFloat(0.55 + 0.45 * state.litterCleanliness)
+            litter.withMaterial { $0.baseColor.tint = UIColor(white: v, alpha: 1) }
         }
         if let treat = treatNode, brain.treatPosition == nil {
-            treat.removeFromParentNode()
+            treat.removeFromParent()
             treatNode = nil
         }
-        if let pom = room.root.childNode(withName: "pompom", recursively: true) {
+        if let pom = room.root.findEntity(named: "pompom") {
             let t = Float(CACurrentMediaTime())
             pom.position.x = RoomLayout.catTreeBase.x + 0.20 + sinf(t * 0.9) * 0.012
         }
@@ -461,11 +489,9 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
 
     // MARK: - Frame loop
 
-    func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
-        if lastTime == 0 { lastTime = time }
-        var dt = Float(time - lastTime)
-        lastTime = time
-        dt = min(max(dt, 0), 0.1)
+    /// Called once per frame by the view.
+    func update(deltaTime: Float) {
+        let dt = min(max(deltaTime, 0), 0.1)
         guard dt > 0 else { return }
 
         // Refresh the sky a few times a minute — it only moves with the real clock.
@@ -475,13 +501,16 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
             sky = WorldClock.sky()
             let lanternOn = brain.room.lanternAuto ? sky.wantsLampLight : brain.room.lanternOn
             if brain.room.lanternAuto { brain.room.lanternOn = lanternOn }
-            lighting.apply(sky: sky, scene: scene, room: room, lanternOn: lanternOn)
-            exposureTarget = Float(LightingRig.exposureOffset(sky: sky, lanternOn: lanternOn))
+            lighting.apply(sky: sky, room: room, lanternOn: lanternOn)
+            exposureTarget = LightingRig.exposure(sky: sky, lanternOn: lanternOn)
         }
 
-        if let camera = cameraNode.camera {
-            camera.exposureOffset = CGFloat(approach(Float(camera.exposureOffset), exposureTarget,
-                                                     rate: 0.7, dt: dt))
+        // Ease toward the exposure the sky wants, then hand it to the rig, which
+        // is where it now has to be applied.
+        let eased = approach(exposure, exposureTarget, rate: 0.7, dt: dt)
+        if abs(eased - exposure) > 1e-4 {
+            exposure = eased
+            lighting.setExposure(exposure)
         }
 
         brain.update(dt: dt, sky: sky)
@@ -496,6 +525,7 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
 
         updateWand(dt: dt)
         updateRoomProps(dt: dt)
+        updateTeacup(dt: dt)
 
         CatVoice.shared.setPurr(level: brain.motion.purr)
         if pettingActive { Haptics.purr(level: brain.motion.purr) }

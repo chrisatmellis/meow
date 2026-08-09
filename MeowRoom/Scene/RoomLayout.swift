@@ -1,5 +1,4 @@
 import Foundation
-import SceneKit
 
 /// Single source of truth for where everything lives, shared by the room builder
 /// and the cat's navigation. Units are metres; origin is the centre of the floor.

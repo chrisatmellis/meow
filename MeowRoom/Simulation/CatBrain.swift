@@ -1,5 +1,4 @@
 import Foundation
-import SceneKit
 
 enum CatEvent {
     case meow(pitch: Float)

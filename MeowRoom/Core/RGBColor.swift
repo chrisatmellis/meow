@@ -12,6 +12,12 @@ struct RGBColor: Codable, Equatable, Hashable {
         self.r = clamp(r); self.g = clamp(g); self.b = clamp(b)
     }
 
+    /// A neutral grey. Named for what it is rather than spelled out three times,
+    /// which is how one of the three ends up different from the other two.
+    init(repeating v: Float) {
+        self.init(v, v, v)
+    }
+
     init(hex: UInt32) {
         self.init(Float((hex >> 16) & 0xFF) / 255,
                   Float((hex >> 8) & 0xFF) / 255,

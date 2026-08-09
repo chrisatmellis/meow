@@ -1,20 +1,23 @@
 import SwiftUI
-import SceneKit
+import RealityKit
 
 /// Live turntable preview of the cat being designed. Reuses the exact same
 /// builder and animator the game uses, so what you see is what you adopt.
-final class CatPreviewController: NSObject, SCNSceneRendererDelegate, ObservableObject {
-    let scene = SCNScene()
+final class CatPreviewController: NSObject, ObservableObject {
+    let root = Entity()
     private var rig: CatRig
     private var animator: CatAnimator
     private var motion = CatMotion()
-    private var lastTime: TimeInterval = 0
+    /// Seconds since the preview opened, used only to rate-limit rebuilds.
+    private var clock: TimeInterval = 0
     private var turntable: Float = 0
     private var blinkTimer: Float = 2
     private var blinkPhase: Float = -1
     private var poseTimer: Float = 6
     private var poseIndex = 0
-    private let pivot = SCNNode()
+    private let pivot = Entity()
+    let camera = PerspectiveCamera()
+    private let environment = Entity()
 
     private var pendingAppearance: CatAppearance?
     private var lastRebuild: TimeInterval = 0
@@ -28,8 +31,8 @@ final class CatPreviewController: NSObject, SCNSceneRendererDelegate, Observable
         self.animator = CatAnimator(rig: rig)
         super.init()
 
-        scene.rootNode.addChildNode(pivot)
-        pivot.addChildNode(rig.root)
+        root.addChild(pivot)
+        pivot.addChild(rig.root)
 
         motion.pose = .sittingTall
         motion.position = SIMD3<Float>(x: 0, y: 0, z: 0)
@@ -39,75 +42,60 @@ final class CatPreviewController: NSObject, SCNSceneRendererDelegate, Observable
     }
 
     private func setupStage() {
-        // A soft studio: key, fill, rim, plus a warm floor disc.
-        let key = SCNLight()
-        key.type = .directional
-        key.intensity = 430
-        key.color = UIColor(red: 1.0, green: 0.96, blue: 0.90, alpha: 1)
-        key.castsShadow = true
-        key.shadowMode = .deferred
-        key.shadowRadius = 8
-        key.shadowSampleCount = RenderQuality.shadowSampleCount
-        key.shadowColor = UIColor(white: 0, alpha: 0.4)
-        key.orthographicScale = 0.6
-        let keyNode = SCNNode()
-        keyNode.light = key
-        keyNode.simdPosition = SIMD3<Float>(x: 0.8, y: 1.2, z: 1.1)
-        keyNode.simdLook(at: SIMD3<Float>(0, 0.16, 0), up: SIMD3<Float>(0, 1, 0), localFront: SIMD3<Float>(0, 0, -1))
-        scene.rootNode.addChildNode(keyNode)
+        // A soft studio: key, fill, rim, and a warm floor disc.
+        //
+        // The ambient light this used to have is gone, because RealityKit has
+        // none. Its job — keeping the shadow side of the cat from going black —
+        // is done by the environment map instead, which does it better: an
+        // ambient term lights the underside of a chin exactly as brightly as the
+        // top of a head, and the environment does not.
+        let key = Entity()
+        key.components.set(DirectionalLightComponent(
+            color: UIColor(red: 1.0, green: 0.96, blue: 0.90, alpha: 1), intensity: 430))
+        key.components.set(DirectionalLightComponent.Shadow(maximumDistance: 3, depthBias: 1))
+        key.look(at: SIMD3<Float>(0, 0.16, 0), from: SIMD3<Float>(0.8, 1.2, 1.1),
+                 upVector: SIMD3<Float>(0, 1, 0), relativeTo: nil)
+        root.addChild(key)
 
-        let fill = SCNLight()
-        fill.type = .omni
-        fill.intensity = 130
-        fill.color = UIColor(red: 0.72, green: 0.82, blue: 1.0, alpha: 1)
-        let fillNode = SCNNode()
-        fillNode.light = fill
-        fillNode.simdPosition = SIMD3<Float>(x: -1.0, y: 0.7, z: 0.6)
-        scene.rootNode.addChildNode(fillNode)
+        let fill = Entity()
+        fill.components.set(PointLightComponent(
+            color: UIColor(red: 0.72, green: 0.82, blue: 1.0, alpha: 1),
+            intensity: 130, attenuationRadius: 4))
+        fill.position = SIMD3<Float>(x: -1.0, y: 0.7, z: 0.6)
+        root.addChild(fill)
 
-        let rim = SCNLight()
-        rim.type = .omni
-        rim.intensity = 175
-        rim.color = UIColor(red: 1.0, green: 0.86, blue: 0.68, alpha: 1)
-        let rimNode = SCNNode()
-        rimNode.light = rim
-        rimNode.simdPosition = SIMD3<Float>(x: -0.3, y: 0.8, z: -1.1)
-        scene.rootNode.addChildNode(rimNode)
+        let rim = Entity()
+        rim.components.set(PointLightComponent(
+            color: UIColor(red: 1.0, green: 0.86, blue: 0.68, alpha: 1),
+            intensity: 175, attenuationRadius: 4))
+        rim.position = SIMD3<Float>(x: -0.3, y: 0.8, z: -1.1)
+        root.addChild(rim)
 
-        let ambient = SCNLight()
-        ambient.type = .ambient
-        ambient.intensity = 48
-        ambient.color = UIColor(red: 0.55, green: 0.58, blue: 0.70, alpha: 1)
-        let ambientNode = SCNNode()
-        ambientNode.light = ambient
-        scene.rootNode.addChildNode(ambientNode)
+        let floor = MeshBuilder.cylinder(radius: 0.55, height: 0.012)
+        let floorNode = Entity.make(floor, Materials.tatami())
+        floorNode.position = SIMD3<Float>(x: 0, y: -0.006, z: 0)
+        root.addChild(floorNode)
 
-        let floor = SCNCylinder(radius: 0.55, height: 0.012)
-        let floorNode = SCNNode.make(floor, Materials.tatami())
-        floorNode.simdPosition = SIMD3<Float>(x: 0, y: -0.006, z: 0)
-        scene.rootNode.addChildNode(floorNode)
+        // A close portrait lens. Vertical here rather than horizontal: the preview
+        // is a head-and-shoulders shot in a tall panel, so it is the height that
+        // has to stay framed.
+        var lens = PerspectiveCameraComponent()
+        lens.fieldOfViewOrientation = .vertical
+        lens.fieldOfViewInDegrees = 34
+        lens.near = 0.02
+        lens.far = 20
+        camera.camera = lens
+        camera.look(at: SIMD3<Float>(0, 0.17, 0), from: SIMD3<Float>(0.0, 0.30, 0.95),
+                    upVector: SIMD3<Float>(0, 1, 0), relativeTo: nil)
+        root.addChild(camera)
 
-        let camera = SCNCamera()
-        camera.fieldOfView = 34
-        camera.zNear = 0.02
-        camera.zFar = 20
-        camera.wantsHDR = true
-        camera.bloomIntensity = 0.12
-        camera.bloomThreshold = 0.9
-        camera.wantsDepthOfField = RenderQuality.wantsDepthOfField
-        camera.focusDistance = 0.95
-        camera.fStop = 5.0
-        camera.vignettingIntensity = 0.4
-        camera.screenSpaceAmbientOcclusionIntensity = RenderQuality.ambientOcclusionIntensity
-        let camNode = SCNNode()
-        camNode.camera = camera
-        camNode.simdPosition = SIMD3<Float>(x: 0.0, y: 0.30, z: 0.95)
-        camNode.simdLook(at: SIMD3<Float>(0, 0.17, 0), up: SIMD3<Float>(0, 1, 0), localFront: SIMD3<Float>(0, 0, -1))
-        scene.rootNode.addChildNode(camNode)
-
-        scene.background.contents = UIColor(red: 0.06, green: 0.06, blue: 0.08, alpha: 1)
-        scene.lightingEnvironment.contents = TextureFactory.skyEnvironment(sky: WorldClock.sky())
-        scene.lightingEnvironment.intensity = 0.28
+        if let cg = TextureFactory.skyEnvironment(sky: WorldClock.sky()).cgImage,
+           let resource = try? EnvironmentResource(equirectangular: cg, withName: "studio") {
+            environment.components.set(ImageBasedLightComponent(source: .single(resource),
+                                                               intensityExponent: log2f(0.28)))
+            root.addChild(environment)
+            root.components.set(ImageBasedLightReceiverComponent(imageBasedLight: environment))
+        }
     }
 
     /// Coalesced rebuilds — sliders fire far faster than we want to rebuild meshes.
@@ -123,10 +111,10 @@ final class CatPreviewController: NSObject, SCNSceneRendererDelegate, Observable
         appearance = pending
 
         let currentPose = motion.pose
-        rig.root.removeFromParentNode()
+        rig.root.removeFromParent()
         rig = CatBuilder.build(pending, preview: true)
         animator = CatAnimator(rig: rig)
-        pivot.addChildNode(rig.root)
+        pivot.addChild(rig.root)
         motion.pose = currentPose
     }
 
@@ -136,15 +124,15 @@ final class CatPreviewController: NSObject, SCNSceneRendererDelegate, Observable
         poseTimer = 12
     }
 
-    func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
-        if lastTime == 0 { lastTime = time }
-        let dt = min(Float(time - lastTime), 0.1)
-        lastTime = time
-        rebuildIfNeeded(now: time)
+    /// Called once per frame by the view.
+    func update(deltaTime: Float) {
+        let dt = min(max(deltaTime, 0), 0.1)
+        clock += TimeInterval(dt)
+        rebuildIfNeeded(now: clock)
         guard dt > 0 else { return }
 
         turntable += dt * 0.28
-        pivot.simdEulerAngles = SIMD3<Float>(x: 0, y: sinf(turntable) * 0.85 + 0.35, z: 0)
+        pivot.eulerAngles = SIMD3<Float>(x: 0, y: sinf(turntable) * 0.85 + 0.35, z: 0)
 
         // Idle life: blinking, breathing, a slow tail.
         blinkTimer -= dt
@@ -171,36 +159,20 @@ final class CatPreviewController: NSObject, SCNSceneRendererDelegate, Observable
     }
 }
 
-struct CatPreviewView: UIViewRepresentable {
+struct CatPreviewView: View {
     let appearance: CatAppearance
     let controller: CatPreviewController
 
-    func makeUIView(context: Context) -> SCNView {
-        let view = SCNView()
-        view.scene = controller.scene
-        view.delegate = controller
-        view.rendersContinuously = true
-        view.isPlaying = true
-        view.antialiasingMode = RenderQuality.antialiasing
-        view.preferredFramesPerSecond = RenderQuality.preferredFramesPerSecond
-        view.backgroundColor = .clear
-        view.allowsCameraControl = false
-
-        let tap = UITapGestureRecognizer(target: context.coordinator,
-                                         action: #selector(Coordinator.tapped))
-        view.addGestureRecognizer(tap)
-        return view
-    }
-
-    func updateUIView(_ uiView: SCNView, context: Context) {
-        controller.request(appearance: appearance)
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator(controller: controller) }
-
-    final class Coordinator: NSObject {
-        let controller: CatPreviewController
-        init(controller: CatPreviewController) { self.controller = controller }
-        @objc func tapped() { controller.cyclePose() }
+    var body: some View {
+        RealityView { content in
+            content.camera = .virtual
+            content.add(controller.root)
+            content.subscribe(to: SceneEvents.Update.self) { event in
+                controller.update(deltaTime: Float(event.deltaTime))
+            }
+        } update: { _ in
+            controller.request(appearance: appearance)
+        }
+        .onTapGesture { controller.cyclePose() }
     }
 }

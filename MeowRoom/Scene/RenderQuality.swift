@@ -1,6 +1,5 @@
 import Foundation
 import Metal
-import SceneKit
 import UIKit
 
 /// The room leans on a fairly heavy post stack — HDR, bloom, screen-space ambient
@@ -49,6 +48,10 @@ enum RenderQuality {
 
     static var wantsDepthOfField: Bool { tier == .high }
 
+    /// Screen-space ambient occlusion went with SceneKit's camera and has no
+    /// RealityKit equivalent short of a custom post-processing pass. The number is
+    /// kept because the tier it belongs to has not changed and the effect is worth
+    /// coming back for; nothing reads it today.
     static var ambientOcclusionIntensity: CGFloat {
         switch tier {
         case .high: return 0.45
@@ -57,9 +60,9 @@ enum RenderQuality {
         }
     }
 
-    static var antialiasing: SCNAntialiasingMode {
-        tier == .low ? .none : .multisampling2X
-    }
+    /// Antialiasing is a rendering effect on the view now rather than a mode on
+    /// it, so this is a yes or no and RealityKit picks the technique.
+    static var wantsAntialiasing: Bool { tier != .low }
 
     /// Long-haired cats get fewer fur shells on weaker hardware.
     static var maxFurShells: Int {

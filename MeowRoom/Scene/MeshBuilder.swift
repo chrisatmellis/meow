@@ -22,8 +22,8 @@ struct LoftRing {
 /// Accumulates triangles into raw vertex data.
 /// Everything the cat is made of is generated here at runtime — no art assets to ship.
 ///
-/// This deliberately produces no renderer type. `SceneKitAdapter` turns it into an
-/// `SCNGeometry` when the scene is built; the verification harness rasterises the
+/// This deliberately produces no renderer type. `RealityKitAdapter` turns it into a
+/// `MeshResource` when the scene is built; the verification harness rasterises the
 /// same buffers directly without a graphics framework in the way.
 final class MeshData {
     private(set) var positions: [Vec3] = []
@@ -34,6 +34,10 @@ final class MeshData {
     /// Pairs of vertices that are the same point on the surface wearing two
     /// different texture coordinates. See `weldNormalsAcrossSeams`.
     private var seams: [(Int32, Int32)] = []
+
+    /// Where each material's run of triangles starts, as an index into `indices`.
+    /// Empty means the whole mesh takes one material, which is nearly everything.
+    private(set) var groupStarts: [(material: Int, start: Int)] = []
 
     func addVertex(_ p: Vec3, uv: Vec2) -> Int32 {
         positions.append(p)
@@ -47,6 +51,34 @@ final class MeshData {
     func linkSeam(_ a: Int32, _ b: Int32) {
         guard a != b else { return }
         seams.append((a, b))
+    }
+
+    /// Sends the triangles added from here on to a different material slot.
+    ///
+    /// A tatami mat is woven rush on the two faces you can see and bound cloth on
+    /// the four edges — one box, two materials. SceneKit spelled that as an array
+    /// on the geometry; RealityKit spells it as several parts in one mesh, each
+    /// naming a material index.
+    func beginGroup(_ material: Int) {
+        if let last = groupStarts.last, last.start == indices.count {
+            groupStarts[groupStarts.count - 1] = (material, indices.count)
+        } else {
+            groupStarts.append((material, indices.count))
+        }
+    }
+
+    /// The triangle ranges for each material, in the order they were declared.
+    var groups: [(material: Int, range: Range<Int>)] {
+        guard !groupStarts.isEmpty else { return [(0, 0..<indices.count)] }
+        var out: [(Int, Range<Int>)] = []
+        // A mesh that starts adding triangles before declaring a group still has to
+        // put them somewhere, and slot zero is where a single-material mesh's go.
+        if groupStarts[0].start > 0 { out.append((0, 0..<groupStarts[0].start)) }
+        for (i, g) in groupStarts.enumerated() {
+            let end = i + 1 < groupStarts.count ? groupStarts[i + 1].start : indices.count
+            if end > g.start { out.append((g.material, g.start..<end)) }
+        }
+        return out
     }
 
     func addTriangle(_ a: Int32, _ b: Int32, _ c: Int32) {
@@ -305,8 +337,13 @@ enum MeshBuilder {
     ///
     /// Each face, bevel strip and corner gets its own vertices and no seam links,
     /// so every piece shades flat and the edges stay crisp.
+    /// - Parameter faceMaterials: when true, each face gets its own material slot,
+    ///   numbered as SceneKit numbered them: +Z, +X, -Z, -X, +Y, -Y. The bevels and
+    ///   corners go to slot zero, which is right for the case that wants this — a
+    ///   tatami mat is woven rush on its two faces and bound cloth round its edge,
+    ///   and the cloth is exactly what should wrap the chamfer.
     static func box(width: Float, height: Float, length: Float,
-                    chamfer: Float = 0) -> MeshData {
+                    chamfer: Float = 0, faceMaterials: Bool = false) -> MeshData {
         let mesh = MeshData()
         let hw = width * 0.5, hh = height * 0.5, hd = length * 0.5
         let c = max(0, min(chamfer, min(hw, min(hh, hd)) * 0.9))
@@ -329,12 +366,15 @@ enum MeshBuilder {
             f.n * f.d + f.u * (su * (f.eu - c)) + f.v * (sv * (f.ev - c))
         }
 
-        for f in faces {
+        for (fi, f) in faces.enumerated() {
+            if faceMaterials { mesh.beginGroup(fi) }
             let p = [corner(f, -1, -1), corner(f, 1, -1), corner(f, 1, 1), corner(f, -1, 1)]
             let uv = [Vec2(x: 0, y: 1), Vec2(x: 1, y: 1), Vec2(x: 1, y: 0), Vec2(x: 0, y: 0)]
             let i = (0..<4).map { mesh.addVertex(p[$0], uv: uv[$0]) }
             mesh.addQuad(i[0], i[1], i[2], i[3])
         }
+
+        if faceMaterials { mesh.beginGroup(0) }
 
         if c > 0 {
             // Twelve bevels and eight corner triangles, enumerated from the eight

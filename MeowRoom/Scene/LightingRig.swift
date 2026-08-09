@@ -1,5 +1,5 @@
 import Foundation
-import SceneKit
+import RealityKit
 import UIKit
 
 /// One sun outside the room, one moon behind it, and sky. Nothing else.
@@ -16,51 +16,58 @@ import UIKit
 /// What replaces them is the sky itself — flat ambient plus the image-based
 /// environment — neither of which has a location, so neither can put a bright
 /// patch anywhere at all.
+/// RealityKit has no ambient light at all, which sounds like a loss and is not:
+/// what replaced it is the environment map, and a room lit by a window is not lit
+/// equally from every direction. The sky is drawn as an image and becomes the fill,
+/// so the fill finally has a *shape* — brighter toward the opening, dimmer in the
+/// corner behind the tansu — without any of it coming from a bulb with a position.
 final class LightingRig {
-    let root = SCNNode()
+    let root = Entity()
 
-    private let sunNode = SCNNode()
-    private let sun = SCNLight()
-    private let moonNode = SCNNode()
-    private let moon = SCNLight()
-    private let ambient = SCNLight()
+    private let sunEntity = Entity()
+    private let moonEntity = Entity()
+    /// The entity carrying the environment. Everything that receives image-based
+    /// light has to point at it, which is easy to miss because the scene still
+    /// renders without it — just flat.
+    private let environment = Entity()
+
+    /// The last budget applied, so a change of exposure alone can be re-applied
+    /// without needing the sky to move.
+    private var lastBudget = LightBudget(sun: 0, sky: 0, moon: 0, lantern: 0)
+    private var exposure: Float = 1
+    private var lastRoom: RoomNode?
+    private var lastSky: SkyState = WorldClock.sky()
 
     init() {
-        // --- Sun: the only shadow caster that matters.
-        sun.type = .directional
-        sun.castsShadow = true
-        sun.shadowMode = .deferred
-        sun.shadowRadius = 6
-        sun.shadowSampleCount = RenderQuality.shadowSampleCount
-        sun.shadowMapSize = RenderQuality.shadowMapSize
-        sun.shadowColor = UIColor(white: 0, alpha: 0.55)
-        // Wide enough to hold the whole room and its walls. With the interior
-        // fills gone, the sun's shadow is what makes the window an aperture: the
-        // walls block it, and the light that reaches the floor is the light that
-        // came through the opening. That only works if the walls are inside the
-        // shadow map.
-        sun.orthographicScale = 4.6
-        sun.zNear = 0.2
-        sun.zFar = 22
-        sun.intensity = 0
-        sunNode.light = sun
-        root.addChildNode(sunNode)
+        root.addChild(sunEntity)
+        root.addChild(moonEntity)
+        root.addChild(environment)
 
-        // --- Moon: cool, soft, no shadows.
-        moon.type = .directional
-        moon.castsShadow = false
-        moon.intensity = 0
-        moon.color = UIColor(red: 0.62, green: 0.72, blue: 0.95, alpha: 1)
-        moonNode.light = moon
-        root.addChildNode(moonNode)
+        // The sun is the only shadow caster that matters. With no interior fills,
+        // its shadow is what makes the window an aperture: the walls block it, and
+        // the light reaching the floor is the light that came through the opening.
+        // That only works if the whole room is inside the shadow's range.
+        sunEntity.components.set(DirectionalLightComponent(color: .white, intensity: 0))
+        sunEntity.components.set(DirectionalLightComponent.Shadow(maximumDistance: 22,
+                                                                  depthBias: 1.2))
 
-        // --- Sky ambient.
-        ambient.type = .ambient
-        ambient.intensity = 200
-        let ambientNode = SCNNode()
-        ambientNode.light = ambient
-        root.addChildNode(ambientNode)
+        // The moon is cool, soft, and casts nothing.
+        moonEntity.components.set(DirectionalLightComponent(
+            color: UIColor(red: 0.62, green: 0.72, blue: 0.95, alpha: 1), intensity: 0))
+    }
 
+    /// Applies a new exposure to the lights already placed.
+    ///
+    /// RealityKit's camera has no exposure, so this is where the room's overall
+    /// level lives now. It multiplies the lights rather than the rendered image,
+    /// which is a real difference: an exposure on the camera also rescaled every
+    /// emissive surface — lantern paper, the feeder's LED, eye catchlights, the
+    /// garden — none of which are in the light budget, and that is exactly what
+    /// once made midnight render brighter than midday. Multiplying the lights
+    /// cannot do that, because emissives are not lights.
+    func setExposure(_ value: Float) {
+        exposure = value
+        if let room = lastRoom { applyIntensities(budget: lastBudget, sky: lastSky, room: room) }
     }
 
     // MARK: - Light budget
@@ -183,10 +190,12 @@ final class LightingRig {
     /// value that varies with the sky rescales every emissive in the room and is
     /// what once made midnight brighter than midday. A constant cannot do that to
     /// the ordering; it only ever stops the whole day down together.
-    static func exposureOffset(for budget: LightBudget) -> CGFloat { -1.75 }
+    /// A multiplier on the lights, replacing what used to be a camera exposure
+    /// offset of -1.75 EV. Same amount of light: 2^-1.75 is 0.297.
+    static func exposure(for budget: LightBudget) -> Float { 0.297 }
 
-    static func exposureOffset(sky: SkyState, lanternOn: Bool) -> CGFloat {
-        exposureOffset(for: budget(sky: sky, lanternOn: lanternOn))
+    static func exposure(sky: SkyState, lanternOn: Bool) -> Float {
+        exposure(for: budget(sky: sky, lanternOn: lanternOn))
     }
 
     /// What the room is actually lit by, which with exposure fixed is what
@@ -231,72 +240,110 @@ final class LightingRig {
         return SIMD3<Float>(x: cosf(theta), y: sinf(theta), z: -windowOffset).normalized
     }
 
-    func apply(sky: SkyState, scene: SCNScene, room: RoomNode, lanternOn: Bool) {
-        // --- Sun placement.
+    func apply(sky: SkyState, room: RoomNode, lanternOn: Bool) {
+        lastRoom = room
+        lastSky = sky
+
+        // --- Sun placement. A directional light shines along its own -Z, so
+        // aiming it is the whole of placing it; its position is decorative.
         let d = LightingRig.arcDirection(azimuth: sky.sunAzimuth)
         let sunPos = SIMD3<Float>(x: d.x * 9, y: max(0.2, d.y * 9), z: d.z * 9)
-        sunNode.simdPosition = sunPos
-        sunNode.simdLook(at: SIMD3<Float>(0, 0.6, -0.2), up: SIMD3<Float>(0, 1, 0), localFront: SIMD3<Float>(0, 0, -1))
+        sunEntity.look(at: SIMD3<Float>(0, 0.6, -0.2), from: sunPos,
+                       upVector: SIMD3<Float>(0, 1, 0), relativeTo: nil)
 
-        let budget = LightingRig.budget(sky: sky, lanternOn: lanternOn)
-        let lit = LightingRig.intensities(for: budget)
-
-        sun.intensity = CGFloat(lit.sun)
-        sun.color = UIColor(sky.sunColor)
-        sun.castsShadow = budget.sun > 30
-
-        // --- Moon.
         let m = LightingRig.arcDirection(azimuth: sky.moonAzimuth)
-        moonNode.simdPosition = SIMD3<Float>(x: m.x * 9, y: max(0.2, m.y * 9), z: m.z * 9)
-        moonNode.simdLook(at: SIMD3<Float>(0, 0.6, -0.2), up: SIMD3<Float>(0, 1, 0), localFront: SIMD3<Float>(0, 0, -1))
-        moon.intensity = CGFloat(lit.moon)
+        moonEntity.look(at: SIMD3<Float>(0, 0.6, -0.2),
+                        from: SIMD3<Float>(x: m.x * 9, y: max(0.2, m.y * 9), z: m.z * 9),
+                        upVector: SIMD3<Float>(0, 1, 0), relativeTo: nil)
 
-        // --- Ambient from the sky colour.
-        ambient.color = UIColor(sky.ambientColor)
-        ambient.intensity = CGFloat(lit.ambient)
+        lastBudget = LightingRig.budget(sky: sky, lanternOn: lanternOn)
+        applyIntensities(budget: lastBudget, sky: sky, room: room)
+
+        // --- Image-based lighting, which is now the only fill there is.
+        //
+        // Flat ambient would light every surface identically regardless of which
+        // way it faces, which is what makes a room read as a paper cut-out. The
+        // environment map is what puts the shape back without putting a bulb in
+        // the room — and RealityKit does not offer the flat option anyway.
+        if let cg = TextureFactory.skyEnvironment(sky: sky).cgImage,
+           let resource = try? EnvironmentResource(equirectangular: cg, withName: "sky") {
+            // The intensity is an exponent of two, not a multiplier, so the
+            // conversion from a linear share of the budget is a log.
+            let linear = max(0.02, min(0.85, lastBudget.sky * 0.0014) * exposure)
+            environment.components.set(ImageBasedLightComponent(
+                source: .single(resource),
+                intensityExponent: log2f(linear)))
+            room.root.components.set(ImageBasedLightReceiverComponent(imageBasedLight: environment))
+        }
+
+        // --- Dust motes only show when there is a beam to catch.
+        room.dustMotes?.isHidden = sky.daylight < 0.12 && !lanternOn
+    }
+
+    /// Everything that scales with the light level, split out so a change of
+    /// exposure can re-run it without recomputing the sky.
+    private func applyIntensities(budget: LightBudget, sky: SkyState, room: RoomNode) {
+        let lit = LightingRig.intensities(for: budget)
+        let e = exposure
+
+        sunEntity.components.set(DirectionalLightComponent(color: UIColor(sky.sunColor),
+                                                          intensity: lit.sun * e))
+        // Shadows are worth their cost only when there is a sun to cast them.
+        if budget.sun > 30 {
+            sunEntity.components.set(DirectionalLightComponent.Shadow(maximumDistance: 22,
+                                                                      depthBias: 1.2))
+        } else {
+            sunEntity.components.remove(DirectionalLightComponent.Shadow.self)
+        }
+
+        moonEntity.components.set(DirectionalLightComponent(
+            color: UIColor(red: 0.62, green: 0.72, blue: 0.95, alpha: 1),
+            intensity: lit.moon * e))
 
         // --- Backlit shoji paper. Its brightness is the sky outside and nothing
         // else: the flat floor this used to carry was what left the paper — and
         // the open half beside it — glowing at ten at night.
-        // Halved. Paper backlit by an overcast sky is bright, but it is not a
-        // light box — at 0.28 the panels clipped, taking their own texture with
-        // them, so the shoji read as a white rectangle rather than as paper.
-        let glow = CGFloat(min(0.14, budget.sky * 0.0002))
-        for mat in room.shojiMaterials {
-            mat.emission.intensity = glow
-            mat.emission.contents = UIColor(sky.skyHorizonColor.lightened(0.35 * sky.daylight))
+        //
+        // Emissives are deliberately *not* scaled by exposure. A lit surface has a
+        // fixed luminance whatever the room is metered at, and treating them
+        // otherwise is what once made midnight brighter than midday.
+        let glow = min(0.14, budget.sky * 0.0002)
+        let glowColor = UIColor(sky.skyHorizonColor.lightened(0.35 * sky.daylight))
+        for panel in room.shojiPanels {
+            panel.withMaterial {
+                $0.emissiveColor = .init(color: glowColor)
+                $0.emissiveIntensity = glow
+            }
         }
 
         // --- Garden outside.
         //
-        // Outdoors really is far brighter than the room it is seen from, and the
-        // previous value leaned on that: the window blew out "as it should". Two
+        // Outdoors really is far brighter than the room it is seen from, and an
+        // earlier value leaned on that: the window blew out "as it should". Two
         // things were wrong with it. The blowout was not confined to the window —
         // bloom carried it across the whole frame — and a window that clips to
         // white throws away the garden behind it, which is drawn and then never
         // seen. Bright enough to read as outside, dim enough to still be a garden.
-        let outdoor = CGFloat(min(0.34, 0.16 + budget.sky * 0.00027))
-        for mat in room.backdropMaterials {
-            mat.emission.contents = TextureFactory.gardenBackdrop(sky: sky)
-            mat.emission.intensity = outdoor
+        let outdoor = min(0.34, 0.16 + budget.sky * 0.00027)
+        let garden = TextureBridge.tiling(TextureFactory.gardenBackdrop(sky: sky), semantic: .color)
+        for panel in room.backdropPanels {
+            panel.withMaterial {
+                $0.emissiveColor = .init(color: .white, texture: garden)
+                $0.emissiveIntensity = outdoor
+            }
         }
 
-        // --- Image-based lighting for believable PBR highlights.
-        scene.lightingEnvironment.contents = TextureFactory.skyEnvironment(sky: sky)
-        // The sky dome, and now the only fill with any sense of direction in it.
-        // Flat ambient alone would light every surface identically regardless of
-        // which way it faces, which is what makes a room read as a paper cut-out;
-        // this is what puts the shape back without putting a bulb in the room.
-        scene.lightingEnvironment.intensity = CGFloat(min(0.85, budget.sky * 0.0014))
-        scene.background.contents = UIColor(sky.skyHorizonColor.darkened(0.4))
-
         // --- Paper lantern.
-        if let light = room.lanternLight, let paper = room.lanternPaper {
-            light.intensity = CGFloat(lit.lantern)
-            // A lit lamp has a fixed luminance, so this does not track the sky.
-            // At night exposure lifts it and the paper reads as the bright thing
-            // in the room, which is what a lamp at night is.
-            paper.emission.intensity = lanternOn ? 0.12 : 0.0
+        if let light = room.lanternLight {
+            light.components.set(PointLightComponent(
+                color: UIColor(red: 1.0, green: 0.82, blue: 0.56, alpha: 1),
+                intensity: lit.lantern * e,
+                attenuationRadius: 2.8))
+        }
+        // A lit lamp has a fixed luminance, so this does not track the sky.
+        let lampLit = budget.lantern > 0
+        for panel in room.lanternPaperPanels {
+            panel.withMaterial { $0.emissiveIntensity = lampLit ? 0.12 : 0.0 }
         }
 
         // --- Sun patch on the tatami.
@@ -306,14 +353,11 @@ final class LightingRig {
             // seeks it out and the brain has opinions about sunbathing, but as a
             // warm tint rather than a shaft of light on the tatami.
             let visible = smoothstep(0.02, 0.22, sky.sunElevation)
-            patch.opacity = CGFloat(visible * 0.07)
+            patch.withMaterial { $0.blending = .transparent(opacity: .init(scale: visible * 0.07)) }
             let p = RoomLayout.sunPatchPosition(sky: sky)
-            patch.simdPosition = SIMD3<Float>(x: p.x, y: 0.033, z: p.z)
+            patch.position = SIMD3<Float>(x: p.x, y: 0.033, z: p.z)
             let stretch = 1.0 + 1.6 * (1 - clamp(sky.sunElevation / 0.9))
-            patch.simdScale = SIMD3<Float>(x: stretch, y: 1.0 + 0.4 * stretch, z: 1)
+            patch.scale = SIMD3<Float>(x: stretch, y: 1.0 + 0.4 * stretch, z: 1)
         }
-
-        // --- Dust motes only show when there is a beam to catch.
-        room.dustMotes?.isHidden = sky.daylight < 0.12 && !lanternOn
     }
 }

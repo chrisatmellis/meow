@@ -1,5 +1,4 @@
 import Foundation
-import SceneKit
 
 /// Body poses the animator knows how to build. Activities pick one.
 enum CatPose {

@@ -1,5 +1,5 @@
 import Foundation
-import SceneKit
+import RealityKit
 import UIKit
 
 enum Materials {
@@ -8,248 +8,260 @@ enum Materials {
     ///   them replaces the flat `roughness` scalar, which is the whole point — a
     ///   single number cannot say that the raised cords of a tatami mat are polished
     ///   and the gaps between them are not.
-    static func pbr(diffuse: Any,
+    ///
+    /// - Parameter tile: how many times the maps repeat across the surface. This is
+    ///   one transform on the material rather than one per channel, which removes a
+    ///   whole class of bug the SceneKit version had to guard against by hand: there,
+    ///   only `diffuse` got the transform at first, so a normal map stretched one
+    ///   repeat of the relief across four of the albedo's and the floor lit as
+    ///   though the weave ran at a different pitch to the weave you could see.
+    static func pbr(diffuse: UIImage? = nil,
+                    tint: UIColor = .white,
                     roughness: Float = 0.8,
                     metalness: Float = 0.0,
                     tile: (Float, Float)? = nil,
                     doubleSided: Bool = false,
-                    maps: TextureFactory.MapSet? = nil) -> SCNMaterial {
-        let m = SCNMaterial()
-        m.lightingModel = .physicallyBased
-        m.diffuse.contents = diffuse
-        m.roughness.contents = NSNumber(value: roughness)
-        m.metalness.contents = NSNumber(value: metalness)
-        m.isDoubleSided = doubleSided
+                    maps: TextureFactory.MapSet? = nil) -> PhysicallyBasedMaterial {
+        var m = PhysicallyBasedMaterial()
+        m.baseColor = .init(tint: tint, texture: diffuse.flatMap { TextureBridge.tiling($0, semantic: .color) })
+        m.roughness = .init(scale: roughness)
+        m.metallic = .init(scale: metalness)
+        m.faceCulling = doubleSided ? .none : .back
 
-        if let maps = maps {
-            if let n = maps.normal { m.normal.contents = n }
-            if let r = maps.roughness { m.roughness.contents = r }
-            if let o = maps.occlusion { m.ambientOcclusion.contents = o }
+        if let maps {
+            // Semantics, not defaults. A normal map read as colour is sRGB-decoded
+            // and every slope comes out wrong by the gamma curve, while still
+            // looking exactly like a normal map.
+            if let n = maps.normal, let t = TextureBridge.tiling(n, semantic: .normal) {
+                m.normal = .init(texture: t)
+            }
+            if let r = maps.roughness, let t = TextureBridge.tiling(r, semantic: .raw) {
+                m.roughness = .init(scale: roughness, texture: t)
+            }
+            if let o = maps.occlusion, let t = TextureBridge.tiling(o, semantic: .raw) {
+                m.ambientOcclusion = .init(texture: t)
+            }
         }
 
         if let (u, v) = tile {
-            // Every channel has to tile by the same amount. Only `diffuse` used to
-            // get the transform, which was harmless while it was the only textured
-            // channel and is not harmless now: a normal map left untiled would
-            // stretch one repeat of the relief across all four of the albedo's, and
-            // the floor would light as though the weave ran at a different pitch to
-            // the weave you can see.
-            for prop in [m.diffuse, m.roughness, m.metalness, m.emission,
-                         m.normal, m.ambientOcclusion] {
-                prop.wrapS = .repeat
-                prop.wrapT = .repeat
-                prop.contentsTransform = SCNMatrix4MakeScale(u, v, 1)
-            }
+            m.textureCoordinateTransform = .init(scale: SIMD2<Float>(u, v))
         }
         return m
     }
 
+    static func pbr(color: RGBColor,
+                    roughness: Float = 0.8,
+                    metalness: Float = 0.0,
+                    doubleSided: Bool = false) -> PhysicallyBasedMaterial {
+        pbr(diffuse: nil, tint: UIColor(color), roughness: roughness,
+            metalness: metalness, doubleSided: doubleSided)
+    }
+
     // MARK: - The cat
 
-    static func catFur(_ a: CatAppearance, preview: Bool = false) -> SCNMaterial {
+    static func catFur(_ a: CatAppearance, preview: Bool = false) -> PhysicallyBasedMaterial {
         let tex = preview ? TextureFactory.catCoatPreview(a) : TextureFactory.catCoat(a)
-        let m = pbr(diffuse: tex,
+        var m = pbr(diffuse: tex,
                     roughness: a.hairless ? 0.42 : (0.95 - 0.45 * a.furGloss),
                     metalness: 0.0,
                     maps: TextureFactory.catCoatMaps(a, preview: preview))
-        // The sheen that used to be attempted here with `m.specular` is now real:
-        // `specular` is ignored entirely under physically-based lighting, so that
-        // line did nothing at all. Gloss is carried by the coat's roughness map,
-        // which varies along each hair, so light rakes across the fur instead of
-        // washing the whole cat evenly.
+        // Gloss is carried by the coat's roughness map, which varies along each
+        // hair, so light rakes across the fur instead of washing the whole cat
+        // evenly. The `specular` line this replaced was ignored entirely under
+        // physically-based lighting and did nothing at all.
         //
         // Emission starts at zero. It used to be a flat 0.02 over the whole cat,
         // standing in for light coming through thin tissue — which is a real effect
         // in the wrong place: it is strong at the ears, nose and pads and absent
         // over the body, and it only happens when the light is *behind* the cat.
-        // A constant is neither of those things; it is just a lighter cat.
-        // `Translucency` drives it per part, per frame, from where the sun is.
-        m.emission.contents = UIColor(a.baseCoat.mixed(with: RGBColor(1, 0.7, 0.6), 0.5), alpha: 1)
-        m.emission.intensity = 0
-        m.diffuse.wrapS = .repeat
-        m.diffuse.wrapT = .repeat
+        // `Translucency` drives it per part, per frame, from where the light is.
+        m.emissiveColor = .init(color: UIColor(a.baseCoat.mixed(with: RGBColor(1, 0.7, 0.6), 0.5)))
+        m.emissiveIntensity = 0
         return m
     }
 
     /// Semi-transparent shells that give long-haired cats a soft silhouette.
-    static func furShell(_ a: CatAppearance, layer: Int) -> SCNMaterial {
-        let m = SCNMaterial()
-        m.lightingModel = .physicallyBased
-        m.diffuse.contents = TextureFactory.catCoatPreview(a)
-        m.transparent.contents = TextureFactory.furShellMask(a)
-        m.transparencyMode = .rgbZero
-        m.transparency = CGFloat(0.85 - 0.22 * Float(layer))
-        m.roughness.contents = NSNumber(value: 1.0)
-        m.metalness.contents = NSNumber(value: 0.0)
-        m.writesToDepthBuffer = false
-        m.readsFromDepthBuffer = true
-        m.blendMode = .alpha
-        m.isDoubleSided = true
-        m.diffuse.wrapS = .repeat
-        m.diffuse.wrapT = .repeat
-        m.transparent.wrapS = .repeat
-        m.transparent.wrapT = .repeat
-        m.transparent.contentsTransform = SCNMatrix4MakeScale(6, 6, 1)
+    ///
+    /// Three stacked opacity controls in the SceneKit version — a transparency
+    /// scalar, a blend mode and a mask whose alpha was read through `.rgbZero` —
+    /// collapse into one here, because RealityKit's transparency carries both its
+    /// scalar and its mask in a single value. It is not possible to set an opacity
+    /// on a material that never became transparent, which is the mistake the old
+    /// three-part spelling invited.
+    static func furShell(_ a: CatAppearance, layer: Int) -> PhysicallyBasedMaterial {
+        var m = PhysicallyBasedMaterial()
+        m.baseColor = .init(texture: TextureBridge.tiling(TextureFactory.catCoatPreview(a), semantic: .color))
+        m.roughness = .init(scale: 1.0)
+        m.metallic = .init(scale: 0.0)
+        m.faceCulling = .none
+        m.writesDepth = false
+
+        let mask = TextureBridge.tiling(TextureFactory.furShellMask(a), semantic: .raw)
+        m.blending = .transparent(opacity: .init(scale: 0.85 - 0.22 * Float(layer), texture: mask))
+        // The mask is drawn at a much finer pitch than the coat beneath it, so the
+        // hairs it cuts out land between the hairs the coat painted.
+        m.secondaryTextureCoordinateTransform = .init(scale: SIMD2<Float>(6, 6))
         return m
     }
 
-    static func eye(_ a: CatAppearance, right: Bool) -> SCNMaterial {
+    static func eye(_ a: CatAppearance, right: Bool) -> PhysicallyBasedMaterial {
         let color = right && a.heterochromia ? a.eyeColorRight : a.eyeColor
         let tex = TextureFactory.iris(color: color, pupil: a.pupilShape,
                                       dilation: 0.5, brightness: a.eyeBrightness)
-        let maps = TextureFactory.irisMaps()
-        let m = SCNMaterial()
-        m.lightingModel = .physicallyBased
-        m.diffuse.contents = tex
-        m.roughness.contents = maps.roughness ?? NSNumber(value: 0.08)
-        m.metalness.contents = NSNumber(value: 0.0)
         // A real iris is a pleated muscle, and this is where the player is looking.
         // Flat, it reads as a printed disc behind glass.
-        if let n = maps.normal { m.normal.contents = n }
-        if let o = maps.occlusion { m.ambientOcclusion.contents = o }
-        m.emission.contents = tex
-        m.emission.intensity = CGFloat(0.06 + 0.22 * a.eyeBrightness)
+        var m = pbr(diffuse: tex, roughness: 0.08, maps: TextureFactory.irisMaps())
+        m.emissiveColor = .init(color: .white,
+                                texture: TextureBridge.tiling(tex, semantic: .color))
+        m.emissiveIntensity = 0.06 + 0.22 * a.eyeBrightness
+        // The cornea over it. Two scalars, and the single most reads-as-alive
+        // detail available: a dry eye is a doll's eye.
+        m.clearcoat = .init(scale: 1.0)
+        m.clearcoatRoughness = .init(scale: 0.03)
         return m
     }
 
     /// The inside of the mouth. Dark, wet, and mostly in shadow — what matters is
     /// that it is *not a hole*. The jaw opens for meows, eating, drinking, grooming
     /// and yawns, and behind it was the inside of the skull.
-    static func oralCavity(_ color: RGBColor) -> SCNMaterial {
-        let m = pbr(diffuse: UIColor(color.darkened(0.45)), roughness: 0.30, metalness: 0)
+    static func oralCavity(_ color: RGBColor) -> PhysicallyBasedMaterial {
         // Both sides: the cavity is seen from inside, through the gap the jaw opens.
-        m.isDoubleSided = true
+        pbr(color: color.darkened(0.45), roughness: 0.30, doubleSided: true)
+    }
+
+    static func tongue(_ color: RGBColor) -> PhysicallyBasedMaterial {
+        var m = pbr(diffuse: TextureFactory.tongue(color), roughness: 0.25,
+                    maps: TextureFactory.tongueMaps())
+        m.clearcoat = .init(scale: 0.7)
+        m.clearcoatRoughness = .init(scale: 0.12)
         return m
     }
 
-    static func tongue(_ color: RGBColor) -> SCNMaterial {
-        pbr(diffuse: TextureFactory.tongue(color), roughness: 0.25, metalness: 0,
-            maps: TextureFactory.tongueMaps())
+    static func skin(_ color: RGBColor, gloss: Float = 0.5) -> PhysicallyBasedMaterial {
+        pbr(color: color, roughness: 1 - gloss * 0.75)
     }
 
-    static func skin(_ color: RGBColor, gloss: Float = 0.5) -> SCNMaterial {
-        pbr(diffuse: UIColor(color), roughness: 1 - gloss * 0.75, metalness: 0)
+    /// A cat's nose, and the pads under its toes: wet, and thin enough that light
+    /// comes through them.
+    static func noseLeather(_ color: RGBColor) -> PhysicallyBasedMaterial {
+        var m = pbr(color: color, roughness: 0.22)
+        m.clearcoat = .init(scale: 0.85)
+        m.clearcoatRoughness = .init(scale: 0.08)
+        return m
     }
 
-    static func whisker(_ a: CatAppearance) -> SCNMaterial {
-        let m = pbr(diffuse: UIColor(a.whiskerColor), roughness: 0.35, metalness: 0)
-        m.emission.contents = UIColor(a.whiskerColor, alpha: 1)
-        m.emission.intensity = 0.10
-        m.isDoubleSided = true
+    static func whisker(_ a: CatAppearance) -> PhysicallyBasedMaterial {
+        var m = pbr(color: a.whiskerColor, roughness: 0.35, doubleSided: true)
+        m.emissiveColor = .init(color: UIColor(a.whiskerColor))
+        m.emissiveIntensity = 0.10
         return m
     }
 
     // MARK: - Room surfaces
 
-    static func tatami() -> SCNMaterial {
-        pbr(diffuse: TextureFactory.tatami(), roughness: 0.92, metalness: 0, tile: (8, 8),
+    static func tatami() -> PhysicallyBasedMaterial {
+        pbr(diffuse: TextureFactory.tatami(), roughness: 0.92, tile: (8, 8),
             maps: TextureFactory.tatamiMaps())
     }
 
-    static func tatamiBorder() -> SCNMaterial {
-        pbr(diffuse: TextureFactory.tatamiBorder(), roughness: 0.85, metalness: 0, tile: (6, 1),
+    static func tatamiBorder() -> PhysicallyBasedMaterial {
+        pbr(diffuse: TextureFactory.tatamiBorder(), roughness: 0.85, tile: (6, 1),
             maps: TextureFactory.tatamiBorderMaps())
     }
 
-    static func darkWood() -> SCNMaterial {
+    static func darkWood() -> PhysicallyBasedMaterial {
         pbr(diffuse: TextureFactory.wood(base: RGBColor(hex: 0x4A3524), key: "dark"),
-            roughness: 0.55, metalness: 0, tile: (2, 2),
-            maps: TextureFactory.woodMaps(key: "dark"))
+            roughness: 0.55, tile: (2, 2), maps: TextureFactory.woodMaps(key: "dark"))
     }
 
-    static func lightWood() -> SCNMaterial {
+    static func lightWood() -> PhysicallyBasedMaterial {
         pbr(diffuse: TextureFactory.wood(base: RGBColor(hex: 0xB08A5C), key: "light"),
-            roughness: 0.62, metalness: 0, tile: (2, 2),
-            maps: TextureFactory.woodMaps(key: "light"))
+            roughness: 0.62, tile: (2, 2), maps: TextureFactory.woodMaps(key: "light"))
     }
 
-    static func hinoki() -> SCNMaterial {
+    static func hinoki() -> PhysicallyBasedMaterial {
         pbr(diffuse: TextureFactory.wood(base: RGBColor(hex: 0xD9C39A), key: "hinoki"),
-            roughness: 0.70, metalness: 0, tile: (1, 3),
-            maps: TextureFactory.woodMaps(key: "hinoki"))
+            roughness: 0.70, tile: (1, 3), maps: TextureFactory.woodMaps(key: "hinoki"))
     }
 
-    static func plaster() -> SCNMaterial {
-        pbr(diffuse: TextureFactory.plaster(), roughness: 0.96, metalness: 0, tile: (3, 2),
+    static func plaster() -> PhysicallyBasedMaterial {
+        pbr(diffuse: TextureFactory.plaster(), roughness: 0.96, tile: (3, 2),
             maps: TextureFactory.plasterMaps())
     }
 
     /// Shoji paper: lit from behind, so its emission is driven by the outdoor light.
-    static func shoji() -> SCNMaterial {
-        let m = pbr(diffuse: TextureFactory.shojiPaper(), roughness: 0.9, metalness: 0, tile: (2, 3),
-                    maps: TextureFactory.shojiMaps())
-        m.emission.contents = UIColor(white: 1, alpha: 1)
-        m.emission.intensity = 0.15
-        m.isDoubleSided = true
+    static func shoji() -> PhysicallyBasedMaterial {
+        var m = pbr(diffuse: TextureFactory.shojiPaper(), roughness: 0.9, tile: (2, 3),
+                    doubleSided: true, maps: TextureFactory.shojiMaps())
+        m.emissiveColor = .init(color: .white)
+        m.emissiveIntensity = 0.15
         return m
     }
 
-    static func futon() -> SCNMaterial {
-        pbr(diffuse: TextureFactory.futonCover(), roughness: 0.95, metalness: 0, tile: (2, 3),
+    static func futon() -> PhysicallyBasedMaterial {
+        pbr(diffuse: TextureFactory.futonCover(), roughness: 0.95, tile: (2, 3),
             maps: TextureFactory.futonMaps())
     }
 
-    static func linen(_ color: RGBColor, key: String) -> SCNMaterial {
-        pbr(diffuse: TextureFactory.fabric(color, key: key), roughness: 0.95, metalness: 0, tile: (3, 3),
+    static func linen(_ color: RGBColor, key: String) -> PhysicallyBasedMaterial {
+        pbr(diffuse: TextureFactory.fabric(color, key: key), roughness: 0.95, tile: (3, 3),
             maps: TextureFactory.fabricMaps(key: key))
     }
 
-    static func sisal() -> SCNMaterial {
-        pbr(diffuse: TextureFactory.sisal(), roughness: 0.98, metalness: 0, tile: (2, 6),
+    static func sisal() -> PhysicallyBasedMaterial {
+        pbr(diffuse: TextureFactory.sisal(), roughness: 0.98, tile: (2, 6),
             maps: TextureFactory.sisalMaps())
     }
 
-    static func litter() -> SCNMaterial {
-        pbr(diffuse: TextureFactory.litterSubstrate(), roughness: 1.0, metalness: 0, tile: (2, 2),
+    static func litter() -> PhysicallyBasedMaterial {
+        pbr(diffuse: TextureFactory.litterSubstrate(), roughness: 1.0, tile: (2, 2),
             maps: TextureFactory.litterMaps())
     }
 
-    static func scroll() -> SCNMaterial {
-        pbr(diffuse: TextureFactory.inkScroll(), roughness: 0.85, metalness: 0)
+    static func scroll() -> PhysicallyBasedMaterial {
+        pbr(diffuse: TextureFactory.inkScroll(), roughness: 0.85)
     }
 
-    static func ceramic(_ color: RGBColor, key: String) -> SCNMaterial {
-        pbr(diffuse: TextureFactory.ceramic(color, key: key), roughness: 0.18, metalness: 0.0)
-    }
-
-    static func plastic(_ color: RGBColor) -> SCNMaterial {
-        pbr(diffuse: UIColor(color), roughness: 0.35, metalness: 0.0)
-    }
-
-    static func metal(_ color: RGBColor, roughness: Float = 0.25) -> SCNMaterial {
-        pbr(diffuse: UIColor(color), roughness: roughness, metalness: 0.95)
-    }
-
-    static func water() -> SCNMaterial {
-        let m = SCNMaterial()
-        m.lightingModel = .physicallyBased
-        m.diffuse.contents = UIColor(red: 0.62, green: 0.76, blue: 0.84, alpha: 1)
-        m.roughness.contents = NSNumber(value: 0.03)
-        m.metalness.contents = NSNumber(value: 0.0)
-        m.transparency = 0.75
-        m.blendMode = .alpha
+    static func ceramic(_ color: RGBColor, key: String) -> PhysicallyBasedMaterial {
+        var m = pbr(diffuse: TextureFactory.ceramic(color, key: key), roughness: 0.18)
+        // Glaze, which is what makes a teacup read as fired rather than moulded.
+        m.clearcoat = .init(scale: 0.6)
+        m.clearcoatRoughness = .init(scale: 0.06)
         return m
     }
 
-    static func foliage() -> SCNMaterial {
-        let m = pbr(diffuse: TextureFactory.foliage(), roughness: 0.75, metalness: 0, tile: (2, 2))
-        m.isDoubleSided = true
+    static func plastic(_ color: RGBColor) -> PhysicallyBasedMaterial {
+        pbr(color: color, roughness: 0.35)
+    }
+
+    static func metal(_ color: RGBColor, roughness: Float = 0.25) -> PhysicallyBasedMaterial {
+        pbr(color: color, roughness: roughness, metalness: 0.95)
+    }
+
+    static func water() -> PhysicallyBasedMaterial {
+        var m = PhysicallyBasedMaterial()
+        m.baseColor = .init(tint: UIColor(red: 0.62, green: 0.76, blue: 0.84, alpha: 1))
+        m.roughness = .init(scale: 0.03)
+        m.metallic = .init(scale: 0.0)
+        m.blending = .transparent(opacity: .init(scale: 0.25))
         return m
     }
 
-    static func lanternPaper() -> SCNMaterial {
-        let m = pbr(diffuse: TextureFactory.shojiPaper(), roughness: 0.9, metalness: 0,
-                    maps: TextureFactory.shojiMaps())
-        m.emission.contents = UIColor(red: 1.0, green: 0.86, blue: 0.62, alpha: 1)
-        m.emission.intensity = 0.0
-        m.isDoubleSided = true
+    static func foliage() -> PhysicallyBasedMaterial {
+        pbr(diffuse: TextureFactory.foliage(), roughness: 0.75, tile: (2, 2), doubleSided: true)
+    }
+
+    static func lanternPaper() -> PhysicallyBasedMaterial {
+        var m = pbr(diffuse: TextureFactory.shojiPaper(), roughness: 0.9,
+                    doubleSided: true, maps: TextureFactory.shojiMaps())
+        m.emissiveColor = .init(color: UIColor(red: 1.0, green: 0.86, blue: 0.62, alpha: 1))
+        m.emissiveIntensity = 0.0
         return m
     }
 
-    /// The garden seen through the window. Unlit so it reads as "outside".
     /// The garden beyond the window.
     ///
-    /// Carried on emission rather than diffuse so it can exceed 1. Outdoors is
+    /// Carried on emission rather than base colour so it can exceed 1. Outdoors is
     /// something like fifty times brighter than a room lit through a window, and
     /// an 8-bit texture cannot say that — as a plain diffuse colour the night sky
     /// rendered *brighter* than the day sky, because the texture only darkens by
@@ -257,13 +269,16 @@ enum Materials {
     /// emission, `LightingRig` can scale it by the actual daylight, so the view
     /// blows out at noon the way a real window does and goes properly black at
     /// night.
-    static func backdrop(sky: SkyState) -> SCNMaterial {
-        let m = SCNMaterial()
-        m.lightingModel = .constant
-        m.diffuse.contents = UIColor.black
-        m.emission.contents = TextureFactory.gardenBackdrop(sky: sky)
-        m.emission.intensity = 1        // LightingRig drives this from the sky.
-        m.isDoubleSided = true
+    static func backdrop(sky: SkyState) -> PhysicallyBasedMaterial {
+        var m = PhysicallyBasedMaterial()
+        m.baseColor = .init(tint: .black)
+        m.roughness = .init(scale: 1)
+        m.metallic = .init(scale: 0)
+        m.faceCulling = .none
+        m.emissiveColor = .init(color: .white,
+                                texture: TextureBridge.tiling(TextureFactory.gardenBackdrop(sky: sky),
+                                                              semantic: .color))
+        m.emissiveIntensity = 1        // LightingRig drives this from the sky.
         return m
     }
 }

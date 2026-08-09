@@ -1,8 +1,9 @@
-// A tiny software rasteriser. SceneKit isn't available off-Apple, but the meshes,
-// the rig and the animator are all ours — so we can walk the node tree, project the
-// triangles ourselves and actually look at the cat. Run with `--render`.
+// A tiny software rasteriser. No graphics framework is available off-Apple, but
+// the meshes, the rig and the animator are all ours — so we can walk the entity
+// tree, project the triangles ourselves and actually look at the cat.
+// Run with `--render`.
 import Foundation
-import SceneKit
+import RealityKit
 
 // MARK: - Triangle soup
 
@@ -13,144 +14,49 @@ private struct Tri {
     var shade: Float          // material lightness 0…1
 }
 
-private func tessellate(_ geometry: SCNGeometry) -> ([SIMD3<Float>], [Int32]) {
-    // Generated meshes: read the buffers the generators actually produced, rather
-    // than whatever the renderer made of them.
-    if let mesh = MeshSourceRegistry.mesh(for: geometry), !mesh.indices.isEmpty {
-        return (mesh.positions.map { SIMD3<Float>(x: $0.x, y: $0.y, z: $0.z) }, mesh.indices)
-    }
-
-    // Anything realised outside the mesh layer still carries its own vertices.
-    if let source = geometry.sources.first(where: { !$0.vertices.isEmpty }),
-       let element = geometry.elements.first, !element.indices.isEmpty {
-        // The shim's geometry source still stores SCNVector3; the rasteriser now
-        // works in the game's own vector type.
-        return (source.vertices.map { SIMD3<Float>($0.x, $0.y, $0.z) }, element.indices)
-    }
-
-    var verts: [SIMD3<Float>] = []
-    var idx: [Int32] = []
-
-    func quad(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ c: SIMD3<Float>, _ d: SIMD3<Float>) {
-        let base = Int32(verts.count)
-        verts.append(contentsOf: [a, b, c, d])
-        idx.append(contentsOf: [base, base + 1, base + 2, base, base + 2, base + 3])
-    }
-
-    switch geometry {
-    case let box as SCNBox:
-        let w = Float(box.width) / 2, h = Float(box.height) / 2, l = Float(box.length) / 2
-        let p = [SIMD3<Float>(x: -w, y: -h, z: -l), SIMD3<Float>(x: w, y: -h, z: -l),
-                 SIMD3<Float>(x: w, y: h, z: -l), SIMD3<Float>(x: -w, y: h, z: -l),
-                 SIMD3<Float>(x: -w, y: -h, z: l), SIMD3<Float>(x: w, y: -h, z: l),
-                 SIMD3<Float>(x: w, y: h, z: l), SIMD3<Float>(x: -w, y: h, z: l)]
-        quad(p[0], p[3], p[2], p[1]); quad(p[4], p[5], p[6], p[7])
-        quad(p[0], p[1], p[5], p[4]); quad(p[2], p[3], p[7], p[6])
-        quad(p[1], p[2], p[6], p[5]); quad(p[0], p[4], p[7], p[3])
-
-    case let sphere as SCNSphere:
-        let r = Float(sphere.radius), rings = 12, segs = 18
-        for i in 0..<rings {
-            for s in 0..<segs {
-                func pt(_ i: Int, _ s: Int) -> SIMD3<Float> {
-                    let phi = Float(i) / Float(rings) * .pi
-                    let th = Float(s) / Float(segs) * 2 * .pi
-                    return SIMD3<Float>(x: sinf(phi) * cosf(th) * r, y: cosf(phi) * r, z: sinf(phi) * sinf(th) * r)
-                }
-                quad(pt(i, s), pt(i + 1, s), pt(i + 1, s + 1), pt(i, s + 1))
-            }
-        }
-
-    case let cyl as SCNCylinder:
-        let r = Float(cyl.radius), h = Float(cyl.height) / 2, segs = 16
-        for s in 0..<segs {
-            let a0 = Float(s) / Float(segs) * 2 * .pi
-            let a1 = Float(s + 1) / Float(segs) * 2 * .pi
-            quad(SIMD3<Float>(x: cosf(a0) * r, y: -h, z: sinf(a0) * r),
-                 SIMD3<Float>(x: cosf(a1) * r, y: -h, z: sinf(a1) * r),
-                 SIMD3<Float>(x: cosf(a1) * r, y: h, z: sinf(a1) * r),
-                 SIMD3<Float>(x: cosf(a0) * r, y: h, z: sinf(a0) * r))
-            let base = Int32(verts.count)
-            verts.append(contentsOf: [SIMD3<Float>(x: 0, y: h, z: 0),
-                                      SIMD3<Float>(x: cosf(a0) * r, y: h, z: sinf(a0) * r),
-                                      SIMD3<Float>(x: cosf(a1) * r, y: h, z: sinf(a1) * r)])
-            idx.append(contentsOf: [base, base + 1, base + 2])
-        }
-
-    case let tube as SCNTube:
-        let ro = Float(tube.outerRadius), ri = Float(tube.innerRadius)
-        let h = Float(tube.height) / 2, segs = 16
-        for s in 0..<segs {
-            let a0 = Float(s) / Float(segs) * 2 * .pi
-            let a1 = Float(s + 1) / Float(segs) * 2 * .pi
-            for r in [ro, ri] {
-                quad(SIMD3<Float>(x: cosf(a0) * r, y: -h, z: sinf(a0) * r),
-                     SIMD3<Float>(x: cosf(a1) * r, y: -h, z: sinf(a1) * r),
-                     SIMD3<Float>(x: cosf(a1) * r, y: h, z: sinf(a1) * r),
-                     SIMD3<Float>(x: cosf(a0) * r, y: h, z: sinf(a0) * r))
-            }
-            quad(SIMD3<Float>(x: cosf(a0) * ri, y: h, z: sinf(a0) * ri),
-                 SIMD3<Float>(x: cosf(a1) * ri, y: h, z: sinf(a1) * ri),
-                 SIMD3<Float>(x: cosf(a1) * ro, y: h, z: sinf(a1) * ro),
-                 SIMD3<Float>(x: cosf(a0) * ro, y: h, z: sinf(a0) * ro))
-        }
-
-    case let torus as SCNTorus:
-        let R = Float(torus.ringRadius), r = Float(torus.pipeRadius)
-        let major = 16, minor = 8
-        for i in 0..<major {
-            for j in 0..<minor {
-                func pt(_ i: Int, _ j: Int) -> SIMD3<Float> {
-                    let u = Float(i) / Float(major) * 2 * .pi
-                    let v = Float(j) / Float(minor) * 2 * .pi
-                    return SIMD3<Float>(x: (R + r * cosf(v)) * cosf(u),
-                                      y: r * sinf(v),
-                                      z: (R + r * cosf(v)) * sinf(u))
-                }
-                quad(pt(i, j), pt(i + 1, j), pt(i + 1, j + 1), pt(i, j + 1))
-            }
-        }
-
-    case let plane as SCNPlane:
-        let w = Float(plane.width) / 2, h = Float(plane.height) / 2
-        quad(SIMD3<Float>(x: -w, y: -h, z: 0), SIMD3<Float>(x: w, y: -h, z: 0),
-             SIMD3<Float>(x: w, y: h, z: 0), SIMD3<Float>(x: -w, y: h, z: 0))
-
-    default:
-        // Silently drawing nothing is how a missing shape hides: the picture just
-        // comes out without it and looks plausible. Say so instead.
-        FileHandle.standardError.write(
-            "render: no tessellation for \(type(of: geometry)) — it will be missing from the image\n"
-                .data(using: .utf8)!)
-    }
-    return (verts, idx)
+/// The triangles an entity draws, in its own space.
+///
+/// This used to have a second half: a hand-written tessellator for `SCNBox`,
+/// `SCNCylinder`, `SCNTorus` and the rest, because the room was built from
+/// SceneKit primitives whose vertices only existed inside the renderer. All of
+/// that is gone — every shape in the game is now generated by `MeshBuilder`, so
+/// there is exactly one path, and the offline renderer draws the same buffers
+/// that get uploaded to the GPU rather than an approximation of them.
+private func tessellate(_ entity: Entity) -> ([SIMD3<Float>], [Int32])? {
+    guard let resource = (entity as? ModelEntity)?.model?.mesh,
+          let mesh = MeshSourceRegistry.mesh(for: resource),
+          !mesh.indices.isEmpty else { return nil }
+    return (mesh.positions.map { SIMD3<Float>(x: $0.x, y: $0.y, z: $0.z) }, mesh.indices)
 }
 
-private func gather(_ node: SCNNode, into tris: inout [Tri], skipHidden: Bool = true) {
-    if skipHidden && node.isHidden { return }
-    if let geometry = node.geometry {
-        let (verts, idx) = tessellate(geometry)
-        if !verts.isEmpty && !idx.isEmpty {
-            let world = node.worldTransform
-            // Approximate the material by its diffuse colour's lightness.
-            var shade: Float = 0.65
-            if let mat = geometry.materials.first, let ui = mat.diffuse.contents as? UIColor {
-                var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-                ui.getRed(&r, green: &g, blue: &b, alpha: &a)
-                shade = Float(0.2126 * r + 0.7152 * g + 0.0722 * b)
-                if shade < 0.02 { shade = 0.55 }   // shim colours read back as black
-            }
-            var i = 0
-            while i + 2 < idx.count {
-                let a = world.apply(verts[Int(idx[i])])
-                let b = world.apply(verts[Int(idx[i + 1])])
-                let c = world.apply(verts[Int(idx[i + 2])])
-                tris.append(Tri(a: a, b: b, c: c, shade: shade))
-                i += 3
-            }
+/// Transforms a point by a world matrix.
+private func apply(_ m: simd_float4x4, _ p: SIMD3<Float>) -> SIMD3<Float> {
+    let v = m * SIMD4<Float>(p.x, p.y, p.z, 1)
+    return SIMD3<Float>(v.x, v.y, v.z)
+}
+
+private func gather(_ entity: Entity, into tris: inout [Tri], skipHidden: Bool = true) {
+    if skipHidden && !entity.isEnabled { return }
+    if let (verts, idx) = tessellate(entity) {
+        let world = entity.worldMatrix
+        // Approximate the material by its base colour's lightness.
+        var shade: Float = 0.65
+        if let tint = entity.pbrMaterial?.baseColor.tint {
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            tint.getRed(&r, green: &g, blue: &b, alpha: &a)
+            shade = Float(0.2126 * r + 0.7152 * g + 0.0722 * b)
+            if shade < 0.02 { shade = 0.55 }   // shim colours read back as black
+        }
+        var i = 0
+        while i + 2 < idx.count {
+            let a = apply(world, verts[Int(idx[i])])
+            let b = apply(world, verts[Int(idx[i + 1])])
+            let c = apply(world, verts[Int(idx[i + 2])])
+            tris.append(Tri(a: a, b: b, c: c, shade: shade))
+            i += 3
         }
     }
-    for child in node.childNodes { gather(child, into: &tris, skipHidden: skipHidden) }
+    for child in entity.children { gather(child, into: &tris, skipHidden: skipHidden) }
 }
 
 // MARK: - Rasteriser
@@ -298,7 +204,7 @@ private func writePNG(_ pixels: [UInt8], width: Int, height: Int, to path: Strin
 /// the rasteriser. The HUD occupies a fixed band along the bottom of the screen,
 /// so knowing the cat's screen box is the only way to tell — without a Mac —
 /// whether a cat that comes when called ends up hidden behind the status pill.
-private func screenBounds(_ node: SCNNode,
+private func screenBounds(_ node: Entity,
                           eye: SIMD3<Float>, target: SIMD3<Float>,
                           fovDegrees: Float, width: Int, height: Int)
     -> (minX: Float, maxX: Float, minY: Float, maxY: Float)? {
@@ -346,7 +252,7 @@ func runRender(outputDirectory: String) {
     let fm = FileManager.default
     try? fm.createDirectory(atPath: outputDirectory, withIntermediateDirectories: true)
 
-    func shot(_ name: String, _ node: SCNNode, eye: SIMD3<Float>, target: SIMD3<Float>,
+    func shot(_ name: String, _ node: Entity, eye: SIMD3<Float>, target: SIMD3<Float>,
               fov: Float, size: (Int, Int), bg: (Float, Float, Float) = (0.10, 0.10, 0.12)) {
         var tris: [Tri] = []
         gather(node, into: &tris)
@@ -402,7 +308,7 @@ func runRender(outputDirectory: String) {
         motion.pose = .sittingTall
         for _ in 0..<200 { animator.update(dt: 1.0 / 60, motion: motion) }
 
-        let head = rig.head.simdConvertPosition(.zero, to: nil)
+        let head = rig.head.convert(position: SIMD3<Float>(repeating: 0), to: nil)
         let d = a.headRadius * 11
         shot("head-\(breed.rawValue)-front", rig.root,
              eye: SIMD3<Float>(x: head.x, y: head.y + d * 0.16, z: head.z + d),
@@ -443,9 +349,9 @@ func runRender(outputDirectory: String) {
     catMotion.yaw = deg(170)
     for _ in 0..<200 { catAnim.update(dt: 1.0 / 60, motion: catMotion) }
 
-    let world = SCNNode()
-    world.addChildNode(room.root)
-    world.addChildNode(catRig.root)
+    let world = Entity()
+    world.addChild(room.root)
+    world.addChild(catRig.root)
 
     let eye = RoomLayout.cameraPosition
     let aim = SIMD3<Float>(x: eye.x, y: eye.y + tanf(RoomLayout.cameraPitch), z: eye.z - 1)
@@ -472,9 +378,9 @@ func runRender(outputDirectory: String) {
     closeMotion.yaw = yawTowards(from: RoomLayout.playerLapSpot, to: RoomLayout.cameraPosition)
     for _ in 0..<200 { closeAnim.update(dt: 1.0 / 60, motion: closeMotion) }
 
-    let closeWorld = SCNNode()
-    closeWorld.addChildNode(RoomBuilder.build(sky: sky).root)
-    closeWorld.addChildNode(closeRig.root)
+    let closeWorld = Entity()
+    closeWorld.addChild(RoomBuilder.build(sky: sky).root)
+    closeWorld.addChild(closeRig.root)
     shot("room-cat-called-over", closeWorld, eye: eye, target: aim,
          fov: vertical, size: (390, 844), bg: (0.05, 0.06, 0.09))
 
@@ -490,7 +396,7 @@ func runRender(outputDirectory: String) {
         }
         let hidden = max(0, b.maxY - hudTop)
         let visible = max(0, min(b.maxY, hudTop) - b.minY)
-        let fraction = visible > 0 ? hidden / (hidden + visible) : 1
+        let fraction: Float = visible > 0 ? hidden / (hidden + visible) : 1
         print(String(format: "  %@ at lap spot: y[%.0f %.0f] x[%.0f %.0f]  %.0f%% behind the HUD (top %.0f)",
                      label as NSString, b.minY, b.maxY, b.minX, b.maxX, fraction * 100, hudTop))
     }

@@ -1,5 +1,5 @@
 import Foundation
-import SceneKit
+import RealityKit
 import UIKit
 
 /// A part thin enough that light comes through it.
@@ -7,8 +7,7 @@ import UIKit
 /// Ears mostly, but also the nose leather, the paw pads and the toe webbing —
 /// anywhere the tissue is a couple of millimetres thick over blood.
 struct TranslucentPart {
-    let node: SCNNode
-    let material: SCNMaterial
+    let entity: Entity
     /// 0 is opaque, 1 is an ear held up to a window.
     let amount: Float
     /// The colour that comes through. Always warmer and redder than the surface,
@@ -27,6 +26,14 @@ struct TranslucentPart {
 /// So the mask is not a texture here. Our ears, nose and pads are already separate
 /// meshes with their own materials, so "where" is free, and this supplies the part a
 /// map cannot.
+///
+/// What this drives changed with the renderer, and it is the one place the port
+/// makes something genuinely better rather than merely equivalent.
+/// `PhysicallyBasedMaterial` has real subsurface scattering — a colour, a weight
+/// and a radius — where SceneKit had nothing of the kind and this had to fake it
+/// by adding light to the surface. Emission is a poor stand-in: it does not fall
+/// off with thickness, it does not tint with distance travelled, and it survives
+/// being in shadow. Subsurface weight is the same *when*, driving the right *how*.
 ///
 /// The test is simply whether the light and the viewer are on opposite sides of the
 /// part. The player never moves, so that reduces to one dot product per part, and it
@@ -74,7 +81,7 @@ enum Translucency {
         let lanternPower: Float = lanternOn ? 0.10 : 0
 
         for part in parts {
-            let p = part.node.simdWorldPosition
+            let p = part.entity.worldPosition
 
             // The window, and it is the main event.
             //
@@ -99,9 +106,14 @@ enum Translucency {
                 + backlight(at: p, lightDirection: sun) * sunPower
                 + backlight(at: p, lightDirection: moon) * moonPower
                 + lanternPower
-            let level = part.amount * min(1, transmitted)
-            part.material.emission.contents = UIColor(part.tint, alpha: 1)
-            part.material.emission.intensity = CGFloat(min(0.55, level))
+            let level = min(0.55, part.amount * min(1, transmitted))
+            part.entity.withMaterial {
+                $0.subsurfaceColor = .init(tint: UIColor(part.tint))
+                $0.subsurfaceWeight = .init(scale: level)
+                // Millimetres of tissue, roughly, which is what sets how far light
+                // spreads before it comes back out. An ear is thinner than a nose.
+                $0.subsurfaceRadius = .init(scale: 0.002 + 0.004 * part.amount)
+            }
         }
     }
 }

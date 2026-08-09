@@ -1,72 +1,89 @@
 import SwiftUI
-import SceneKit
+import RealityKit
 
-/// Hosts the SceneKit view and routes touches to the scene controller.
-struct SceneContainerView: UIViewRepresentable {
+/// Hosts the scene and routes touches to the controller.
+///
+/// The touch handling is the part that changed most. SceneKit put a hit test on
+/// the view: give it a screen point, get back everything under it, sorted. There
+/// is no such thing here — SwiftUI's spatial gestures resolve the entity
+/// themselves and hand it over, and only entities that opted in with an
+/// `InputTargetComponent` are candidates.
+///
+/// That is a better arrangement than it first looks. Every ray used to hit every
+/// surface in the room and the code then sifted for one belonging to the cat; now
+/// the cat is the only thing listening, and the controller never needs to know
+/// what a view is.
+struct SceneContainerView: View {
     let controller: GameSceneController
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(controller: controller)
-    }
+    /// Where the last drag was on screen. The controller still wants this in
+    /// points, because petting speed is measured in how fast the finger moves
+    /// rather than how far the hand travels in the room.
+    @State private var lastDrag: CGPoint?
 
-    func makeUIView(context: Context) -> SCNView {
-        let view = SCNView()
-        view.scene = controller.scene
-        view.delegate = controller
-        view.rendersContinuously = true
-        view.isPlaying = true
-        view.allowsCameraControl = false          // the player never moves
-        view.antialiasingMode = RenderQuality.antialiasing
-        view.preferredFramesPerSecond = RenderQuality.preferredFramesPerSecond
-        view.backgroundColor = .black
-        view.autoenablesDefaultLighting = false
-        view.isJitteringEnabled = false
+    var body: some View {
+        RealityView { content in
+            // Non-AR: a virtual camera looking at a room, not the device's camera
+            // looking at the world.
+            content.camera = .virtual
+            content.environment = .default
 
-        let tap = UITapGestureRecognizer(target: context.coordinator,
-                                         action: #selector(Coordinator.handleTap(_:)))
-        view.addGestureRecognizer(tap)
+            // Depth of field and HDR survive the move off SceneKit's camera.
+            // Bloom, vignette and colour fringing do not, and are not faked here.
+            content.renderingEffects.depthOfField = RenderQuality.wantsDepthOfField ? .automatic : .disabled
+            content.renderingEffects.antialiasing = RenderQuality.wantsAntialiasing ? .automatic : .none
+            content.renderingEffects.dynamicRange = .high
+            content.renderingEffects.cameraGrain = .disabled
+            content.renderingEffects.motionBlur = .disabled
 
-        let pan = UIPanGestureRecognizer(target: context.coordinator,
-                                         action: #selector(Coordinator.handlePan(_:)))
-        pan.maximumNumberOfTouches = 1
-        view.addGestureRecognizer(pan)
-
-        context.coordinator.view = view
-        return view
-    }
-
-    func updateUIView(_ uiView: SCNView, context: Context) {}
-
-    final class Coordinator: NSObject {
-        let controller: GameSceneController
-        weak var view: SCNView?
-        private var lastPoint: CGPoint = .zero
-
-        init(controller: GameSceneController) {
-            self.controller = controller
-        }
-
-        @objc func handleTap(_ gr: UITapGestureRecognizer) {
-            guard let view else { return }
-            controller.handleTap(at: gr.location(in: view), in: view)
-        }
-
-        @objc func handlePan(_ gr: UIPanGestureRecognizer) {
-            guard let view else { return }
-            let point = gr.location(in: view)
-            switch gr.state {
-            case .began:
-                lastPoint = point
-                controller.beginPan(at: point, in: view)
-            case .changed:
-                let delta = CGPoint(x: point.x - lastPoint.x, y: point.y - lastPoint.y)
-                lastPoint = point
-                controller.updatePan(at: point, translationDelta: delta, in: view)
-            case .ended, .cancelled, .failed:
-                controller.endPan()
-            default:
-                break
+            content.add(controller.root)
+            content.subscribe(to: SceneEvents.Update.self) { event in
+                controller.update(deltaTime: Float(event.deltaTime))
             }
         }
+        .gesture(
+            SpatialTapGesture()
+                .targetedToAnyEntity()
+                .onEnded { value in
+                    controller.handleTap(on: value.entity,
+                                         at: value.convert(value.location3D, from: .local, to: .scene))
+                }
+        )
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .targetedToAnyEntity()
+                .onChanged { value in
+                    let world = value.convert(value.location3D, from: .local, to: .scene)
+                    guard let previous = lastDrag else {
+                        lastDrag = value.location
+                        controller.beginPan(at: value.location, on: value.entity, worldPoint: world)
+                        return
+                    }
+                    let delta = CGPoint(x: value.location.x - previous.x,
+                                        y: value.location.y - previous.y)
+                    lastDrag = value.location
+                    controller.updatePan(at: value.location, translationDelta: delta,
+                                         on: value.entity, worldPoint: world)
+                }
+                .onEnded { _ in
+                    lastDrag = nil
+                    controller.endPan()
+                }
+        )
+        // The wand is swung by dragging anywhere at all, including off the cat and
+        // off every other target, so it needs a gesture aimed at no entity.
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    guard controller.wandActive else { return }
+                    let previous = lastDrag ?? value.location
+                    lastDrag = value.location
+                    controller.updatePan(at: value.location,
+                                         translationDelta: CGPoint(x: value.location.x - previous.x,
+                                                                   y: value.location.y - previous.y),
+                                         on: nil, worldPoint: .zero)
+                }
+                .onEnded { _ in lastDrag = nil }
+        )
     }
 }

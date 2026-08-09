@@ -31,7 +31,7 @@ fi
 mkdir -p "$MODULES"
 
 echo "==> building framework stand-ins"
-for name in CoreGraphics QuartzCore UIKit Metal SceneKit RealityKit AVFoundation UserNotifications SwiftUI; do
+for name in CoreGraphics QuartzCore UIKit Metal SceneKit SwiftUI RealityKit AVFoundation UserNotifications; do
   swiftc -emit-module -emit-library \
     -module-name "$name" \
     -emit-module-path "$MODULES/$name.swiftmodule" \

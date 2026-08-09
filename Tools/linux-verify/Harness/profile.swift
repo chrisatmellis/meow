@@ -122,7 +122,7 @@ func runProfile() {
         lo = min(lo, screen); hi = max(hi, screen)
         print(String(format: "  %02d:00 %7.0f %7.0f %7.1f %7.0f  | %6.0f %+5.2f %8.0f",
                      hour, b.sun, b.sky, b.moon, b.lantern,
-                     b.key, Float(LightingRig.exposureOffset(for: b)), screen))
+                     b.key, LightingRig.exposure(for: b), screen))
     }
     print(String(format: "  room light spans %.2f stops across the day (less than that on screen,", log2(hi / lo)))
     print("  since the tone mapper and sRGB both compress the bottom end)")

@@ -34,6 +34,9 @@
 @_exported import Foundation
 @_exported import CoreGraphics
 @_exported import UIKit
+// For `RealityView`, which is a SwiftUI view that RealityKit vends — so on Linux
+// the RealityKit stand-in has to be built after the SwiftUI one.
+import SwiftUI
 
 // MARK: - simd stand-ins
 //
@@ -1177,4 +1180,161 @@ public struct BoundingBox {
 
     public var center: SIMD3<Float> { (min + max) * 0.5 }
     public var extents: SIMD3<Float> { max - min }
+}
+
+// MARK: - RealityView
+
+/// The SwiftUI host. On iOS this is the non-AR path: `content.camera = .virtual`
+/// and an explicit `PerspectiveCamera` in the scene, rather than the device's
+/// camera looking at the room through AR.
+public struct RealityViewCamera {
+    public static let virtual = RealityViewCamera()
+    public static let spatialTracking = RealityViewCamera()
+}
+
+public struct RealityViewEnvironment {
+    public static let `default` = RealityViewEnvironment()
+    public static func skybox(_ resource: EnvironmentResource?) -> RealityViewEnvironment {
+        RealityViewEnvironment()
+    }
+}
+
+public struct RealityViewRenderingEffects {
+    public enum Antialiasing { case none, msaa, temporal, automatic }
+    public enum DepthOfField { case disabled, automatic }
+    public enum DynamicRange { case standard, high, automatic }
+    public enum CameraGrain { case disabled, automatic }
+    public enum MotionBlur { case disabled, automatic }
+
+    public var antialiasing: Antialiasing = .automatic
+    public var depthOfField: DepthOfField = .automatic
+    public var dynamicRange: DynamicRange = .automatic
+    public var cameraGrain: CameraGrain = .automatic
+    public var motionBlur: MotionBlur = .automatic
+    public init() {}
+}
+
+public struct RealityViewCameraContent {
+    public var camera = RealityViewCamera.virtual
+    public var environment = RealityViewEnvironment.default
+    public var renderingEffects = RealityViewRenderingEffects()
+    public private(set) var entities: [Entity] = []
+
+    public init() {}
+    public mutating func add(_ entity: Entity) { entities.append(entity) }
+    public mutating func remove(_ entity: Entity) { entities.removeAll { $0 === entity } }
+
+    @discardableResult
+    public func subscribe<E>(to event: E.Type, _ handler: @escaping (E) -> Void) -> EventSubscription {
+        EventSubscription()
+    }
+}
+
+public struct EventSubscription {
+    public init() {}
+    public func cancel() {}
+}
+
+/// The frame loop. RealityKit hands out a delta rather than an absolute time,
+/// which removes the "is this the first frame" dance the SceneKit delegate needed.
+public enum SceneEvents {
+    public struct Update {
+        public var deltaTime: TimeInterval
+        public init(deltaTime: TimeInterval = 1.0 / 60.0) { self.deltaTime = deltaTime }
+    }
+}
+
+// MARK: - Input
+
+/// Marks an entity as something a gesture can land on. Without it an entity is
+/// invisible to touch however solid it looks, which is the trap: the scene still
+/// renders perfectly and nothing responds.
+public struct InputTargetComponent: Component {
+    public var allowedInputTypes: InputTypes = .all
+    public init(allowedInputTypes: InputTypes = .all) { self.allowedInputTypes = allowedInputTypes }
+
+    public struct InputTypes: OptionSet {
+        public let rawValue: Int
+        public init(rawValue: Int) { self.rawValue = rawValue }
+        public static let indirect = InputTypes(rawValue: 1)
+        public static let direct = InputTypes(rawValue: 2)
+        public static let all: InputTypes = [.indirect, .direct]
+    }
+}
+
+public struct CollisionComponent: Component {
+    public var shapes: [ShapeResource]
+    public var isStatic: Bool
+    public init(shapes: [ShapeResource], isStatic: Bool = false) {
+        self.shapes = shapes
+        self.isStatic = isStatic
+    }
+}
+
+public struct ShapeResource {
+    public static func generateBox(size: SIMD3<Float>) -> ShapeResource { ShapeResource() }
+    public static func generateSphere(radius: Float) -> ShapeResource { ShapeResource() }
+    public static func generateConvex(from mesh: MeshResource) throws -> ShapeResource { ShapeResource() }
+}
+
+public struct RealityView<Content: View>: View {
+    public var body: Never { fatalError() }
+
+    // The real initialiser's `make`/`update` closures are what the app writes, and
+    // `Content` is inferred from the (unused here) placeholder. Defaulting it to
+    // `EmptyView` keeps the app's call sites written exactly as they are on
+    // device, where trailing-closure syntax names no generic argument at all.
+    public init(make: @escaping (inout RealityViewCameraContent) async -> Void,
+                update: @escaping (inout RealityViewCameraContent) -> Void = { _ in })
+        where Content == EmptyView {
+        var content = RealityViewCameraContent()
+        update(&content)
+    }
+}
+
+// MARK: - Entity-targeted gestures
+
+/// What a targeted gesture hands back: the gesture's own value, plus the entity
+/// it landed on and the means to put its location into scene space.
+public struct EntityTargetValue<Value> {
+    public var gestureValue: Value
+    public var entity: Entity
+
+    public init(gestureValue: Value, entity: Entity) {
+        self.gestureValue = gestureValue
+        self.entity = entity
+    }
+
+    public enum CoordinateSpace { case local, scene }
+
+    public func convert(_ point: SIMD3<Float>, from: CoordinateSpace, to: CoordinateSpace) -> SIMD3<Float> {
+        switch (from, to) {
+        case (.local, .scene): return entity.convert(position: point, to: nil)
+        case (.scene, .local): return entity.convert(position: point, from: nil)
+        default: return point
+        }
+    }
+}
+
+public struct TargetedGesture<G: SwiftUI.Gesture> {
+    public typealias Value = EntityTargetValue<G.Value>
+    public init() {}
+    public func onChanged(_ action: @escaping (Value) -> Void) -> TargetedGesture<G> { self }
+    public func onEnded(_ action: @escaping (Value) -> Void) -> TargetedGesture<G> { self }
+}
+
+public extension SwiftUI.Gesture {
+    /// Restricts a gesture to entities carrying an `InputTargetComponent`, and
+    /// tells the handler which one it hit.
+    func targetedToAnyEntity() -> TargetedGesture<Self> { TargetedGesture<Self>() }
+}
+
+public extension EntityTargetValue where Value == SwiftUI.DragGesture.Value {
+    var location: CGPoint { gestureValue.location }
+    var location3D: SIMD3<Float> { gestureValue.location3D }
+}
+
+public extension EntityTargetValue where Value == SwiftUI.SpatialTapGesture.Value {
+    var location: CGPoint { gestureValue.location }
+    var location3D: SIMD3<Float> { gestureValue.location3D }
 }

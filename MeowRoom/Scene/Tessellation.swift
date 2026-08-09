@@ -1,5 +1,4 @@
 import Foundation
-import SceneKit
 
 /// How finely a curved primitive should be divided.
 ///
@@ -39,40 +38,5 @@ enum Tessellation {
     /// always the small radius, and it defaults to 24.
     static func torus(ring: Float, pipe: Float) -> (ring: Int, pipe: Int) {
         (around(ring, min: 12, max: 36), around(pipe, min: 5, max: 16))
-    }
-}
-
-extension SCNSphere {
-    /// Divides the sphere for its actual size.
-    @discardableResult
-    func sized() -> SCNSphere {
-        segmentCount = Tessellation.sphere(Float(radius))
-        return self
-    }
-}
-
-extension SCNCylinder {
-    @discardableResult
-    func sized() -> SCNCylinder {
-        radialSegmentCount = Tessellation.around(Float(radius))
-        return self
-    }
-}
-
-extension SCNTube {
-    @discardableResult
-    func sized() -> SCNTube {
-        radialSegmentCount = Tessellation.around(Float(outerRadius))
-        return self
-    }
-}
-
-extension SCNTorus {
-    @discardableResult
-    func sized() -> SCNTorus {
-        let (r, p) = Tessellation.torus(ring: Float(ringRadius), pipe: Float(pipeRadius))
-        ringSegmentCount = r
-        pipeSegmentCount = p
-        return self
     }
 }

@@ -487,23 +487,23 @@ section("animator") {
         for _ in 0..<240 {
             animator.update(dt: 1.0 / 60, motion: motion)
         }
-        expect(finite(rig.body.simdPosition), "\(pose) body position finite")
-        expect(finite(rig.spine.simdEulerAngles), "\(pose) spine angles finite")
-        expect(finite(rig.head.simdEulerAngles), "\(pose) head angles finite")
-        expect(finite(rig.neck.simdEulerAngles), "\(pose) neck angles finite")
-        expect(finite(rig.tailPitch.simdEulerAngles), "\(pose) tail pitch finite")
+        expect(finite(rig.body.position), "\(pose) body position finite")
+        expect(finite(rig.spine.eulerAngles), "\(pose) spine angles finite")
+        expect(finite(rig.head.eulerAngles), "\(pose) head angles finite")
+        expect(finite(rig.neck.eulerAngles), "\(pose) neck angles finite")
+        expect(finite(rig.tailPitch.eulerAngles), "\(pose) tail pitch finite")
         for (i, leg) in rig.legs.enumerated() {
-            expect(finite(leg.hip.simdEulerAngles), "\(pose) leg \(i) hip finite")
-            expect(finite(leg.knee.simdEulerAngles), "\(pose) leg \(i) knee finite")
-            expect(finite(leg.ankle.simdEulerAngles), "\(pose) leg \(i) ankle finite")
-            expect(abs(leg.hip.simdEulerAngles.x) < 6.4, "\(pose) leg \(i) hip angle bounded")
-            expect(abs(leg.knee.simdEulerAngles.x) < 6.4, "\(pose) leg \(i) knee angle bounded")
+            expect(finite(leg.hip.eulerAngles), "\(pose) leg \(i) hip finite")
+            expect(finite(leg.knee.eulerAngles), "\(pose) leg \(i) knee finite")
+            expect(finite(leg.ankle.eulerAngles), "\(pose) leg \(i) ankle finite")
+            expect(abs(leg.hip.eulerAngles.x) < 6.4, "\(pose) leg \(i) hip angle bounded")
+            expect(abs(leg.knee.eulerAngles.x) < 6.4, "\(pose) leg \(i) knee angle bounded")
         }
         for seg in rig.tailSegments {
-            expect(finite(seg.simdEulerAngles), "\(pose) tail segment finite")
+            expect(finite(seg.eulerAngles), "\(pose) tail segment finite")
         }
-        expect(finite(rig.earL.simdEulerAngles) && finite(rig.earR.simdEulerAngles), "\(pose) ears finite")
-        expect(finite(rig.lidUpperL.simdEulerAngles), "\(pose) eyelids finite")
+        expect(finite(rig.earL.eulerAngles) && finite(rig.earR.eulerAngles), "\(pose) ears finite")
+        expect(finite(rig.lidUpperL.eulerAngles), "\(pose) eyelids finite")
     }
 
     // Look-at must not drift: repeated frames aimed at a fixed point should settle.
@@ -512,10 +512,10 @@ section("animator") {
     motion.lookTarget = SIMD3<Float>(x: 1, y: 0.5, z: 1)
     motion.lookWeight = 1
     for _ in 0..<120 { animator.update(dt: 1.0 / 60, motion: motion) }
-    let firstYaw = rig.head.simdEulerAngles.y
+    let firstYaw = rig.head.eulerAngles.y
     for _ in 0..<120 { animator.update(dt: 1.0 / 60, motion: motion) }
-    expect(abs(rig.head.simdEulerAngles.y - firstYaw) < 1e-3,
-           "look-at is stable, drifted \(rig.head.simdEulerAngles.y - firstYaw)")
+    expect(abs(rig.head.eulerAngles.y - firstYaw) < 1e-3,
+           "look-at is stable, drifted \(rig.head.eulerAngles.y - firstYaw)")
 }
 
 // MARK: - Brain
@@ -827,37 +827,38 @@ section("textures") {
 section("room builder") {
     let sky = WorldClock.sky()
     let room = RoomBuilder.build(sky: sky)
-    expect(room.root.childNodes.count > 10, "room has content")
-    expect(room.shojiMaterials.count >= 2, "shoji materials captured")
-    expect(room.backdropMaterials.count >= 1, "backdrop captured")
+    expect(room.root.children.count > 10, "room has content")
+    expect(room.shojiPanels.count >= 2, "shoji panels captured")
+    expect(room.backdropPanels.count >= 1, "backdrop captured")
     expect(room.lanternLight != nil, "lantern light captured")
     expect(room.foodPile != nil && room.waterSurface != nil, "consumable nodes captured")
     expect(room.sunPatch != nil, "sun patch captured")
 
     let lighting = LightingRig()
-    let scene = SCNScene()
     // Every light, every emissive surface and the camera all come off one light
     // budget now, so the invariants worth holding are about that budget rather
     // than about any single curve.
-    var samples: [(hour: Int, key: Float, exposure: CGFloat, rendered: Float)] = []
+    var samples: [(hour: Int, key: Float, exposure: Float, rendered: Float)] = []
     for hour in 0..<24 {
         var comps = DateComponents(); comps.year = 2026; comps.month = 9; comps.day = 21; comps.hour = hour
         var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "UTC")!
         let s = WorldClock.sky(at: cal.date(from: comps)!, timeZone: TimeZone(identifier: "UTC")!)
         let lanternOn = s.wantsLampLight
-        lighting.apply(sky: s, scene: scene, room: room, lanternOn: lanternOn)
+        lighting.apply(sky: s, room: room, lanternOn: lanternOn)
 
         let b = LightingRig.budget(sky: s, lanternOn: lanternOn)
-        let e = LightingRig.exposureOffset(for: b)
+        let e = LightingRig.exposure(for: b)
         expect(b.key > 0, "something is lighting the room at \(hour):00")
         // Exposure is deliberately constant. Varying it with the sky rescales
         // every emissive in the room too — lantern paper, feeder LED, eye
         // catchlights, the garden — none of which are in the budget, and three
         // builds each broke a different hour that way. The day/night difference
         // lives in the lights instead.
-        expect(abs(e - LightingRig.exposureOffset(for: LightingRig.budget(sky: s, lanternOn: false))) < 1e-6,
+        expect(abs(e - LightingRig.exposure(for: LightingRig.budget(sky: s, lanternOn: false))) < 1e-6,
                "exposure does not vary with the lantern at \(hour):00")
-        expect(e >= -2.0 && e <= 0.05, "exposure at \(hour):00 is in range (\(e))")
+        // A multiplier now, not an EV offset: it scales the lights rather than the
+        // rendered image, because RealityKit's camera has no exposure at all.
+        expect(e > 0 && e <= 1.0, "exposure at \(hour):00 is in range (\(e))")
         samples.append((hour, b.key, e, LightingRig.renderedBrightness(for: b)))
     }
 
@@ -984,7 +985,7 @@ section("realitykit shim") {
                           ("tube", MeshBuilder.tube(length: 0.4, radius: { 0.05 + 0.02 * $0 })),
                           ("ear", MeshBuilder.ear(length: 0.08, width: 0.05,
                                                   thickness: 0.012, curl: 0.3))] {
-        guard let resource = try? mesh.meshResource(name: label),
+        guard let resource = mesh.meshResource(name: label),
               let part = resource.contents.models.first?.parts.first else {
             expect(false, "\(label) converts to a MeshResource")
             continue
@@ -1506,12 +1507,15 @@ section("sun arc") {
     // which is what stops any of them putting a bright patch on a nearby surface.
     let rig = LightingRig()
     var positioned = 0
-    for node in rig.root.childNodes where node.light != nil {
-        guard let type = node.light?.type else { continue }
-        if type == .omni || type == .spot { positioned += 1 }
+    func countPositioned(_ e: Entity) {
+        if e.components.has(PointLightComponent.self) || e.components.has(SpotLightComponent.self) {
+            positioned += 1
+        }
+        for c in e.children { countPositioned(c) }
     }
+    countPositioned(rig.root)
     expect(positioned == 0,
-           "no light sits inside the room (\(positioned) omni/spot lights found)")
+           "no light sits inside the room (\(positioned) point/spot lights found)")
 }
 
 section("mouth") {
@@ -1521,8 +1525,8 @@ section("mouth") {
         let rig = CatBuilder.build(a)
         let animator = CatAnimator(rig: rig)
 
-        guard let cavity = rig.head.childNodes.first(where: { $0.name == "oralCavity" }),
-              let tongue = rig.jaw.childNodes.first(where: { $0.name == "tongue" }) else {
+        guard let cavity = rig.head.children.first(where: { $0.name == "oralCavity" }),
+              let tongue = rig.jaw.children.first(where: { $0.name == "tongue" }) else {
             expect(false, "\(breed.rawValue) has a mouth behind its jaw")
             continue
         }
@@ -1534,15 +1538,15 @@ section("mouth") {
         var motion = CatMotion()
         motion.pose = .sitting
         for _ in 0..<120 { animator.update(dt: 1.0 / 60, motion: motion) }
-        let closedCavity = rig.head.simdConvertPosition(cavity.simdWorldPosition, from: nil)
-        let closedTongue = rig.head.simdConvertPosition(tongue.simdWorldPosition, from: nil)
+        let closedCavity = rig.head.convert(position: cavity.worldPosition, from: nil)
+        let closedTongue = rig.head.convert(position: tongue.worldPosition, from: nil)
 
         animator.triggerMeow()
         for _ in 0..<8 { animator.update(dt: 1.0 / 60, motion: motion) }
-        let openCavity = rig.head.simdConvertPosition(cavity.simdWorldPosition, from: nil)
-        let openTongue = rig.head.simdConvertPosition(tongue.simdWorldPosition, from: nil)
+        let openCavity = rig.head.convert(position: cavity.worldPosition, from: nil)
+        let openTongue = rig.head.convert(position: tongue.worldPosition, from: nil)
 
-        expect(rig.jaw.simdEulerAngles.x > 0.05, "\(breed.rawValue) actually opens its jaw")
+        expect(rig.jaw.eulerAngles.x > 0.05, "\(breed.rawValue) actually opens its jaw")
 
         // The whole point of parenting the cavity to the head: it must stay where it
         // is while the jaw swings away, or it is not a mouth, it is a second chin.
@@ -1556,7 +1560,7 @@ section("mouth") {
 
         // The cavity has to sit inside the head, spanning the gap the jaw opens —
         // far enough back not to poke through the muzzle, not so far it misses.
-        let inHead = rig.head.simdConvertPosition(cavity.simdPosition, from: rig.head)
+        let inHead = rig.head.convert(position: cavity.position, from: rig.head)
         let headRadius = a.headRadius
         expect(inHead.length < headRadius * 1.2,
                "\(breed.rawValue) mouth cavity is inside the head (\(inHead.length) vs \(headRadius))")
@@ -1567,9 +1571,10 @@ section("mouth") {
         // jaw ends up at: the cavity is a closed surface, and it is drawn from the
         // inside as well as the outside. Single-sided, the gap the jaw opens would
         // look straight through its back face and out the far side of the head.
-        expect(cavity.geometry?.firstMaterial?.isDoubleSided == true,
+        expect(cavity.pbrMaterial?.faceCulling == PhysicallyBasedMaterial.FaceCulling.none,
                "\(breed.rawValue) mouth cavity renders from inside the mouth")
-        if let mesh = MeshSourceRegistry.mesh(for: cavity.geometry!) {
+        if let resource = (cavity as? ModelEntity)?.model?.mesh,
+           let mesh = MeshSourceRegistry.mesh(for: resource) {
             expect(mesh.indices.count > 0, "\(breed.rawValue) mouth cavity has geometry")
         }
     }
@@ -1619,7 +1624,7 @@ section("translucency") {
         comps.year = 2026; comps.month = 6; comps.day = 21; comps.hour = hour
         let sky = WorldClock.sky(at: cal.date(from: comps)!, timeZone: TimeZone(identifier: "UTC")!)
         Translucency.apply(rig.translucentParts, sky: sky, lanternOn: false)
-        let level = rig.translucentParts.map { Float($0.material.emission.intensity) }.max() ?? 0
+        let level = rig.translucentParts.map { $0.entity.pbrMaterial?.subsurfaceWeight.scale ?? 0 }.max() ?? 0
         expect(level.isFinite && level >= 0 && level <= 0.55,
                "transmitted light at \(hour):00 is in range (\(level))")
         levels.append((hour, level))
@@ -1637,15 +1642,15 @@ section("translucency") {
     midday.year = 2026; midday.month = 6; midday.day = 21; midday.hour = 12
     let noon = WorldClock.sky(at: cal.date(from: midday)!, timeZone: TimeZone(identifier: "UTC")!)
     func level(at position: SIMD3<Float>) -> Float {
-        rig.root.simdPosition = position
+        rig.root.position = position
         Translucency.apply(rig.translucentParts, sky: noon, lanternOn: false)
-        return rig.translucentParts.map { Float($0.material.emission.intensity) }.max() ?? 0
+        return rig.translucentParts.map { $0.entity.pbrMaterial?.subsurfaceWeight.scale ?? 0 }.max() ?? 0
     }
     let byWindow = level(at: SIMD3<Float>(x: 0, y: 0, z: -1.9))
     let atPlayer = level(at: SIMD3<Float>(x: 0, y: 0, z: 1.6))
     expect(byWindow > atPlayer * 2,
            "a cat at the window is backlit; one beside the player is not (\(byWindow) vs \(atPlayer))")
-    rig.root.simdPosition = .zero
+    rig.root.position = .zero
 
     if CommandLine.arguments.contains("--budget") {
         print("    ear transmission by hour: " +
@@ -1657,29 +1662,57 @@ section("translucency") {
     midnight.year = 2026; midnight.month = 6; midnight.day = 21; midnight.hour = 1
     let night = WorldClock.sky(at: cal.date(from: midnight)!, timeZone: TimeZone(identifier: "UTC")!)
     Translucency.apply(rig.translucentParts, sky: night, lanternOn: false)
-    let lanternOff = rig.translucentParts.map { Float($0.material.emission.intensity) }.max() ?? 0
+    let lanternOff = rig.translucentParts.map { $0.entity.pbrMaterial?.subsurfaceWeight.scale ?? 0 }.max() ?? 0
     Translucency.apply(rig.translucentParts, sky: night, lanternOn: true)
-    let lanternOn = rig.translucentParts.map { Float($0.material.emission.intensity) }.max() ?? 0
+    let lanternOn = rig.translucentParts.map { $0.entity.pbrMaterial?.subsurfaceWeight.scale ?? 0 }.max() ?? 0
     expect(lanternOn > lanternOff, "the lantern warms the ears at night (\(lanternOff) → \(lanternOn))")
+
+    // The same both-ends check as the triangle budget, for the same reason: the
+    // level is read back off a material now, and a part that never got one would
+    // report zero and quietly satisfy every comparison above.
+    var wrote = 0
+    Translucency.apply(rig.translucentParts, sky: WorldClock.sky(), lanternOn: true)
+    for part in rig.translucentParts where (part.entity.pbrMaterial?.subsurfaceWeight.scale ?? 0) > 0 {
+        wrote += 1
+        expect(part.entity.pbrMaterial?.subsurfaceRadius.scale ?? 0 > 0,
+               "a part that transmits light has a thickness to transmit it through")
+    }
+    expect(wrote > 0, "translucency actually reaches the materials (\(wrote) parts)")
+
 }
 
 section("triangle budget") {
     /// Walks a node tree adding up geometry, counting each instance separately.
-    func triangles(_ node: SCNNode) -> Int {
-        var total = node.geometry?.estimatedTriangles ?? 0
-        for child in node.childNodes { total += triangles(child) }
+    ///
+    /// The count comes from the source mesh rather than from the realised
+    /// resource, which is the same buffers the generators produced and does not
+    /// need the renderer to hand them back.
+    func ownTriangles(_ entity: Entity) -> Int {
+        guard let resource = (entity as? ModelEntity)?.model?.mesh,
+              let mesh = MeshSourceRegistry.mesh(for: resource) else { return 0 }
+        return mesh.indices.count / 3
+    }
+
+    func triangles(_ entity: Entity) -> Int {
+        var total = ownTriangles(entity)
+        for child in entity.children { total += triangles(child) }
         return total
     }
 
-    /// The heaviest single piece of geometry under a node, and what it is.
-    func worst(_ node: SCNNode, path: String = "") -> (Int, String) {
-        var best = (node.geometry?.estimatedTriangles ?? 0, path)
-        for child in node.childNodes {
-            let sub = worst(child, path: "\(path)/\(child.name ?? "?")")
+    /// The heaviest single piece of geometry under an entity, and what it is.
+    func worst(_ entity: Entity, path: String = "") -> (Int, String) {
+        var best = (ownTriangles(entity), path)
+        for child in entity.children {
+            let sub = worst(child, path: "\(path)/\(child.name)")
             if sub.0 > best.0 { best = sub }
         }
         return best
     }
+
+    // Counting needs the source meshes, and recording them is off by default so
+    // that building hundreds of rigs elsewhere costs nothing.
+    MeshSourceRegistry.isRecording = true
+    defer { MeshSourceRegistry.isRecording = false; MeshSourceRegistry.reset() }
 
     // The room, without the cat.
     //
@@ -1690,6 +1723,11 @@ section("triangle budget") {
     // triangles between them — more than the entire cat.
     let room = RoomBuilder.build(sky: WorldClock.sky())
     let roomTris = triangles(room.root)
+    // Both ends. A budget test that counts nothing passes, and counting nothing
+    // is exactly what happens if the source registry is not recording — which is
+    // easy to get wrong now that the count comes from there rather than from the
+    // renderer's own geometry.
+    expect(roomTris > 5_000, "the room's triangles are actually being counted (\(roomTris))")
     expect(roomTris < 90_000, "the room fits its triangle budget (\(roomTris))")
     let heaviest = worst(room.root)
     expect(heaviest.0 < 12_000,

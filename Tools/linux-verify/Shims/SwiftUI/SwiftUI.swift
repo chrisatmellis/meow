@@ -690,6 +690,7 @@ extension View {
     public func transition(_ t: AnyTransition) -> some View { self }
     public func animation<V: Equatable>(_ a: Animation?, value: V) -> some View { self }
     public func onTapGesture(count: Int = 1, perform action: @escaping () -> Void) -> some View { self }
+    public func gesture<G>(_ gesture: G) -> some View { self }
     public func onAppear(perform action: (() -> Void)? = nil) -> some View { self }
     public func onDisappear(perform action: (() -> Void)? = nil) -> some View { self }
     public func onChange<V: Equatable>(of value: V, initial: Bool = false,
@@ -801,4 +802,53 @@ extension UIViewRepresentable {
 
 extension UIViewRepresentable where Coordinator == Void {
     public func makeCoordinator() -> Void { () }
+}
+
+
+// MARK: - Gestures
+//
+// Enough of the gesture surface to typecheck the scene hosts. The values these
+// carry — a screen point, a 3D location, and (once targeted) the entity that was
+// hit — are what the game reads, so those are real; the recognition is not.
+
+public protocol Gesture {
+    associatedtype Value
+}
+
+public struct DragGesture: Gesture {
+    public struct Value {
+        public var location: CGPoint
+        public var startLocation: CGPoint
+        public var translation: CGSize
+        public var location3D: SIMD3<Float>
+        public init(location: CGPoint = .zero, startLocation: CGPoint = .zero,
+                    translation: CGSize = CGSize(width: 0, height: 0),
+                    location3D: SIMD3<Float> = SIMD3<Float>(repeating: 0)) {
+            self.location = location
+            self.startLocation = startLocation
+            self.translation = translation
+            self.location3D = location3D
+        }
+    }
+
+    public init(minimumDistance: CGFloat = 10, coordinateSpace: Int = 0) {}
+
+    public func onChanged(_ action: @escaping (Value) -> Void) -> DragGesture { self }
+    public func onEnded(_ action: @escaping (Value) -> Void) -> DragGesture { self }
+}
+
+public struct SpatialTapGesture: Gesture {
+    public struct Value {
+        public var location: CGPoint
+        public var location3D: SIMD3<Float>
+        public init(location: CGPoint = .zero,
+                    location3D: SIMD3<Float> = SIMD3<Float>(repeating: 0)) {
+            self.location = location
+            self.location3D = location3D
+        }
+    }
+
+    public init(count: Int = 1, coordinateSpace: Int = 0) {}
+
+    public func onEnded(_ action: @escaping (Value) -> Void) -> SpatialTapGesture { self }
 }
