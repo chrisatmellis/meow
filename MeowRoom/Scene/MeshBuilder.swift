@@ -51,6 +51,29 @@ final class MeshData {
         self.indices = indices
     }
 
+    /// A copy of this surface pushed out along its own normals.
+    ///
+    /// For fur shells. Scaling a copy about the origin is the obvious thing and
+    /// the wrong one: the cat's origin is at its pelvis, so a uniform scale gives
+    /// a centimetre of "fur" at the nose and almost none at the hips, and slides
+    /// the shell's texture off the hairs painted underneath. The original normals
+    /// are kept rather than recomputed — recomputing them on an offset surface
+    /// flips them wherever the surface was concave.
+    func offsetAlongNormals(_ distance: Float) -> MeshData {
+        normalsIfNeeded()
+        let moved = zip(positions, normals).map { $0 + $1 * distance }
+        let out = MeshData(positions: moved, normals: normals, uvs: uvs, indices: indices)
+        return out
+    }
+
+    /// Swaps the vertex positions, keeping everything else. The shaping pass
+    /// moves vertices without adding or removing any, so the indices, the texture
+    /// coordinates and the seam links all stay valid.
+    func replacePositions(_ p: [Vec3]) {
+        guard p.count == positions.count else { return }
+        positions = p
+    }
+
     func addVertex(_ p: Vec3, uv: Vec2) -> Int32 {
         positions.append(p)
         normals.append(.zero)

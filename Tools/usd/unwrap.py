@@ -108,11 +108,23 @@ def build(path_in):
     jw = api.GetPrimvar('skel:jointWeights')
     skel = UsdSkel.Skeleton(skel_prim) if skel_prim else None
 
-    joint_pos, parent = [], []
+    joint_pos, parent, bind = [], [], []
     if skel:
         paths = [str(j) for j in (skel.GetJointsAttr().Get() or [])]
         binds = skel.GetBindTransformsAttr().Get() or []
         joint_pos = [tuple(b.ExtractTranslation()) for b in binds]
+        # The whole matrix, not just where the joint is. This skeleton's bind pose
+        # carries rotation — up to a full flip on some bones — so a joint's rest
+        # orientation is not the identity and cannot be reconstructed from its
+        # position. Skinning against a translation-only inverse bind matrix
+        # produces a cat that looks correct until the first frame it is posed.
+        # Transposed on the way out. USD stores matrices row-major and transforms
+        # row vectors, so its translation is the last *row*; simd is column-major
+        # and transforms column vectors, so its translation is the last column.
+        # Emitting the rows verbatim puts (0, 0, 0, 1) where the position should
+        # be, and every joint reads as sitting at the origin — which is a cat with
+        # no height, no leg lengths, and a skeleton collapsed to a point.
+        bind = [tuple(b[c][r] for c in range(4) for r in range(4)) for b in binds]
         index_of = {p: i for i, p in enumerate(paths)}
         for p in paths:
             cut = p.rfind('/')
@@ -149,7 +161,7 @@ def build(path_in):
             chain[i] = chain[parent[i]] + length[parent[i]]
 
     return dict(points=points, tris=tris, normals=normals, scale=scale,
-                joint_pos=joint_pos, parent=parent, direction=direction,
+                joint_pos=joint_pos, parent=parent, direction=direction, bind=bind,
                 length=length, chain=chain,
                 ji=list(ji.Get()) if ji else None, ji_n=ji.GetElementSize() if ji else 0,
                 jw=list(jw.Get()) if jw else None)

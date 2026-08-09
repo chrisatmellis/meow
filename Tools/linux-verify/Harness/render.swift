@@ -19,9 +19,8 @@ private let shippedAsset: CatMeshAsset? = {
 }()
 
 private func buildCat(_ a: CatAppearance, preview: Bool = false) -> CatRig {
-    if let asset = shippedAsset,
-       let rig = ModelCatBuilder.build(a, preview: preview, using: asset) { return rig }
-    return CatBuilder.generate(a, preview: preview)
+    if let asset = shippedAsset { return CatBuilder.build(a, preview: preview, using: asset) }
+    return CatBuilder.build(a, preview: preview)
 }
 
 // MARK: - Triangle soup
@@ -326,7 +325,7 @@ func runRender(outputDirectory: String) {
         motion.position = .zero
         motion.pose = .sittingTall
         for _ in 0..<200 { animator.update(dt: 1.0 / 60, motion: motion) }
-        ModelCatBuilder.syncPose(rig)
+        CatBuilder.syncPose(rig)
 
         let head = rig.head.convert(position: SIMD3<Float>(repeating: 0), to: nil)
         let d = a.headRadius * 11
@@ -349,7 +348,7 @@ func runRender(outputDirectory: String) {
         motion.position = .zero
         motion.pose = .standing
         for _ in 0..<200 { animator.update(dt: 1.0 / 60, motion: motion) }
-        ModelCatBuilder.syncPose(rig)
+        CatBuilder.syncPose(rig)
         shot("breed-\(breed.rawValue)", rig.root,
              eye: SIMD3<Float>(x: 1.0, y: 0.22, z: 0.10), target: SIMD3<Float>(x: 0, y: 0.16, z: 0),
              fov: 34, size: (420, 320))

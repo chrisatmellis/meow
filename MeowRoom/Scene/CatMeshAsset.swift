@@ -43,10 +43,28 @@ struct CatMeshAsset {
     let influencesPerVertex: Int
     /// Parent index per joint, -1 for the root.
     let parents: [Int]
-    /// Rest position of each joint in the model's own space, metres.
-    let restPositions: [SIMD3<Float>]
+    /// The bind pose: each joint's full transform in model space.
+    ///
+    /// The whole matrix, not just where the joint is. This skeleton's bind pose
+    /// carries rotation — a couple of bones are flipped outright — so a joint's
+    /// rest orientation is not the identity and cannot be recovered from its
+    /// position. Skinning against a translation-only inverse bind matrix gives a
+    /// cat that looks right in the bind pose and folds inside out on the first
+    /// frame it is animated.
+    let bind: [simd_float4x4]
     /// Joint index for each role, or -1 where the skeleton has no such joint.
     private let roleJoints: [Int]
+
+    /// Where each joint sits in model space, metres.
+    var restPositions: [SIMD3<Float>] {
+        bind.map { SIMD3<Float>($0[3].x, $0[3].y, $0[3].z) }
+    }
+
+    /// A joint's transform relative to its parent in the bind pose.
+    func restLocal(_ j: Int) -> simd_float4x4 {
+        let p = parents[j]
+        return p >= 0 ? bind[p].inverse * bind[j] : bind[j]
+    }
 
     func joint(_ role: Role) -> Int? {
         let j = roleJoints[role.rawValue]
@@ -108,7 +126,7 @@ struct CatMeshAsset {
         }
 
         try need(8)
-        guard data[0..<8].elementsEqual("MEOWCAT1".utf8) else { throw LoadError.malformed }
+        guard data[0..<8].elementsEqual("MEOWCAT2".utf8) else { throw LoadError.malformed }
         at = 8
 
         let vertexCount = try u32()
@@ -153,10 +171,14 @@ struct CatMeshAsset {
         for _ in 0..<(vertexCount * influencesPerVertex) { jw.append(try f32()) }
 
         var par: [Int] = []
-        var rest: [SIMD3<Float>] = []
+        var binds: [simd_float4x4] = []
         for _ in 0..<jointCount {
             par.append(try i16())
-            rest.append(SIMD3<Float>(try f32(), try f32(), try f32()))
+            var m = matrix_identity_float4x4
+            for c in 0..<4 {
+                m[c] = SIMD4<Float>(try f32(), try f32(), try f32(), try f32())
+            }
+            binds.append(m)
         }
 
         let roleCount = try u32()
@@ -170,7 +192,7 @@ struct CatMeshAsset {
         jointIndices = ji
         jointWeights = jw
         parents = par
-        restPositions = rest
+        bind = binds
         roleJoints = roles
     }
 }

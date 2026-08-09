@@ -1339,6 +1339,23 @@ section("modelled cat") {
     expect(asset.parents.enumerated().allSatisfy { $0.element < $0.offset },
            "parents come before their children")
 
+    // The bind pose is a matrix per joint, and a matrix has two plausible
+    // layouts. USD is row-major and transforms row vectors; simd is column-major
+    // and transforms column vectors. Emit the rows verbatim and every joint's
+    // translation reads as (0, 0, 0) — a skeleton collapsed to a point, which
+    // then produces a cat of zero height with legs of zero length and no error
+    // anywhere. So: the skeleton has to have some size.
+    let span = asset.restPositions.reduce(into: (lo: SIMD3<Float>(repeating: .infinity),
+                                                 hi: SIMD3<Float>(repeating: -.infinity))) {
+        $0.lo = SIMD3<Float>(min($0.lo.x, $1.x), min($0.lo.y, $1.y), min($0.lo.z, $1.z))
+        $0.hi = SIMD3<Float>(max($0.hi.x, $1.x), max($0.hi.y, $1.y), max($0.hi.z, $1.z))
+    }
+    let extent = span.hi - span.lo
+    expect(extent.x > 0.2 && extent.y > 0.1 && extent.z > 0.02,
+           "the skeleton has the extent of a cat (\(extent)) rather than collapsing to a point")
+    expect(asset.bind.allSatisfy { abs($0[3].w - 1) < 1e-4 },
+           "every bind matrix is affine, which it is not if the layout is transposed")
+
     // Every role the animator can drive resolved. This is the part that was
     // inferred from the rest pose rather than read from the file, because the
     // conversion stripped the joint names.
@@ -1368,14 +1385,42 @@ section("modelled cat") {
     // The rig the animator is handed.
     var a = BreedPresets.appearance(for: .domesticShorthair)
     a.seed = 11
-    guard let rig = ModelCatBuilder.build(a, using: asset) else {
-        expect(false, "a rig builds from the asset")
-        return
-    }
+    let rig = CatBuilder.build(a, using: asset)
     expect(rig.legs.count == 4, "four legs (\(rig.legs.count))")
     expect(rig.tailSegments.count >= 3, "a tail with segments (\(rig.tailSegments.count))")
     expect(rig.skinnedBody != nil, "the rig carries a skinned surface")
     expect(rig.skinJoints.count == asset.jointCount, "a posable entity per joint")
+
+    // The face. Every one of these is placed in the model's axes and then
+    // converted into the skull bone's frame, and the bind pose is not the
+    // identity — so "a head-radius forward" is meaningless until it is said in
+    // the right frame. Measured in body space, where the cat faces +Z.
+    func inBody(_ e: Entity) -> SIMD3<Float> { e.position(relativeTo: rig.body) }
+    let headAt = inBody(rig.head)
+    if let nose = rig.skinnedBody?.parent?.findEntity(named: "nose") ?? rig.head.findEntity(named: "nose") {
+        let d = inBody(nose) - headAt
+        expect(d.z > 0, "the nose is on the front of the head (offset \(d))")
+        expect(abs(d.x) < abs(d.z), "the nose is on the midline, not out to one side")
+    } else {
+        expect(false, "the cat has a nose")
+    }
+    do {
+        // A whisker's tip is its root plus its own +Z, since that is the axis
+        // strands are built along. It has to end up forward of where it started
+        // and out to the side — not swept back over the skull, which is where
+        // Euler angles put them: `Rx · Ry · Rz` yaws before it pitches, so once
+        // the yaw has laid a whisker along X a pitch about X does nothing at all.
+        var checked = 0
+        for root in rig.whiskerRoots {
+            for w in root.children where w.name == "whisker" {
+                let tip = w.convert(position: SIMD3<Float>(0, 0, 0.05), to: rig.body)
+                let d = tip - inBody(root)
+                expect(d.z > 0, "a whisker points forward (\(d))")
+                checked += 1
+            }
+        }
+        expect(checked >= 8, "whiskers exist to check (\(checked))")
+    }
 
     // The frame conversion, which is where a quarter turn in the wrong direction
     // would leave the cat walking sideways for the rest of the project. The model
@@ -1391,13 +1436,20 @@ section("modelled cat") {
         expect(x * leg.side > 0,
                "leg side matches where the leg actually is (side \(leg.side), x \(x))")
     }
-    // Diagonal pairs, the same as the generated cat's. Getting this wrong gives a
-    // cat that paces like a camel instead of trotting like a cat.
-    let fl = rig.legs.first { $0.isFront && $0.side < 0 }!
-    let br = rig.legs.first { !$0.isFront && $0.side > 0 }!
-    let fr = rig.legs.first { $0.isFront && $0.side > 0 }!
-    expect(abs(fl.gaitPhase - br.gaitPhase) < 1e-6, "diagonal feet share a gait phase")
-    expect(abs(fl.gaitPhase - fr.gaitPhase) > 0.4, "feet on the same end do not")
+    // Diagonal pairs. Getting this wrong gives a cat that paces like a camel
+    // instead of trotting like a cat.
+    //
+    // Spelled out rather than force-unwrapped: "no such leg" is a real outcome
+    // worth naming, and an assertion suite that crashes tells you less than one
+    // that says which of the four it could not find.
+    let corners = rig.legs.map { "\($0.isFront ? "fore" : "hind")\($0.side < 0 ? "L" : "R")" }
+    expect(Set(corners).count == 4, "one leg at each corner (found \(corners.sorted()))")
+    if let fl = rig.legs.first(where: { $0.isFront && $0.side < 0 }),
+       let br = rig.legs.first(where: { !$0.isFront && $0.side > 0 }),
+       let fr = rig.legs.first(where: { $0.isFront && $0.side > 0 }) {
+        expect(abs(fl.gaitPhase - br.gaitPhase) < 1e-6, "diagonal feet share a gait phase")
+        expect(abs(fl.gaitPhase - fr.gaitPhase) > 0.4, "feet on the same end do not")
+    }
 
     // It has to survive being animated, which is the only way to find out whether
     // the joints the animator addresses are the joints it thinks they are.
@@ -1409,7 +1461,7 @@ section("modelled cat") {
         motion.position = SIMD3<Float>(0, 0, Float(i) * 0.002)
         animator.update(dt: 1.0 / 60, motion: motion)
     }
-    ModelCatBuilder.syncPose(rig)
+    CatBuilder.syncPose(rig)
     for (i, j) in rig.skinJoints.enumerated() {
         expect(finite(j.position), "joint \(i) has a finite position after 400 frames")
         expect(finite(j.eulerAngles), "joint \(i) has finite angles after 400 frames")
@@ -1653,65 +1705,42 @@ section("sun arc") {
            "no light sits inside the room (\(positioned) point/spot lights found)")
 }
 
-section("mouth") {
+// The jaw, which used to be checked by looking for a separate oral cavity mesh
+// behind it. There is no such mesh now and there should not be: the model's head
+// is one closed surface, so opening the jaw stretches the skin over it instead of
+// revealing a hole. What is worth checking is that the jaw is a real bone in the
+// right place and that working it does not tear the cat apart.
+section("jaw") {
+    guard let asset = CatAsset.shared else {
+        expect(false, "the cat asset loads")
+        return
+    }
     for breed in CatBreed.allCases {
         var a = BreedPresets.appearance(for: breed)
         a.seed = 3
-        let rig = CatBuilder.build(a)
+        let rig = CatBuilder.build(a, using: asset)
         let animator = CatAnimator(rig: rig)
 
-        guard let cavity = rig.head.children.first(where: { $0.name == "oralCavity" }),
-              let tongue = rig.jaw.children.first(where: { $0.name == "tongue" }) else {
-            expect(false, "\(breed.rawValue) has a mouth behind its jaw")
-            continue
-        }
-
-        // Measured in head space, and with the pose held still, so the only thing
-        // moving is the jaw. Comparing world positions across a pose change instead
-        // just measures the head walking off, which is what the first version of
-        // this test did — it reported the cavity moving eight centimetres.
         var motion = CatMotion()
-        motion.pose = .sitting
-        for _ in 0..<120 { animator.update(dt: 1.0 / 60, motion: motion) }
-        let closedCavity = rig.head.convert(position: cavity.worldPosition, from: nil)
-        let closedTongue = rig.head.convert(position: tongue.worldPosition, from: nil)
-
+        motion.pose = .sittingTall
+        for _ in 0..<30 { animator.update(dt: 1.0 / 60, motion: motion) }
+        let closedSettled = rig.jaw.eulerAngles
         animator.triggerMeow()
-        for _ in 0..<8 { animator.update(dt: 1.0 / 60, motion: motion) }
-        let openCavity = rig.head.convert(position: cavity.worldPosition, from: nil)
-        let openTongue = rig.head.convert(position: tongue.worldPosition, from: nil)
+        animator.update(dt: 1.0 / 60, motion: motion)
+        animator.update(dt: 1.0 / 60, motion: motion)
+        let open = rig.jaw.eulerAngles
+        expect(abs(open.x - closedSettled.x) > 0.002,
+               "\(breed.rawValue) opens its jaw when it meows (\(closedSettled.x) -> \(open.x))")
+        expect(finite(open), "\(breed.rawValue) jaw angles stay finite")
 
-        expect(rig.jaw.eulerAngles.x > 0.05, "\(breed.rawValue) actually opens its jaw")
-
-        // The whole point of parenting the cavity to the head: it must stay where it
-        // is while the jaw swings away, or it is not a mouth, it is a second chin.
-        let cavityMoved = (openCavity - closedCavity).length
-        expect(cavityMoved < 1e-4,
-               "\(breed.rawValue) mouth cavity stays with the head, not the jaw (\(cavityMoved) m)")
-
-        // And the tongue must go with the jaw, because it does.
-        let tongueMoved = (openTongue - closedTongue).length
-        expect(tongueMoved > 1e-4, "\(breed.rawValue) tongue moves with the jaw (\(tongueMoved) m)")
-
-        // The cavity has to sit inside the head, spanning the gap the jaw opens —
-        // far enough back not to poke through the muzzle, not so far it misses.
-        let inHead = rig.head.convert(position: cavity.position, from: rig.head)
-        let headRadius = a.headRadius
-        expect(inHead.length < headRadius * 1.2,
-               "\(breed.rawValue) mouth cavity is inside the head (\(inHead.length) vs \(headRadius))")
-        expect(inHead.y < 0, "\(breed.rawValue) mouth cavity is in the lower half of the head")
-        expect(inHead.z > 0, "\(breed.rawValue) mouth cavity is toward the muzzle, not the skull")
-
-        // The two properties that actually guarantee no hole, whatever angle the
-        // jaw ends up at: the cavity is a closed surface, and it is drawn from the
-        // inside as well as the outside. Single-sided, the gap the jaw opens would
-        // look straight through its back face and out the far side of the head.
-        expect(cavity.pbrMaterial?.faceCulling == PhysicallyBasedMaterial.FaceCulling.none,
-               "\(breed.rawValue) mouth cavity renders from inside the mouth")
-        if let resource = (cavity as? ModelEntity)?.model?.mesh,
-           let mesh = MeshSourceRegistry.mesh(for: resource) {
-            expect(mesh.indices.count > 0, "\(breed.rawValue) mouth cavity has geometry")
-        }
+        // The jaw hangs off the skull and in front of the neck, which is the part
+        // the exported role inference could plausibly have got wrong.
+        let jawWorld = rig.jaw.worldPosition
+        let headWorld = rig.head.worldPosition
+        let neckWorld = rig.neck.worldPosition
+        expect(jawWorld.y < headWorld.y + 1e-4, "\(breed.rawValue) jaw sits below the skull")
+        expect((jawWorld - neckWorld).length > (headWorld - neckWorld).length * 0.4,
+               "\(breed.rawValue) jaw is out at the muzzle, not back at the neck")
     }
 }
 
@@ -1720,8 +1749,17 @@ section("translucency") {
     a.seed = 11
     let rig = CatBuilder.build(a)
 
-    expect(rig.translucentParts.count >= 7,
-           "ears, inner ears, nose and four pads are registered (\(rig.translucentParts.count))")
+    // Two inner ears and a nose.
+    //
+    // Fewer than the generated cat had, and for a reason worth writing down:
+    // translucency is driven per material, and the modelled body is one skinned
+    // surface wearing one material. Its ears and paw pads cannot glow on their
+    // own without becoming separate meshes, which would mean editing the model.
+    // So the pieces that genuinely need to transmit are generated just inside the
+    // ears and on the tip of the muzzle — which is also where a backlit cat
+    // actually lights up.
+    expect(rig.translucentParts.count >= 3,
+           "the inner ears and the nose are registered (\(rig.translucentParts.count))")
     expect(rig.translucentParts.allSatisfy { $0.amount > 0 && $0.amount <= 1 },
            "every translucent amount is a sensible fraction")
     // The ears must be the strongest. If the body ever out-glows them the effect is

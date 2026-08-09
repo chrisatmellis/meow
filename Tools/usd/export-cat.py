@@ -31,7 +31,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from unwrap import build, unwrap, split_seam, report, dot, sub, cross  # noqa: E402
 
-MAGIC = b'MEOWCAT1'
+MAGIC = b'MEOWCAT2'
 
 # The roles the game's rig knows how to drive. Anything not named here is still
 # carried and still skinned — it simply follows its parent.
@@ -208,7 +208,14 @@ def main():
         blob += struct.pack('<f', jw[i])
     for i in range(len(jp)):
         blob += struct.pack('<h', par[i])
-        blob += struct.pack('<3f', *(c * scale for c in jp[i]))
+        # The full world bind matrix, column-major, with the translation scaled
+        # into metres. Positions alone are not enough: this skeleton's bind pose
+        # has rotation in it.
+        m = list(model['bind'][i])
+        m[12] *= scale
+        m[13] *= scale
+        m[14] *= scale
+        blob += struct.pack('<16f', *m)
     # Roles, as a fixed-order table of joint indices; -1 for a role this skeleton
     # does not have.
     inv = {r: -1 for r in ROLES}
