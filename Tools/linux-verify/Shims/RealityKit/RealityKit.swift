@@ -80,6 +80,13 @@ public struct simd_float4x4 {
         self.init(diagonal: SIMD4<Float>(repeating: scalar))
     }
 
+    /// The rotation matrix for a quaternion. This is how Apple's simd spells it —
+    /// a matrix initialiser, not a property on the quaternion — and the app has to
+    /// use the spelling that exists on device.
+    public init(_ q: simd_quatf) {
+        self = q.matrix
+    }
+
     public subscript(column: Int) -> SIMD4<Float> {
         get {
             switch column {

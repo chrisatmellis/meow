@@ -177,7 +177,11 @@ enum CatShape {
             // rotations do not line its bones up with anything in particular.
             let t = SIMD3<Float>(local[3].x, local[3].y, local[3].z) * localScale[j]
             local[3] = SIMD4<Float>(t, 1)
-            bind[j] = bind[p] * localTurn[j].matrix * local
+            // `simd_float4x4(quaternion)`, not `quaternion.matrix`. The latter is
+            // a stand-in invention and does not exist in Apple's simd — the sort
+            // of thing that typechecks off-device and fails the moment a real
+            // compiler sees it.
+            bind[j] = bind[p] * simd_float4x4(localTurn[j]) * local
         }
 
         // Everything is measured from the pelvis, so a change of proportion does
