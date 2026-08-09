@@ -50,11 +50,11 @@ enum PetZone: String {
 
 /// Read-only view of the cat used by the renderer and the HUD.
 struct CatMotion {
-    var position = SCNVector3(x: 0, y: 0, z: -0.6)
+    var position = SIMD3<Float>(x: 0, y: 0, z: -0.6)
     var yaw: Float = 0
     var pose: CatPose = .sitting
     var speed: Float = 0
-    var lookTarget: SCNVector3? = nil
+    var lookTarget: SIMD3<Float>? = nil
     var lookWeight: Float = 0
     var tailAgitation: Float = 0
     var earPin: Float = 0
@@ -92,18 +92,18 @@ final class CatBrain {
     private var recallTimer: Float = 0
 
     var wandActive = false
-    var wandTip = SCNVector3(x: 0, y: 0.4, z: 0.4)
+    var wandTip = SIMD3<Float>(x: 0, y: 0.4, z: 0.4)
     private var wandExcitement: Float = 0
     private var pounceCooldown: Float = 0
 
-    var treatPosition: SCNVector3? = nil
+    var treatPosition: SIMD3<Float>? = nil
 
     var onEvent: ((CatEvent) -> Void)?
 
     // Internals
     private var rng: SeededGenerator
     private var noise: ValueNoise
-    private var spot = CatSpot(position: SCNVector3(x: 0, y: 0, z: -0.6))
+    private var spot = CatSpot(position: SIMD3<Float>(x: 0, y: 0, z: -0.6))
     private var performRemaining: Float = 4
     private var reevaluateIn: Float = 2
     private var recentActivities: [CatActivity: Float] = [:]
@@ -139,7 +139,7 @@ final class CatBrain {
         self.bond = save.bond
         self.rng = SeededGenerator(seed: save.profile.appearance.seed &+ UInt64(Date().timeIntervalSince1970))
         self.noise = ValueNoise(seed: save.profile.appearance.seed)
-        self.motion.position = SCNVector3(x: 0.1, y: 0, z: -0.5)
+        self.motion.position = SIMD3<Float>(x: 0.1, y: 0, z: -0.5)
         chooseActivity(force: true)
     }
 
@@ -200,7 +200,7 @@ final class CatBrain {
         motion.position.planarDistance(to: RoomLayout.cameraPosition) < 1.60 && !isOverstimulated
     }
 
-    func setWand(active: Bool, tip: SCNVector3) {
+    func setWand(active: Bool, tip: SIMD3<Float>) {
         if active && !wandActive { wandExcitement = 0.2 }
         wandActive = active
         wandTip = tip
@@ -209,7 +209,7 @@ final class CatBrain {
         }
     }
 
-    func dropTreat(at position: SCNVector3) {
+    func dropTreat(at position: SIMD3<Float>) {
         treatPosition = RoomLayout.clampToWalkable(position)
         reevaluateIn = 0
     }
@@ -355,7 +355,7 @@ final class CatBrain {
         // Storm off.
         begin(.wander)
         spot = CatSpot(position: RoomLayout.clampToWalkable(
-            SCNVector3(x: motion.position.x + rng.float(-1.4, 1.4),
+            SIMD3<Float>(x: motion.position.x + rng.float(-1.4, 1.4),
                        y: 0,
                        z: -1.2 + rng.float(-0.3, 0.3))))
         isTraveling = true
@@ -412,7 +412,7 @@ final class CatBrain {
 
     // MARK: - Movement
 
-    private func step(toward target: SCNVector3, speed: Float, dt: Float) {
+    private func step(toward target: SIMD3<Float>, speed: Float, dt: Float) {
         let dx = target.x - motion.position.x
         let dz = target.z - motion.position.z
         let d = sqrtf(dx * dx + dz * dz)
@@ -801,7 +801,7 @@ final class CatBrain {
     // MARK: - Look-at, blinking, breathing
 
     private func updateLook(dt: Float) {
-        var target: SCNVector3? = nil
+        var target: SIMD3<Float>? = nil
         var weight: Float = 0
 
         if isBeingPet || attentionTimer > 0 {
@@ -811,7 +811,7 @@ final class CatBrain {
             target = wandTip
             weight = 1
         } else if activity == .windowWatch || activity == .chirpAtBirds || activity == .napWindowSill {
-            target = SCNVector3(x: RoomLayout.windowCenter.x, y: 1.2, z: -2.4)
+            target = SIMD3<Float>(x: RoomLayout.windowCenter.x, y: 1.2, z: -2.4)
             weight = 0.8
         } else if activity == .sitAndStare || activity == .greetPlayer || activity == .followPlayer {
             target = RoomLayout.cameraPosition
@@ -823,7 +823,7 @@ final class CatBrain {
                 target = RoomLayout.cameraPosition
                 weight = 0.4
             } else if n < -0.4 {
-                target = SCNVector3(x: RoomLayout.windowCenter.x, y: 1.0, z: -2.0)
+                target = SIMD3<Float>(x: RoomLayout.windowCenter.x, y: 1.0, z: -2.0)
                 weight = 0.4
             }
         }

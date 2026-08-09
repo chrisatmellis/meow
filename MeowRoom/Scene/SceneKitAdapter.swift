@@ -74,19 +74,19 @@ extension SCNNode {
 
     @discardableResult
     func positioned(_ x: Float, _ y: Float, _ z: Float) -> SCNNode {
-        position = SCNVector3(x: x, y: y, z: z)
+        simdPosition = SIMD3<Float>(x: x, y: y, z: z)
         return self
     }
 
     @discardableResult
     func rotated(_ x: Float, _ y: Float, _ z: Float) -> SCNNode {
-        eulerAngles = SCNVector3(x: x, y: y, z: z)
+        simdEulerAngles = SIMD3<Float>(x: x, y: y, z: z)
         return self
     }
 
     @discardableResult
     func scaled(_ x: Float, _ y: Float, _ z: Float) -> SCNNode {
-        scale = SCNVector3(x: x, y: y, z: z)
+        simdScale = SIMD3<Float>(x: x, y: y, z: z)
         return self
     }
 

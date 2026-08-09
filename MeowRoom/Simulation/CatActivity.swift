@@ -30,7 +30,7 @@ enum CatPose {
 
 /// A place in the room the cat can occupy, plus how it gets there.
 struct CatSpot {
-    var position: SCNVector3
+    var position: SIMD3<Float>
     var surfaceHeight: Float = 0
     var facing: Float? = nil          // desired yaw once arrived
     var needsJump: Bool = false
@@ -206,7 +206,7 @@ enum CatActivity: String, CaseIterable, Codable {
     func spot(sky: SkyState, rng: inout SeededGenerator) -> CatSpot {
         switch self {
         case .sleepFuton:
-            return CatSpot(position: SCNVector3(x: RoomLayout.futonCenter.x + rng.float(-0.22, 0.22),
+            return CatSpot(position: SIMD3<Float>(x: RoomLayout.futonCenter.x + rng.float(-0.22, 0.22),
                                                y: 0,
                                                z: RoomLayout.futonCenter.z + rng.float(-0.45, 0.45)),
                            surfaceHeight: RoomLayout.futonTop,
@@ -224,7 +224,7 @@ enum CatActivity: String, CaseIterable, Codable {
             let p = RoomLayout.sunPatchPosition(sky: sky)
             return CatSpot(position: RoomLayout.clampToWalkable(p), facing: rng.float(-.pi, .pi))
         case .napWindowSill, .windowWatch, .chirpAtBirds:
-            return CatSpot(position: SCNVector3(x: RoomLayout.windowSill.x + rng.float(-0.5, 0.5),
+            return CatSpot(position: SIMD3<Float>(x: RoomLayout.windowSill.x + rng.float(-0.5, 0.5),
                                                y: 0,
                                                z: RoomLayout.windowSill.z + 0.10),
                            surfaceHeight: RoomLayout.windowSill.y,
@@ -236,10 +236,10 @@ enum CatActivity: String, CaseIterable, Codable {
                            facing: deg(200),
                            needsJump: true)
         case .eat:
-            return CatSpot(position: SCNVector3(x: RoomLayout.feederBowl.x - 0.22, y: 0, z: RoomLayout.feederBowl.z),
+            return CatSpot(position: SIMD3<Float>(x: RoomLayout.feederBowl.x - 0.22, y: 0, z: RoomLayout.feederBowl.z),
                            facing: deg(90))
         case .drink:
-            return CatSpot(position: SCNVector3(x: RoomLayout.fountainRim.x - 0.22, y: 0, z: RoomLayout.fountainRim.z),
+            return CatSpot(position: SIMD3<Float>(x: RoomLayout.fountainRim.x - 0.22, y: 0, z: RoomLayout.fountainRim.z),
                            facing: deg(90))
         case .litter:
             return CatSpot(position: RoomLayout.litterBoxCenter,
@@ -255,9 +255,9 @@ enum CatActivity: String, CaseIterable, Codable {
             return CatSpot(position: RoomLayout.playerNearSpot, facing: 0)
         case .sitAndStare:
             return CatSpot(position: RoomLayout.clampToWalkable(
-                SCNVector3(x: rng.float(-0.8, 0.8), y: 0, z: rng.float(0.0, 0.7))), facing: 0)
+                SIMD3<Float>(x: rng.float(-0.8, 0.8), y: 0, z: rng.float(0.0, 0.7))), facing: 0)
         case .hide:
-            return CatSpot(position: SCNVector3(x: RoomLayout.tableCenter.x, y: 0, z: RoomLayout.tableCenter.z),
+            return CatSpot(position: SIMD3<Float>(x: RoomLayout.tableCenter.x, y: 0, z: RoomLayout.tableCenter.z),
                            facing: deg(180))
         case .eatTreat:
             return CatSpot(position: RoomLayout.playerLapSpot, facing: 0)

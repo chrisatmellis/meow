@@ -1,5 +1,4 @@
 import Foundation
-import SceneKit
 
 // MARK: - Scalar helpers
 
@@ -53,59 +52,50 @@ func approachAngle(_ current: Float, _ target: Float, rate: Float, dt: Float) ->
     return current + angleDelta(current, target) * t
 }
 
-// MARK: - SCNVector3 arithmetic
+// MARK: - Vectors
+//
+// `SIMD3<Float>` rather than `SCNVector3`, because it is the type RealityKit
+// speaks natively and SceneKit accepts it everywhere through its `simd`
+// properties. Making the game's own data renderer-neutral is what lets the port
+// happen in two verified steps instead of one unverifiable jump: the whole
+// codebase moves to this type while still rendering under SceneKit and still
+// passing every assertion, and only then does the node type change.
+//
+// Most of what used to be here is gone with it. SIMD3 already has +, -, scalar
+// * and /, componentwise arithmetic and .zero, and simd supplies dot and cross —
+// so all that is left is the handful of things that are actually about this game.
 
-func + (l: SCNVector3, r: SCNVector3) -> SCNVector3 {
-    SCNVector3(x: l.x + r.x, y: l.y + r.y, z: l.z + r.z)
-}
+typealias Vec3f = SIMD3<Float>
 
-func - (l: SCNVector3, r: SCNVector3) -> SCNVector3 {
-    SCNVector3(x: l.x - r.x, y: l.y - r.y, z: l.z - r.z)
-}
-
-func * (l: SCNVector3, r: Float) -> SCNVector3 {
-    SCNVector3(x: l.x * r, y: l.y * r, z: l.z * r)
-}
-
-func * (l: Float, r: SCNVector3) -> SCNVector3 { r * l }
-
-func / (l: SCNVector3, r: Float) -> SCNVector3 {
-    SCNVector3(x: l.x / r, y: l.y / r, z: l.z / r)
-}
-
-func += (l: inout SCNVector3, r: SCNVector3) { l = l + r }
-
-extension SCNVector3 {
-    static let zero = SCNVector3(x: 0, y: 0, z: 0)
-
+extension SIMD3 where Scalar == Float {
     var length: Float { sqrtf(x * x + y * y + z * z) }
 
-    var normalized: SCNVector3 {
+    var normalized: SIMD3<Float> {
         let l = length
-        return l > 1e-6 ? self / l : SCNVector3(x: 0, y: 0, z: 1)
+        return l > 1e-6 ? self / l : SIMD3<Float>(0, 0, 1)
     }
 
     /// Distance ignoring the vertical axis — the room is effectively 2D for navigation.
-    func planarDistance(to other: SCNVector3) -> Float {
+    func planarDistance(to other: SIMD3<Float>) -> Float {
         let dx = x - other.x, dz = z - other.z
         return sqrtf(dx * dx + dz * dz)
     }
 
-    func lerped(to other: SCNVector3, _ t: Float) -> SCNVector3 {
-        SCNVector3(x: mix(x, other.x, t), y: mix(y, other.y, t), z: mix(z, other.z, t))
+    func lerped(to other: SIMD3<Float>, _ t: Float) -> SIMD3<Float> {
+        SIMD3<Float>(mix(x, other.x, t), mix(y, other.y, t), mix(z, other.z, t))
     }
 }
 
-func dot(_ a: SCNVector3, _ b: SCNVector3) -> Float { a.x * b.x + a.y * b.y + a.z * b.z }
+func dot(_ a: SIMD3<Float>, _ b: SIMD3<Float>) -> Float { a.x * b.x + a.y * b.y + a.z * b.z }
 
-func cross(_ a: SCNVector3, _ b: SCNVector3) -> SCNVector3 {
-    SCNVector3(x: a.y * b.z - a.z * b.y,
-               y: a.z * b.x - a.x * b.z,
-               z: a.x * b.y - a.y * b.x)
+func cross(_ a: SIMD3<Float>, _ b: SIMD3<Float>) -> SIMD3<Float> {
+    SIMD3<Float>(a.y * b.z - a.z * b.y,
+                 a.z * b.x - a.x * b.z,
+                 a.x * b.y - a.y * b.x)
 }
 
 /// Yaw (rotation about +Y) that points -Z... in room space we treat +Z as the cat's forward.
-func yawTowards(from: SCNVector3, to: SCNVector3) -> Float {
+func yawTowards(from: SIMD3<Float>, to: SIMD3<Float>) -> Float {
     return atan2f(to.x - from.x, to.z - from.z)
 }
 

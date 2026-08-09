@@ -7,29 +7,31 @@ import SceneKit
 // MARK: - Triangle soup
 
 private struct Tri {
-    var a: SCNVector3
-    var b: SCNVector3
-    var c: SCNVector3
+    var a: SIMD3<Float>
+    var b: SIMD3<Float>
+    var c: SIMD3<Float>
     var shade: Float          // material lightness 0…1
 }
 
-private func tessellate(_ geometry: SCNGeometry) -> ([SCNVector3], [Int32]) {
+private func tessellate(_ geometry: SCNGeometry) -> ([SIMD3<Float>], [Int32]) {
     // Generated meshes: read the buffers the generators actually produced, rather
     // than whatever the renderer made of them.
     if let mesh = MeshSourceRegistry.mesh(for: geometry), !mesh.indices.isEmpty {
-        return (mesh.positions.map { SCNVector3(x: $0.x, y: $0.y, z: $0.z) }, mesh.indices)
+        return (mesh.positions.map { SIMD3<Float>(x: $0.x, y: $0.y, z: $0.z) }, mesh.indices)
     }
 
     // Anything realised outside the mesh layer still carries its own vertices.
     if let source = geometry.sources.first(where: { !$0.vertices.isEmpty }),
        let element = geometry.elements.first, !element.indices.isEmpty {
-        return (source.vertices, element.indices)
+        // The shim's geometry source still stores SCNVector3; the rasteriser now
+        // works in the game's own vector type.
+        return (source.vertices.map { SIMD3<Float>($0.x, $0.y, $0.z) }, element.indices)
     }
 
-    var verts: [SCNVector3] = []
+    var verts: [SIMD3<Float>] = []
     var idx: [Int32] = []
 
-    func quad(_ a: SCNVector3, _ b: SCNVector3, _ c: SCNVector3, _ d: SCNVector3) {
+    func quad(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ c: SIMD3<Float>, _ d: SIMD3<Float>) {
         let base = Int32(verts.count)
         verts.append(contentsOf: [a, b, c, d])
         idx.append(contentsOf: [base, base + 1, base + 2, base, base + 2, base + 3])
@@ -38,10 +40,10 @@ private func tessellate(_ geometry: SCNGeometry) -> ([SCNVector3], [Int32]) {
     switch geometry {
     case let box as SCNBox:
         let w = Float(box.width) / 2, h = Float(box.height) / 2, l = Float(box.length) / 2
-        let p = [SCNVector3(x: -w, y: -h, z: -l), SCNVector3(x: w, y: -h, z: -l),
-                 SCNVector3(x: w, y: h, z: -l), SCNVector3(x: -w, y: h, z: -l),
-                 SCNVector3(x: -w, y: -h, z: l), SCNVector3(x: w, y: -h, z: l),
-                 SCNVector3(x: w, y: h, z: l), SCNVector3(x: -w, y: h, z: l)]
+        let p = [SIMD3<Float>(x: -w, y: -h, z: -l), SIMD3<Float>(x: w, y: -h, z: -l),
+                 SIMD3<Float>(x: w, y: h, z: -l), SIMD3<Float>(x: -w, y: h, z: -l),
+                 SIMD3<Float>(x: -w, y: -h, z: l), SIMD3<Float>(x: w, y: -h, z: l),
+                 SIMD3<Float>(x: w, y: h, z: l), SIMD3<Float>(x: -w, y: h, z: l)]
         quad(p[0], p[3], p[2], p[1]); quad(p[4], p[5], p[6], p[7])
         quad(p[0], p[1], p[5], p[4]); quad(p[2], p[3], p[7], p[6])
         quad(p[1], p[2], p[6], p[5]); quad(p[0], p[4], p[7], p[3])
@@ -50,10 +52,10 @@ private func tessellate(_ geometry: SCNGeometry) -> ([SCNVector3], [Int32]) {
         let r = Float(sphere.radius), rings = 12, segs = 18
         for i in 0..<rings {
             for s in 0..<segs {
-                func pt(_ i: Int, _ s: Int) -> SCNVector3 {
+                func pt(_ i: Int, _ s: Int) -> SIMD3<Float> {
                     let phi = Float(i) / Float(rings) * .pi
                     let th = Float(s) / Float(segs) * 2 * .pi
-                    return SCNVector3(x: sinf(phi) * cosf(th) * r, y: cosf(phi) * r, z: sinf(phi) * sinf(th) * r)
+                    return SIMD3<Float>(x: sinf(phi) * cosf(th) * r, y: cosf(phi) * r, z: sinf(phi) * sinf(th) * r)
                 }
                 quad(pt(i, s), pt(i + 1, s), pt(i + 1, s + 1), pt(i, s + 1))
             }
@@ -64,14 +66,14 @@ private func tessellate(_ geometry: SCNGeometry) -> ([SCNVector3], [Int32]) {
         for s in 0..<segs {
             let a0 = Float(s) / Float(segs) * 2 * .pi
             let a1 = Float(s + 1) / Float(segs) * 2 * .pi
-            quad(SCNVector3(x: cosf(a0) * r, y: -h, z: sinf(a0) * r),
-                 SCNVector3(x: cosf(a1) * r, y: -h, z: sinf(a1) * r),
-                 SCNVector3(x: cosf(a1) * r, y: h, z: sinf(a1) * r),
-                 SCNVector3(x: cosf(a0) * r, y: h, z: sinf(a0) * r))
+            quad(SIMD3<Float>(x: cosf(a0) * r, y: -h, z: sinf(a0) * r),
+                 SIMD3<Float>(x: cosf(a1) * r, y: -h, z: sinf(a1) * r),
+                 SIMD3<Float>(x: cosf(a1) * r, y: h, z: sinf(a1) * r),
+                 SIMD3<Float>(x: cosf(a0) * r, y: h, z: sinf(a0) * r))
             let base = Int32(verts.count)
-            verts.append(contentsOf: [SCNVector3(x: 0, y: h, z: 0),
-                                      SCNVector3(x: cosf(a0) * r, y: h, z: sinf(a0) * r),
-                                      SCNVector3(x: cosf(a1) * r, y: h, z: sinf(a1) * r)])
+            verts.append(contentsOf: [SIMD3<Float>(x: 0, y: h, z: 0),
+                                      SIMD3<Float>(x: cosf(a0) * r, y: h, z: sinf(a0) * r),
+                                      SIMD3<Float>(x: cosf(a1) * r, y: h, z: sinf(a1) * r)])
             idx.append(contentsOf: [base, base + 1, base + 2])
         }
 
@@ -82,15 +84,15 @@ private func tessellate(_ geometry: SCNGeometry) -> ([SCNVector3], [Int32]) {
             let a0 = Float(s) / Float(segs) * 2 * .pi
             let a1 = Float(s + 1) / Float(segs) * 2 * .pi
             for r in [ro, ri] {
-                quad(SCNVector3(x: cosf(a0) * r, y: -h, z: sinf(a0) * r),
-                     SCNVector3(x: cosf(a1) * r, y: -h, z: sinf(a1) * r),
-                     SCNVector3(x: cosf(a1) * r, y: h, z: sinf(a1) * r),
-                     SCNVector3(x: cosf(a0) * r, y: h, z: sinf(a0) * r))
+                quad(SIMD3<Float>(x: cosf(a0) * r, y: -h, z: sinf(a0) * r),
+                     SIMD3<Float>(x: cosf(a1) * r, y: -h, z: sinf(a1) * r),
+                     SIMD3<Float>(x: cosf(a1) * r, y: h, z: sinf(a1) * r),
+                     SIMD3<Float>(x: cosf(a0) * r, y: h, z: sinf(a0) * r))
             }
-            quad(SCNVector3(x: cosf(a0) * ri, y: h, z: sinf(a0) * ri),
-                 SCNVector3(x: cosf(a1) * ri, y: h, z: sinf(a1) * ri),
-                 SCNVector3(x: cosf(a1) * ro, y: h, z: sinf(a1) * ro),
-                 SCNVector3(x: cosf(a0) * ro, y: h, z: sinf(a0) * ro))
+            quad(SIMD3<Float>(x: cosf(a0) * ri, y: h, z: sinf(a0) * ri),
+                 SIMD3<Float>(x: cosf(a1) * ri, y: h, z: sinf(a1) * ri),
+                 SIMD3<Float>(x: cosf(a1) * ro, y: h, z: sinf(a1) * ro),
+                 SIMD3<Float>(x: cosf(a0) * ro, y: h, z: sinf(a0) * ro))
         }
 
     case let torus as SCNTorus:
@@ -98,10 +100,10 @@ private func tessellate(_ geometry: SCNGeometry) -> ([SCNVector3], [Int32]) {
         let major = 16, minor = 8
         for i in 0..<major {
             for j in 0..<minor {
-                func pt(_ i: Int, _ j: Int) -> SCNVector3 {
+                func pt(_ i: Int, _ j: Int) -> SIMD3<Float> {
                     let u = Float(i) / Float(major) * 2 * .pi
                     let v = Float(j) / Float(minor) * 2 * .pi
-                    return SCNVector3(x: (R + r * cosf(v)) * cosf(u),
+                    return SIMD3<Float>(x: (R + r * cosf(v)) * cosf(u),
                                       y: r * sinf(v),
                                       z: (R + r * cosf(v)) * sinf(u))
                 }
@@ -111,8 +113,8 @@ private func tessellate(_ geometry: SCNGeometry) -> ([SCNVector3], [Int32]) {
 
     case let plane as SCNPlane:
         let w = Float(plane.width) / 2, h = Float(plane.height) / 2
-        quad(SCNVector3(x: -w, y: -h, z: 0), SCNVector3(x: w, y: -h, z: 0),
-             SCNVector3(x: w, y: h, z: 0), SCNVector3(x: -w, y: h, z: 0))
+        quad(SIMD3<Float>(x: -w, y: -h, z: 0), SIMD3<Float>(x: w, y: -h, z: 0),
+             SIMD3<Float>(x: w, y: h, z: 0), SIMD3<Float>(x: -w, y: h, z: 0))
 
     default:
         // Silently drawing nothing is how a missing shape hides: the picture just
@@ -154,14 +156,14 @@ private func gather(_ node: SCNNode, into tris: inout [Tri], skipHidden: Bool = 
 // MARK: - Rasteriser
 
 private func render(_ tris: [Tri],
-                    eye: SCNVector3, target: SCNVector3,
+                    eye: SIMD3<Float>, target: SIMD3<Float>,
                     fovDegrees: Float, width: Int, height: Int,
                     background: (Float, Float, Float)) -> [UInt8] {
     // Camera basis.
     let forward = (target - eye).normalized
-    let worldUp = SCNVector3(x: 0, y: 1, z: 0)
+    let worldUp = SIMD3<Float>(x: 0, y: 1, z: 0)
     var right = cross(worldUp, forward).normalized
-    if right.length < 1e-4 { right = SCNVector3(x: 1, y: 0, z: 0) }
+    if right.length < 1e-4 { right = SIMD3<Float>(x: 1, y: 0, z: 0) }
     let up = cross(forward, right).normalized
 
     let aspect = Float(width) / Float(height)
@@ -175,18 +177,18 @@ private func render(_ tris: [Tri],
         pixels[i * 3 + 2] = UInt8(clamp(background.2) * 255)
     }
 
-    let lightDir = SCNVector3(x: -0.45, y: 0.8, z: -0.4).normalized
+    let lightDir = SIMD3<Float>(x: -0.45, y: 0.8, z: -0.4).normalized
 
     for tri in tris {
         // To camera space.
-        func toCamera(_ p: SCNVector3) -> SCNVector3 {
+        func toCamera(_ p: SIMD3<Float>) -> SIMD3<Float> {
             let d = p - eye
-            return SCNVector3(x: dot(d, right), y: dot(d, up), z: dot(d, forward))
+            return SIMD3<Float>(x: dot(d, right), y: dot(d, up), z: dot(d, forward))
         }
         let ca = toCamera(tri.a), cb = toCamera(tri.b), cc = toCamera(tri.c)
         guard ca.z > 0.02, cb.z > 0.02, cc.z > 0.02 else { continue }
 
-        func project(_ p: SCNVector3) -> (Float, Float) {
+        func project(_ p: SIMD3<Float>) -> (Float, Float) {
             let x = (p.x / (p.z * tanHalf * aspect) * 0.5 + 0.5) * Float(width)
             let y = (1 - (p.y / (p.z * tanHalf) * 0.5 + 0.5)) * Float(height)
             return (x, y)
@@ -297,7 +299,7 @@ private func writePNG(_ pixels: [UInt8], width: Int, height: Int, to path: Strin
 /// so knowing the cat's screen box is the only way to tell — without a Mac —
 /// whether a cat that comes when called ends up hidden behind the status pill.
 private func screenBounds(_ node: SCNNode,
-                          eye: SCNVector3, target: SCNVector3,
+                          eye: SIMD3<Float>, target: SIMD3<Float>,
                           fovDegrees: Float, width: Int, height: Int)
     -> (minX: Float, maxX: Float, minY: Float, maxY: Float)? {
 
@@ -305,8 +307,8 @@ private func screenBounds(_ node: SCNNode,
     gather(node, into: &tris)
 
     let forward = (target - eye).normalized
-    var right = cross(SCNVector3(x: 0, y: 1, z: 0), forward).normalized
-    if right.length < 1e-4 { right = SCNVector3(x: 1, y: 0, z: 0) }
+    var right = cross(SIMD3<Float>(x: 0, y: 1, z: 0), forward).normalized
+    if right.length < 1e-4 { right = SIMD3<Float>(x: 1, y: 0, z: 0) }
     let up = cross(forward, right).normalized
 
     let aspect = Float(width) / Float(height)
@@ -344,19 +346,19 @@ func runRender(outputDirectory: String) {
     let fm = FileManager.default
     try? fm.createDirectory(atPath: outputDirectory, withIntermediateDirectories: true)
 
-    func shot(_ name: String, _ node: SCNNode, eye: SCNVector3, target: SCNVector3,
+    func shot(_ name: String, _ node: SCNNode, eye: SIMD3<Float>, target: SIMD3<Float>,
               fov: Float, size: (Int, Int), bg: (Float, Float, Float) = (0.10, 0.10, 0.12)) {
         var tris: [Tri] = []
         gather(node, into: &tris)
         let pixels = render(tris, eye: eye, target: target, fovDegrees: fov,
                             width: size.0, height: size.1, background: bg)
         writePNG(pixels, width: size.0, height: size.1, to: "\(outputDirectory)/\(name).png")
-        var lo = SCNVector3(x: .infinity, y: .infinity, z: .infinity)
-        var hi = SCNVector3(x: -.infinity, y: -.infinity, z: -.infinity)
+        var lo = SIMD3<Float>(x: .infinity, y: .infinity, z: .infinity)
+        var hi = SIMD3<Float>(x: -.infinity, y: -.infinity, z: -.infinity)
         for t in tris {
             for p in [t.a, t.b, t.c] {
-                lo = SCNVector3(x: min(lo.x, p.x), y: min(lo.y, p.y), z: min(lo.z, p.z))
-                hi = SCNVector3(x: max(hi.x, p.x), y: max(hi.y, p.y), z: max(hi.z, p.z))
+                lo = SIMD3<Float>(x: min(lo.x, p.x), y: min(lo.y, p.y), z: min(lo.z, p.z))
+                hi = SIMD3<Float>(x: max(hi.x, p.x), y: max(hi.y, p.y), z: max(hi.z, p.z))
             }
         }
         print(String(format: "  %@.png  %d tris  bbox x[%.2f %.2f] y[%.2f %.2f] z[%.2f %.2f]",
@@ -381,10 +383,10 @@ func runRender(outputDirectory: String) {
         for _ in 0..<300 { animator.update(dt: 1.0 / 60, motion: motion) }
 
         shot("cat-\(label)-side", rig.root,
-             eye: SCNVector3(x: 0.95, y: 0.20, z: 0.05), target: SCNVector3(x: 0, y: 0.16, z: 0),
+             eye: SIMD3<Float>(x: 0.95, y: 0.20, z: 0.05), target: SIMD3<Float>(x: 0, y: 0.16, z: 0),
              fov: 34, size: (420, 320))
         shot("cat-\(label)-front", rig.root,
-             eye: SCNVector3(x: 0.30, y: 0.30, z: 0.85), target: SCNVector3(x: 0, y: 0.16, z: 0),
+             eye: SIMD3<Float>(x: 0.30, y: 0.30, z: 0.85), target: SIMD3<Float>(x: 0, y: 0.16, z: 0),
              fov: 34, size: (420, 320))
     }
 
@@ -400,13 +402,13 @@ func runRender(outputDirectory: String) {
         motion.pose = .sittingTall
         for _ in 0..<200 { animator.update(dt: 1.0 / 60, motion: motion) }
 
-        let head = rig.head.convertPosition(.zero, to: nil)
+        let head = rig.head.simdConvertPosition(.zero, to: nil)
         let d = a.headRadius * 11
         shot("head-\(breed.rawValue)-front", rig.root,
-             eye: SCNVector3(x: head.x, y: head.y + d * 0.16, z: head.z + d),
+             eye: SIMD3<Float>(x: head.x, y: head.y + d * 0.16, z: head.z + d),
              target: head, fov: 30, size: (460, 460))
         shot("head-\(breed.rawValue)-threequarter", rig.root,
-             eye: SCNVector3(x: head.x + d * 0.62, y: head.y + d * 0.30, z: head.z + d * 0.72),
+             eye: SIMD3<Float>(x: head.x + d * 0.62, y: head.y + d * 0.30, z: head.z + d * 0.72),
              target: head, fov: 30, size: (460, 460))
 
         // Mid-meow, jaw wide. Until recently there was nothing behind it and an open
@@ -422,7 +424,7 @@ func runRender(outputDirectory: String) {
         motion.pose = .standing
         for _ in 0..<200 { animator.update(dt: 1.0 / 60, motion: motion) }
         shot("breed-\(breed.rawValue)", rig.root,
-             eye: SCNVector3(x: 1.0, y: 0.22, z: 0.10), target: SCNVector3(x: 0, y: 0.16, z: 0),
+             eye: SIMD3<Float>(x: 1.0, y: 0.22, z: 0.10), target: SIMD3<Float>(x: 0, y: 0.16, z: 0),
              fov: 34, size: (420, 320))
     }
 
@@ -437,7 +439,7 @@ func runRender(outputDirectory: String) {
     let catAnim = CatAnimator(rig: catRig)
     var catMotion = CatMotion()
     catMotion.pose = .sittingTall
-    catMotion.position = SCNVector3(x: 0.1, y: 0, z: -0.3)
+    catMotion.position = SIMD3<Float>(x: 0.1, y: 0, z: -0.3)
     catMotion.yaw = deg(170)
     for _ in 0..<200 { catAnim.update(dt: 1.0 / 60, motion: catMotion) }
 
@@ -446,7 +448,7 @@ func runRender(outputDirectory: String) {
     world.addChildNode(catRig.root)
 
     let eye = RoomLayout.cameraPosition
-    let aim = SCNVector3(x: eye.x, y: eye.y + tanf(RoomLayout.cameraPitch), z: eye.z - 1)
+    let aim = SIMD3<Float>(x: eye.x, y: eye.y + tanf(RoomLayout.cameraPitch), z: eye.z - 1)
     // The app pins the field of view to the horizontal axis at 54°; this rasteriser
     // takes a vertical FOV, so convert for a 390x844 portrait frame.
     let horizontal: Float = 54
@@ -455,7 +457,7 @@ func runRender(outputDirectory: String) {
     shot("room-player-view", world, eye: eye, target: aim, fov: vertical, size: (390, 844),
          bg: (0.05, 0.06, 0.09))
     shot("room-overhead", world,
-         eye: SCNVector3(x: 0.2, y: 3.4, z: 2.6), target: SCNVector3(x: 0, y: 0.3, z: -0.6),
+         eye: SIMD3<Float>(x: 0.2, y: 3.4, z: 2.6), target: SIMD3<Float>(x: 0, y: 0.3, z: -0.6),
          fov: 60, size: (600, 480), bg: (0.05, 0.06, 0.09))
 
     // --- The cat where it sits when called over, checked against the HUD.

@@ -44,6 +44,16 @@ public struct SCNMatrix4 {
     }
 
     /// Transforms a point (w = 1).
+    // SIMD3 overloads, because the game's own geometry now speaks that type and
+    // the offline rasteriser consumes the game's geometry directly.
+    public func apply(_ p: SIMD3<Float>) -> SIMD3<Float> {
+        let r = apply(SCNVector3(x: p.x, y: p.y, z: p.z))
+        return SIMD3<Float>(r.x, r.y, r.z)
+    }
+    public func applyVector(_ p: SIMD3<Float>) -> SIMD3<Float> {
+        let r = applyVector(SCNVector3(x: p.x, y: p.y, z: p.z))
+        return SIMD3<Float>(r.x, r.y, r.z)
+    }
     public func apply(_ p: SCNVector3) -> SCNVector3 {
         SCNVector3(x: self[0,0]*p.x + self[0,1]*p.y + self[0,2]*p.z + self[0,3],
                    y: self[1,0]*p.x + self[1,1]*p.y + self[1,2]*p.z + self[1,3],
@@ -495,6 +505,40 @@ open class SCNNode: NSObject {
     public var worldTransform: SCNMatrix4 {
         if let parent { return parent.worldTransform * localTransform }
         return localTransform
+    }
+
+    // The simd-typed accessors. Real SceneKit has had these for years; the game
+    // now uses them everywhere so that its own data is SIMD3<Float> — the type
+    // RealityKit speaks — while still rendering through SceneKit. That is what
+    // lets the port happen as two verified steps rather than one blind jump.
+    open func simdLook(at target: SIMD3<Float>, up: SIMD3<Float>, localFront: SIMD3<Float>) {
+        look(at: SCNVector3(x: target.x, y: target.y, z: target.z),
+             up: SCNVector3(x: up.x, y: up.y, z: up.z),
+             localFront: SCNVector3(x: localFront.x, y: localFront.y, z: localFront.z))
+    }
+    open var simdPosition: SIMD3<Float> {
+        get { SIMD3<Float>(position.x, position.y, position.z) }
+        set { position = SCNVector3(x: newValue.x, y: newValue.y, z: newValue.z) }
+    }
+    open var simdEulerAngles: SIMD3<Float> {
+        get { SIMD3<Float>(eulerAngles.x, eulerAngles.y, eulerAngles.z) }
+        set { eulerAngles = SCNVector3(x: newValue.x, y: newValue.y, z: newValue.z) }
+    }
+    open var simdScale: SIMD3<Float> {
+        get { SIMD3<Float>(scale.x, scale.y, scale.z) }
+        set { scale = SCNVector3(x: newValue.x, y: newValue.y, z: newValue.z) }
+    }
+    open var simdWorldPosition: SIMD3<Float> {
+        let p = worldPosition
+        return SIMD3<Float>(p.x, p.y, p.z)
+    }
+    open func simdConvertPosition(_ position: SIMD3<Float>, to node: SCNNode?) -> SIMD3<Float> {
+        let r = convertPosition(SCNVector3(x: position.x, y: position.y, z: position.z), to: node)
+        return SIMD3<Float>(r.x, r.y, r.z)
+    }
+    open func simdConvertPosition(_ position: SIMD3<Float>, from node: SCNNode?) -> SIMD3<Float> {
+        let r = convertPosition(SCNVector3(x: position.x, y: position.y, z: position.z), from: node)
+        return SIMD3<Float>(r.x, r.y, r.z)
     }
 
     open func convertPosition(_ position: SCNVector3, from node: SCNNode?) -> SCNVector3 {

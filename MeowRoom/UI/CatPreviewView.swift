@@ -32,7 +32,7 @@ final class CatPreviewController: NSObject, SCNSceneRendererDelegate, Observable
         pivot.addChildNode(rig.root)
 
         motion.pose = .sittingTall
-        motion.position = SCNVector3(x: 0, y: 0, z: 0)
+        motion.position = SIMD3<Float>(x: 0, y: 0, z: 0)
         motion.eyeOpen = 1
 
         setupStage()
@@ -52,8 +52,8 @@ final class CatPreviewController: NSObject, SCNSceneRendererDelegate, Observable
         key.orthographicScale = 0.6
         let keyNode = SCNNode()
         keyNode.light = key
-        keyNode.position = SCNVector3(x: 0.8, y: 1.2, z: 1.1)
-        keyNode.look(at: SCNVector3(x: 0, y: 0.16, z: 0))
+        keyNode.simdPosition = SIMD3<Float>(x: 0.8, y: 1.2, z: 1.1)
+        keyNode.simdLook(at: SIMD3<Float>(0, 0.16, 0), up: SIMD3<Float>(0, 1, 0), localFront: SIMD3<Float>(0, 0, -1))
         scene.rootNode.addChildNode(keyNode)
 
         let fill = SCNLight()
@@ -62,7 +62,7 @@ final class CatPreviewController: NSObject, SCNSceneRendererDelegate, Observable
         fill.color = UIColor(red: 0.72, green: 0.82, blue: 1.0, alpha: 1)
         let fillNode = SCNNode()
         fillNode.light = fill
-        fillNode.position = SCNVector3(x: -1.0, y: 0.7, z: 0.6)
+        fillNode.simdPosition = SIMD3<Float>(x: -1.0, y: 0.7, z: 0.6)
         scene.rootNode.addChildNode(fillNode)
 
         let rim = SCNLight()
@@ -71,7 +71,7 @@ final class CatPreviewController: NSObject, SCNSceneRendererDelegate, Observable
         rim.color = UIColor(red: 1.0, green: 0.86, blue: 0.68, alpha: 1)
         let rimNode = SCNNode()
         rimNode.light = rim
-        rimNode.position = SCNVector3(x: -0.3, y: 0.8, z: -1.1)
+        rimNode.simdPosition = SIMD3<Float>(x: -0.3, y: 0.8, z: -1.1)
         scene.rootNode.addChildNode(rimNode)
 
         let ambient = SCNLight()
@@ -84,7 +84,7 @@ final class CatPreviewController: NSObject, SCNSceneRendererDelegate, Observable
 
         let floor = SCNCylinder(radius: 0.55, height: 0.012)
         let floorNode = SCNNode.make(floor, Materials.tatami())
-        floorNode.position = SCNVector3(x: 0, y: -0.006, z: 0)
+        floorNode.simdPosition = SIMD3<Float>(x: 0, y: -0.006, z: 0)
         scene.rootNode.addChildNode(floorNode)
 
         let camera = SCNCamera()
@@ -101,8 +101,8 @@ final class CatPreviewController: NSObject, SCNSceneRendererDelegate, Observable
         camera.screenSpaceAmbientOcclusionIntensity = RenderQuality.ambientOcclusionIntensity
         let camNode = SCNNode()
         camNode.camera = camera
-        camNode.position = SCNVector3(x: 0.0, y: 0.30, z: 0.95)
-        camNode.look(at: SCNVector3(x: 0, y: 0.17, z: 0))
+        camNode.simdPosition = SIMD3<Float>(x: 0.0, y: 0.30, z: 0.95)
+        camNode.simdLook(at: SIMD3<Float>(0, 0.17, 0), up: SIMD3<Float>(0, 1, 0), localFront: SIMD3<Float>(0, 0, -1))
         scene.rootNode.addChildNode(camNode)
 
         scene.background.contents = UIColor(red: 0.06, green: 0.06, blue: 0.08, alpha: 1)
@@ -144,7 +144,7 @@ final class CatPreviewController: NSObject, SCNSceneRendererDelegate, Observable
         guard dt > 0 else { return }
 
         turntable += dt * 0.28
-        pivot.eulerAngles = SCNVector3(x: 0, y: sinf(turntable) * 0.85 + 0.35, z: 0)
+        pivot.simdEulerAngles = SIMD3<Float>(x: 0, y: sinf(turntable) * 0.85 + 0.35, z: 0)
 
         // Idle life: blinking, breathing, a slow tail.
         blinkTimer -= dt
@@ -157,7 +157,7 @@ final class CatPreviewController: NSObject, SCNSceneRendererDelegate, Observable
         motion.eyeOpen = open
         motion.breathRate = 0.85
         motion.tailAgitation = 0.12
-        motion.lookTarget = SCNVector3(x: 0, y: 0.30, z: 1.2)
+        motion.lookTarget = SIMD3<Float>(x: 0, y: 0.30, z: 1.2)
         motion.lookWeight = 0.55
 
         poseTimer -= dt

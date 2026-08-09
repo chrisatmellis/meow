@@ -43,7 +43,7 @@ enum Translucency {
     ///   ordinary ear within a step or two. A broad source like a lit window is much
     ///   more forgiving, because some part of it is behind the ear over a wide range
     ///   of angles.
-    static func backlight(at position: SCNVector3, lightDirection: SCNVector3,
+    static func backlight(at position: SIMD3<Float>, lightDirection: SIMD3<Float>,
                           focus: Float = 3) -> Float {
         let toCamera = (RoomLayout.cameraPosition - position).normalized
         let aligned = -dot(toCamera, lightDirection.normalized)
@@ -60,8 +60,8 @@ enum Translucency {
         // The same directions `LightingRig` aims the sun and moon lights along, so
         // an ear can never glow from a sun that is lighting the room from elsewhere.
         let s = sky.sunDirection, m = sky.moonDirection
-        let sun = SCNVector3(x: s.x, y: s.y, z: s.z)
-        let moon = SCNVector3(x: m.x, y: m.y, z: m.z)
+        let sun = SIMD3<Float>(x: s.x, y: s.y, z: s.z)
+        let moon = SIMD3<Float>(x: m.x, y: m.y, z: m.z)
 
         // Above the horizon or it is not lighting anything.
         let sunUp = max(0, min(1, sky.sunElevation * 6))
@@ -74,7 +74,7 @@ enum Translucency {
         let lanternPower: Float = lanternOn ? 0.10 : 0
 
         for part in parts {
-            let p = part.node.worldPosition
+            let p = part.node.simdWorldPosition
 
             // The window, and it is the main event.
             //

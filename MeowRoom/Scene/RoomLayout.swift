@@ -16,7 +16,7 @@ enum RoomLayout {
     static let wallThickness: Float = 0.06
 
     /// Seated eye height, right against the near wall.
-    static let cameraPosition = SCNVector3(x: 0.0, y: 1.03, z: 2.00)
+    static let cameraPosition = SIMD3<Float>(x: 0.0, y: 1.03, z: 2.00)
     static let cameraPitch: Float = deg(-6)
 
     /// Bottom of the window opening — furniture tucks underneath it.
@@ -25,72 +25,72 @@ enum RoomLayout {
     // Furniture ------------------------------------------------------------
 
     /// Futon along the -X side, angled into view.
-    static let futonCenter = SCNVector3(x: -0.82, y: 0.0, z: -0.30)
-    static let futonSize = SCNVector3(x: 0.92, y: 0.11, z: 1.85)
+    static let futonCenter = SIMD3<Float>(x: -0.82, y: 0.0, z: -0.30)
+    static let futonSize = SIMD3<Float>(x: 0.92, y: 0.11, z: 1.85)
     static let futonTop: Float = 0.13
-    static let pillowCenter = SCNVector3(x: -0.82, y: 0.16, z: -1.02)
+    static let pillowCenter = SIMD3<Float>(x: -0.82, y: 0.16, z: -1.02)
 
     /// Low table (chabudai) with a teacup that is absolutely going to get knocked off.
-    static let tableCenter = SCNVector3(x: 0.80, y: 0.0, z: 0.34)
-    static let tableSize = SCNVector3(x: 0.72, y: 0.30, z: 0.50)
+    static let tableCenter = SIMD3<Float>(x: 0.80, y: 0.0, z: 0.34)
+    static let tableSize = SIMD3<Float>(x: 0.72, y: 0.30, z: 0.50)
     static let tableTop: Float = 0.30
 
     /// Tansu chest against the +X wall, up near the window end.
-    static let tansuCenter = SCNVector3(x: 1.44, y: 0.0, z: -1.28)
-    static let tansuSize = SCNVector3(x: 0.44, y: 0.70, z: 0.90)
+    static let tansuCenter = SIMD3<Float>(x: 1.44, y: 0.0, z: -1.28)
+    static let tansuSize = SIMD3<Float>(x: 0.44, y: 0.70, z: 0.90)
 
     /// Cat tree in the far -X corner, by the window.
-    static let catTreeBase = SCNVector3(x: -1.26, y: 0.0, z: -1.80)
-    static let catTreeMidPlatform = SCNVector3(x: -1.26, y: 0.50, z: -1.80)
-    static let catTreeTopPlatform = SCNVector3(x: -1.20, y: 1.02, z: -1.86)
-    static let scratchPostSpot = SCNVector3(x: -1.02, y: 0.0, z: -1.58)
+    static let catTreeBase = SIMD3<Float>(x: -1.26, y: 0.0, z: -1.80)
+    static let catTreeMidPlatform = SIMD3<Float>(x: -1.26, y: 0.50, z: -1.80)
+    static let catTreeTopPlatform = SIMD3<Float>(x: -1.20, y: 1.02, z: -1.86)
+    static let scratchPostSpot = SIMD3<Float>(x: -1.02, y: 0.0, z: -1.58)
 
     /// Round cat bed on the tatami.
-    static let catBedCenter = SCNVector3(x: 0.34, y: 0.0, z: -1.18)
+    static let catBedCenter = SIMD3<Float>(x: 0.34, y: 0.0, z: -1.18)
     static let catBedTop: Float = 0.09
 
     /// Feeding station under the far window, on the right.
-    static let feederBase = SCNVector3(x: 1.16, y: 0.0, z: -2.02)
-    static let feederBowl = SCNVector3(x: 1.16, y: 0.045, z: -1.76)
-    static let fountainBase = SCNVector3(x: 0.66, y: 0.0, z: -2.02)
-    static let fountainRim = SCNVector3(x: 0.66, y: 0.115, z: -1.78)
+    static let feederBase = SIMD3<Float>(x: 1.16, y: 0.0, z: -2.02)
+    static let feederBowl = SIMD3<Float>(x: 1.16, y: 0.045, z: -1.76)
+    static let fountainBase = SIMD3<Float>(x: 0.66, y: 0.0, z: -2.02)
+    static let fountainRim = SIMD3<Float>(x: 0.66, y: 0.115, z: -1.78)
 
     /// Covered litter box, far side on the left.
-    static let litterBoxCenter = SCNVector3(x: -0.62, y: 0.0, z: -1.94)
-    static let litterEntrance = SCNVector3(x: -0.62, y: 0.0, z: -1.62)
+    static let litterBoxCenter = SIMD3<Float>(x: -0.62, y: 0.0, z: -1.94)
+    static let litterEntrance = SIMD3<Float>(x: -0.62, y: 0.0, z: -1.62)
 
     /// Toys.
-    static let toyBasketCenter = SCNVector3(x: -0.12, y: 0.0, z: 0.62)
-    static let toyMouseSpot = SCNVector3(x: 0.16, y: 0.0, z: -0.52)
-    static let toyBallSpot = SCNVector3(x: -0.34, y: 0.0, z: -0.86)
+    static let toyBasketCenter = SIMD3<Float>(x: -0.12, y: 0.0, z: 0.62)
+    static let toyMouseSpot = SIMD3<Float>(x: 0.16, y: 0.0, z: -0.52)
+    static let toyBallSpot = SIMD3<Float>(x: -0.34, y: 0.0, z: -0.86)
 
     /// Paper lantern in the far +X corner.
-    static let lanternCenter = SCNVector3(x: 1.42, y: 0.0, z: -1.96)
+    static let lanternCenter = SIMD3<Float>(x: 1.42, y: 0.0, z: -1.96)
     static let lanternLightHeight: Float = 0.92
 
     /// Window sill the cat jumps onto to watch the garden.
-    static let windowSill = SCNVector3(x: 0.10, y: windowSillHeight, z: -2.02)
-    static let windowCenter = SCNVector3(x: 0.05, y: 1.20, z: -halfDepth)
-    static let sideWindowCenter = SCNVector3(x: halfWidth, y: 1.25, z: -0.70)
+    static let windowSill = SIMD3<Float>(x: 0.10, y: windowSillHeight, z: -2.02)
+    static let windowCenter = SIMD3<Float>(x: 0.05, y: 1.20, z: -halfDepth)
+    static let sideWindowCenter = SIMD3<Float>(x: halfWidth, y: 1.25, z: -0.70)
 
     /// Where the cat stands when it comes over for attention. Far enough back that
     /// it sits clear of the HUD along the bottom of the screen — at the original
     /// distance a cat that came when called was half-hidden behind the status pill.
-    static let playerLapSpot = SCNVector3(x: 0.06, y: 0.0, z: 0.72)
-    static let playerNearSpot = SCNVector3(x: -0.10, y: 0.0, z: 0.56)
+    static let playerLapSpot = SIMD3<Float>(x: 0.06, y: 0.0, z: 0.72)
+    static let playerNearSpot = SIMD3<Float>(x: -0.10, y: 0.0, z: 0.56)
 
     /// Sunny patch on the tatami — slides across the floor through the day.
-    static func sunPatchPosition(sky: SkyState) -> SCNVector3 {
+    static func sunPatchPosition(sky: SkyState) -> SIMD3<Float> {
         let t = clamp(remap(sky.sunAzimuth, deg(70), deg(290), 0, 1))
         let x = mix(1.15, -1.05, t)
         let depth = mix(-1.60, -0.55, 1 - clamp(sky.sunElevation / 1.1))
-        return SCNVector3(x: x, y: 0, z: depth)
+        return SIMD3<Float>(x: x, y: 0, z: depth)
     }
 
     // Navigation -----------------------------------------------------------
 
     /// Keeps the cat inside the room and out of solid furniture.
-    static func clampToWalkable(_ p: SCNVector3) -> SCNVector3 {
+    static func clampToWalkable(_ p: SIMD3<Float>) -> SIMD3<Float> {
         var x = min(max(p.x, -halfWidth + 0.24), halfWidth - 0.24)
         var z = min(max(p.z, -halfDepth + 0.34), halfDepth - 0.55)
 
@@ -107,12 +107,12 @@ enum RoomLayout {
         if abs(x - tableCenter.x) < 0.05 && abs(z - tableCenter.z) < 0.05 {
             z += 0.14
         }
-        return SCNVector3(x: x, y: p.y, z: z)
+        return SIMD3<Float>(x: x, y: p.y, z: z)
     }
 
     /// Random reachable point, biased toward the half of the room the player can see.
-    static func randomFloorPoint(using g: inout SeededGenerator) -> SCNVector3 {
-        let p = SCNVector3(x: g.float(-halfWidth + 0.35, halfWidth - 0.35),
+    static func randomFloorPoint(using g: inout SeededGenerator) -> SIMD3<Float> {
+        let p = SIMD3<Float>(x: g.float(-halfWidth + 0.35, halfWidth - 0.35),
                            y: 0,
                            z: g.float(-halfDepth + 0.45, halfDepth - 0.80))
         return clampToWalkable(p)

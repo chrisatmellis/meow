@@ -14,7 +14,7 @@ struct LegRig {
     var lowerLength: Float = 0.07
     var pawLength: Float = 0.03
     /// Rest position of the foot in body space.
-    var restFoot = SCNVector3.zero
+    var restFoot = SIMD3<Float>.zero
     /// Phase offset in the walk cycle, 0...1.
     var gaitPhase: Float = 0
     /// Which way the middle joint folds.
@@ -107,7 +107,7 @@ enum CatBuilder {
         // ---- Root chain -------------------------------------------------
         rig.root.name = "cat"
         rig.root.addChildNode(rig.body)
-        rig.body.position = SCNVector3(x: 0, y: rig.bodyHeight, z: 0)
+        rig.body.simdPosition = SIMD3<Float>(x: 0, y: rig.bodyHeight, z: 0)
         rig.body.addChildNode(rig.spine)
 
         // ---- Torso ------------------------------------------------------
@@ -144,12 +144,12 @@ enum CatBuilder {
                                         rings: ring(12), segments: seg(18),
                                         vSpan: vSpan(R * 1.3, a))
             let rn = SCNNode.make(ruff, Materials.furShell(a, layer: 0))
-            rn.position = SCNVector3(x: 0, y: -R * 0.05, z: L * 0.44)
+            rn.simdPosition = SIMD3<Float>(x: 0, y: -R * 0.05, z: L * 0.44)
             rig.spine.addChildNode(rn)
         }
 
         // ---- Neck & head -------------------------------------------------
-        rig.neck.position = SCNVector3(x: 0, y: R * 0.30, z: L * 0.48)
+        rig.neck.simdPosition = SIMD3<Float>(x: 0, y: R * 0.30, z: L * 0.48)
         rig.spine.addChildNode(rig.neck)
 
         // Long enough that the head can genuinely lift clear of the shoulders when the
@@ -160,10 +160,10 @@ enum CatBuilder {
             neckR * (1 - 0.10 * t)
         }, vSpan: vSpan(neckLen * 1.6, a))
         let neckNode = SCNNode.make(neckGeo, furMat, name: "neck")
-        neckNode.eulerAngles = SCNVector3(x: deg(-16), y: 0, z: 0)
+        neckNode.simdEulerAngles = SIMD3<Float>(x: deg(-16), y: 0, z: 0)
         rig.neck.addChildNode(neckNode)
 
-        rig.head.position = SCNVector3(x: 0, y: neckLen * 0.42, z: neckLen * 1.42)
+        rig.head.simdPosition = SIMD3<Float>(x: 0, y: neckLen * 0.42, z: neckLen * 1.42)
         rig.neck.addChildNode(rig.head)
         buildHead(rig: rig, a: a, furMat: furMat, skinMat: skinMat, detail: detail)
 
@@ -184,10 +184,10 @@ enum CatBuilder {
             leg.bendSign = isFront ? 1 : -1
             leg.gaitPhase = [0.0, 0.5, 0.5, 0.0][i]      // diagonal (trot-like) pairing
 
-            let hipPos = SCNVector3(x: side * (isFront ? spreadFront : spreadBack),
+            let hipPos = SIMD3<Float>(x: side * (isFront ? spreadFront : spreadBack),
                                     y: hipDrop,
                                     z: isFront ? frontZ : backZ)
-            leg.hip.position = hipPos
+            leg.hip.simdPosition = hipPos
             rig.spine.addChildNode(leg.hip)
 
             let reach = hipPos.y - groundY               // vertical distance to the floor
@@ -200,7 +200,7 @@ enum CatBuilder {
             leg.upperLength = upper
             leg.lowerLength = lower
             leg.pawLength = pawLen
-            leg.restFoot = SCNVector3(x: hipPos.x, y: groundY, z: hipPos.z + (isFront ? 0.012 : -0.006))
+            leg.restFoot = SIMD3<Float>(x: hipPos.x, y: groundY, z: hipPos.z + (isFront ? 0.012 : -0.006))
 
             // The upper segment is deliberately fat so it merges into the torso the way
             // a real cat's shoulder and haunch do; only the lower leg reads as a limb.
@@ -211,20 +211,20 @@ enum CatBuilder {
                 mix(thickTop, thickTop * 0.52, t)
             }, vSpan: vSpan(upper, a))
             let un = SCNNode.make(upperGeo, furMat)
-            un.eulerAngles = SCNVector3(x: deg(90), y: 0, z: 0)
+            un.simdEulerAngles = SIMD3<Float>(x: deg(90), y: 0, z: 0)
             leg.hip.addChildNode(un)
 
-            leg.knee.position = SCNVector3(x: 0, y: -upper, z: 0)
+            leg.knee.simdPosition = SIMD3<Float>(x: 0, y: -upper, z: 0)
             leg.hip.addChildNode(leg.knee)
 
             let lowerGeo = MeshBuilder.tube(length: lower * 1.06, count: 5, segments: seg(14), radius: { t in
                 mix(thickTop * 0.50, thickBottom, t)
             }, vSpan: vSpan(lower, a))
             let ln = SCNNode.make(lowerGeo, furMat)
-            ln.eulerAngles = SCNVector3(x: deg(90), y: 0, z: 0)
+            ln.simdEulerAngles = SIMD3<Float>(x: deg(90), y: 0, z: 0)
             leg.knee.addChildNode(ln)
 
-            leg.ankle.position = SCNVector3(x: 0, y: -lower, z: 0)
+            leg.ankle.simdPosition = SIMD3<Float>(x: 0, y: -lower, z: 0)
             leg.knee.addChildNode(leg.ankle)
 
             // Paw: a small rounded blob plus toe bumps.
@@ -232,7 +232,7 @@ enum CatBuilder {
             let pawGeo = MeshBuilder.blob(radius: pawR, scaleX: 0.95, scaleY: 0.72, scaleZ: 1.35,
                                           rings: ring(8), segments: seg(16), vSpan: vSpan(pawR * 2.7, a))
             let pn = SCNNode.make(pawGeo, furMat)
-            pn.position = SCNVector3(x: 0, y: -pawLen * 0.35, z: pawR * 0.30)
+            pn.simdPosition = SIMD3<Float>(x: 0, y: -pawLen * 0.35, z: pawR * 0.30)
             leg.ankle.addChildNode(pn)
             leg.paw = leg.ankle
 
@@ -241,7 +241,7 @@ enum CatBuilder {
                                           rings: ring(6), segments: seg(12))
             let padMat = Materials.skin(a.pawPadColor, gloss: 0.35)
             let pad = SCNNode.make(padGeo, padMat)
-            pad.position = SCNVector3(x: 0, y: -pawLen * 0.35 - pawR * 0.46, z: pawR * 0.30)
+            pad.simdPosition = SIMD3<Float>(x: 0, y: -pawLen * 0.35 - pawR * 0.46, z: pawR * 0.30)
             leg.ankle.addChildNode(pad)
             // Pads are thicker than an ear and usually face the floor, so they get
             // much less — but a cat lying on its side in a sun patch shows them.
@@ -253,8 +253,8 @@ enum CatBuilder {
                 for k in 0..<3 {
                     let tuft = MeshBuilder.strand(length: pawR * (0.8 + a.toeTufts), thickness: 0.0016, droop: 0.4)
                     let tn = SCNNode.make(tuft, Materials.furShell(a, layer: 1))
-                    tn.position = SCNVector3(x: (Float(k) - 1) * pawR * 0.3, y: -pawLen * 0.35, z: pawR * 0.6)
-                    tn.eulerAngles = SCNVector3(x: deg(70), y: 0, z: 0)
+                    tn.simdPosition = SIMD3<Float>(x: (Float(k) - 1) * pawR * 0.3, y: -pawLen * 0.35, z: pawR * 0.6)
+                    tn.simdEulerAngles = SIMD3<Float>(x: deg(70), y: 0, z: 0)
                     leg.ankle.addChildNode(tn)
                 }
             }
@@ -301,7 +301,7 @@ enum CatBuilder {
                                       rings: ring(12), segments: seg(28),
                                       vSpan: vSpan(muzzleLen * 2, a))
         let muzzleNode = SCNNode.make(muzzle, furMat, name: "muzzle")
-        muzzleNode.position = SCNVector3(x: 0, y: -hr * 0.26, z: hr * (0.52 + 0.26 * a.muzzleLength))
+        muzzleNode.simdPosition = SIMD3<Float>(x: 0, y: -hr * 0.26, z: hr * (0.52 + 0.26 * a.muzzleLength))
         rig.head.addChildNode(muzzleNode)
 
         // Nose leather.
@@ -314,18 +314,18 @@ enum CatBuilder {
         rig.translucentParts.append(
             TranslucentPart(node: noseNode, material: noseMat, amount: 0.35,
                             tint: a.noseColor.mixed(with: RGBColor(1.0, 0.34, 0.30), 0.5)))
-        noseNode.position = SCNVector3(x: 0,
+        noseNode.simdPosition = SIMD3<Float>(x: 0,
                                        y: -hr * 0.14,
                                        z: hr * (0.52 + 0.26 * a.muzzleLength) + muzzleLen * 0.80)
         rig.head.addChildNode(noseNode)
 
         // Chin & jaw (opens when the cat meows).
-        rig.jaw.position = SCNVector3(x: 0, y: -hr * 0.34, z: hr * 0.52)
+        rig.jaw.simdPosition = SIMD3<Float>(x: 0, y: -hr * 0.34, z: hr * 0.52)
         rig.head.addChildNode(rig.jaw)
         let chin = MeshBuilder.blob(radius: hr * (0.20 + 0.14 * a.chinSize), scaleX: 1.1, scaleY: 0.7, scaleZ: 1.0,
                                     rings: ring(9), segments: seg(16), vSpan: vSpan(hr * 0.6, a))
         let chinNode = SCNNode.make(chin, furMat)
-        chinNode.position = SCNVector3(x: 0, y: -hr * 0.06, z: hr * (0.18 + 0.30 * a.muzzleLength))
+        chinNode.simdPosition = SIMD3<Float>(x: 0, y: -hr * 0.06, z: hr * (0.18 + 0.30 * a.muzzleLength))
         rig.jaw.addChildNode(chinNode)
 
         // Something behind the teeth.
@@ -342,7 +342,7 @@ enum CatBuilder {
                                       scaleZ: max(0.6, mouthDepth / (hr * 0.30)),
                                       rings: ring(6), segments: seg(12))
         let cavityNode = SCNNode.make(cavity, Materials.oralCavity(a.innerEarColor), name: "oralCavity")
-        cavityNode.position = SCNVector3(x: 0, y: -hr * 0.30,
+        cavityNode.simdPosition = SIMD3<Float>(x: 0, y: -hr * 0.30,
                                          z: hr * (0.30 + 0.24 * a.muzzleLength))
         rig.head.addChildNode(cavityNode)
 
@@ -350,7 +350,7 @@ enum CatBuilder {
         let tongueGeo = MeshBuilder.blob(radius: hr * 0.17, scaleX: 0.80, scaleY: 0.26,
                                          scaleZ: 1.9, rings: ring(7), segments: seg(12))
         let tongueNode = SCNNode.make(tongueGeo, Materials.tongue(a.noseColor), name: "tongue")
-        tongueNode.position = SCNVector3(x: 0, y: hr * 0.02, z: hr * (0.20 + 0.24 * a.muzzleLength))
+        tongueNode.simdPosition = SIMD3<Float>(x: 0, y: hr * 0.02, z: hr * (0.20 + 0.24 * a.muzzleLength))
         rig.jaw.addChildNode(tongueNode)
 
         // Cheek floof.
@@ -361,7 +361,7 @@ enum CatBuilder {
                                              rings: ring(9), segments: seg(14),
                                              vSpan: vSpan(hr * 0.9, a))
                 let cn = SCNNode.make(cheek, Materials.furShell(a, layer: 0))
-                cn.position = SCNVector3(x: side * hr * 0.70 * widthMul, y: -hr * 0.20, z: hr * 0.14)
+                cn.simdPosition = SIMD3<Float>(x: side * hr * 0.70 * widthMul, y: -hr * 0.20, z: hr * 0.14)
                 rig.head.addChildNode(cn)
             }
         }
@@ -371,11 +371,11 @@ enum CatBuilder {
         let earWidth = hr * (0.62 + 0.75 * a.earWidth)
         for side in [-1, 1] as [Float] {
             let holder = SCNNode()
-            holder.position = SCNVector3(x: side * hr * 0.62 * widthMul,
+            holder.simdPosition = SIMD3<Float>(x: side * hr * 0.62 * widthMul,
                                          y: hr * 0.60 * roundMul,
                                          z: -hr * 0.05)
             let tilt = deg(mix(-8, 30, a.earTilt))
-            holder.eulerAngles = SCNVector3(x: deg(-72), y: side * deg(24), z: side * tilt)
+            holder.simdEulerAngles = SIMD3<Float>(x: deg(-72), y: side * deg(24), z: side * tilt)
             rig.head.addChildNode(holder)
 
             let curl: Float = a.earShape == .curled ? -0.9 : (a.earShape == .folded ? 1.6 * a.earFold : 0.12)
@@ -393,7 +393,7 @@ enum CatBuilder {
                                            thickness: earWidth * 0.12, curl: curl)
             let innerMat = Materials.skin(a.innerEarColor, gloss: 0.4)
             let inner = SCNNode.make(innerGeo, innerMat)
-            inner.position = SCNVector3(x: 0, y: earWidth * 0.09, z: earLen * 0.06)
+            inner.simdPosition = SIMD3<Float>(x: 0, y: earWidth * 0.09, z: earLen * 0.06)
             holder.addChildNode(inner)
 
             // Cartilage and a little fur over blood: the thinnest thing on the cat,
@@ -411,10 +411,10 @@ enum CatBuilder {
                     let tuft = MeshBuilder.strand(length: earLen * (0.35 + 0.75 * a.earTufts),
                                                   thickness: 0.0013, droop: 0.15)
                     let tn = SCNNode.make(tuft, Materials.furShell(a, layer: 0))
-                    tn.position = SCNVector3(x: (Float(k) - 1.5) * earWidth * 0.14,
+                    tn.simdPosition = SIMD3<Float>(x: (Float(k) - 1.5) * earWidth * 0.14,
                                              y: 0,
                                              z: earLen * (a.earShape == .lynxTipped ? 0.92 : 0.35))
-                    tn.eulerAngles = SCNVector3(x: deg(Float(k) * 6 - 12), y: 0, z: 0)
+                    tn.simdEulerAngles = SIMD3<Float>(x: deg(Float(k) * 6 - 12), y: 0, z: 0)
                     holder.addChildNode(tn)
                 }
             }
@@ -427,11 +427,11 @@ enum CatBuilder {
         let spacing = hr * (0.36 + 0.22 * a.eyeSpacing) * widthMul
         for side in [-1, 1] as [Float] {
             let socket = SCNNode()
-            socket.position = SCNVector3(x: side * spacing,
+            socket.simdPosition = SIMD3<Float>(x: side * spacing,
                                          y: hr * (0.05 + 0.10 * (1 - a.eyeSize)),
                                          z: hr * (0.60 + 0.10 * a.muzzleLength))
             let tiltZ = side * deg(mix(-4, 22, a.eyeTilt))
-            socket.eulerAngles = SCNVector3(x: 0, y: side * deg(16), z: tiltZ)
+            socket.simdEulerAngles = SIMD3<Float>(x: 0, y: side * deg(16), z: tiltZ)
             rig.head.addChildNode(socket)
 
             // Eyeball: mostly hidden, so it only needs to read as a dark wet sphere.
@@ -449,19 +449,19 @@ enum CatBuilder {
 
             // Eyelids: caps of fur that swing shut from above and below.
             let upper = SCNNode.make(eyeCap(radius: eyeR * 1.10, capAngle: deg(74)), furMat, name: "lidUpper")
-            upper.eulerAngles = SCNVector3(x: deg(-90), y: 0, z: 0)
+            upper.simdEulerAngles = SIMD3<Float>(x: deg(-90), y: 0, z: 0)
             socket.addChildNode(upper)
             let lower = SCNNode.make(eyeCap(radius: eyeR * 1.10, capAngle: deg(66)), furMat, name: "lidLower")
-            lower.eulerAngles = SCNVector3(x: deg(90), y: 0, z: 0)
+            lower.simdEulerAngles = SIMD3<Float>(x: deg(90), y: 0, z: 0)
             socket.addChildNode(lower)
 
             // Shape the aperture: hooded / almond / oriental eyes squash differently.
             switch a.eyeShape {
-            case .almond: socket.scale = SCNVector3(x: 1.0, y: 0.88, z: 1.0)
-            case .round: socket.scale = SCNVector3(x: 1.0, y: 1.0, z: 1.0)
-            case .oval: socket.scale = SCNVector3(x: 0.94, y: 1.02, z: 1.0)
-            case .oriental: socket.scale = SCNVector3(x: 1.12, y: 0.76, z: 1.0)
-            case .hooded: socket.scale = SCNVector3(x: 1.05, y: 0.72, z: 1.0)
+            case .almond: socket.simdScale = SIMD3<Float>(x: 1.0, y: 0.88, z: 1.0)
+            case .round: socket.simdScale = SIMD3<Float>(x: 1.0, y: 1.0, z: 1.0)
+            case .oval: socket.simdScale = SIMD3<Float>(x: 0.94, y: 1.02, z: 1.0)
+            case .oriental: socket.simdScale = SIMD3<Float>(x: 1.12, y: 0.76, z: 1.0)
+            case .hooded: socket.simdScale = SIMD3<Float>(x: 1.05, y: 0.72, z: 1.0)
             }
 
             if side < 0 {
@@ -476,7 +476,7 @@ enum CatBuilder {
             let whiskerMat = Materials.whisker(a)
             for side in [-1, 1] as [Float] {
                 let pad = SCNNode()
-                pad.position = SCNVector3(x: side * hr * 0.32,
+                pad.simdPosition = SIMD3<Float>(x: side * hr * 0.32,
                                           y: -hr * 0.20,
                                           z: hr * (0.70 + 0.34 * a.muzzleLength))
                 rig.head.addChildNode(pad)
@@ -488,7 +488,7 @@ enum CatBuilder {
                                                  thickness: 0.0006 + 0.0009 * a.whiskerThickness,
                                                  droop: 0.35)
                     let wn = SCNNode.make(geo, whiskerMat)
-                    wn.eulerAngles = SCNVector3(x: deg(mix(14, -18, t)),
+                    wn.simdEulerAngles = SIMD3<Float>(x: deg(mix(14, -18, t)),
                                                 y: side * deg(mix(58, 82, t)),
                                                 z: 0)
                     pad.addChildNode(wn)
@@ -501,8 +501,8 @@ enum CatBuilder {
                         let geo = MeshBuilder.strand(length: hr * (0.7 + 1.0 * a.eyebrowWhiskers),
                                                      thickness: 0.0006, droop: 0.1)
                         let wn = SCNNode.make(geo, Materials.whisker(a))
-                        wn.position = SCNVector3(x: side * hr * 0.34, y: hr * 0.42, z: hr * 0.44)
-                        wn.eulerAngles = SCNVector3(x: deg(-34 - Float(k) * 10), y: side * deg(38), z: 0)
+                        wn.simdPosition = SIMD3<Float>(x: side * hr * 0.34, y: hr * 0.42, z: hr * 0.44)
+                        wn.simdEulerAngles = SIMD3<Float>(x: deg(-34 - Float(k) * 10), y: side * deg(38), z: 0)
                         rig.head.addChildNode(wn)
                     }
                 }
@@ -548,10 +548,10 @@ enum CatBuilder {
 
         // The root only carries the 180° yaw, so the animator's pitch is unambiguous:
         // inside `tailPitch`, +Z runs down the tail and +X rotation lifts it.
-        rig.tailRoot.position = SCNVector3(x: 0, y: a.torsoRadius * 0.55, z: -a.torsoLength * 0.5)
-        rig.tailRoot.eulerAngles = SCNVector3(x: 0, y: .pi, z: 0)
+        rig.tailRoot.simdPosition = SIMD3<Float>(x: 0, y: a.torsoRadius * 0.55, z: -a.torsoLength * 0.5)
+        rig.tailRoot.simdEulerAngles = SIMD3<Float>(x: 0, y: .pi, z: 0)
         rig.spine.addChildNode(rig.tailRoot)
-        rig.tailPitch.eulerAngles = SCNVector3(x: deg(-30), y: 0, z: 0)
+        rig.tailPitch.simdEulerAngles = SIMD3<Float>(x: deg(-30), y: 0, z: 0)
         rig.tailRoot.addChildNode(rig.tailPitch)
 
         let segCount = a.tailShape == .bobbed ? 3 : 9
@@ -562,7 +562,7 @@ enum CatBuilder {
 
         for i in 0..<segCount {
             let node = SCNNode()
-            node.position = SCNVector3(x: 0, y: 0, z: i == 0 ? 0 : segLen)
+            node.simdPosition = SIMD3<Float>(x: 0, y: 0, z: i == 0 ? 0 : segLen)
             parent.addChildNode(node)
 
             let t0 = Float(i) / Float(segCount)
@@ -596,8 +596,8 @@ enum CatBuilder {
             if a.tailRingCount > 0.15 && (i % 2 == 0) && a.pattern != .solid {
                 let ring = SCNTorus(ringRadius: CGFloat(a.tailRadius * 0.86), pipeRadius: CGFloat(a.tailRadius * 0.20)).sized()
                 let rn = SCNNode.make(ring, Materials.skin(a.markingColor, gloss: 0.2))
-                rn.position = SCNVector3(x: 0, y: 0, z: segLen * 0.5)
-                rn.eulerAngles = SCNVector3(x: deg(90), y: 0, z: 0)
+                rn.simdPosition = SIMD3<Float>(x: 0, y: 0, z: segLen * 0.5)
+                rn.simdEulerAngles = SIMD3<Float>(x: deg(90), y: 0, z: 0)
                 rn.opacity = CGFloat(0.35 * a.tailRingCount * a.patternContrast)
                 node.addChildNode(rn)
             }
@@ -614,7 +614,7 @@ enum CatBuilder {
         func ring(_ base: Int) -> Int { CatBuilder.ring(base, detail) }
 
         let holder = SCNNode()
-        holder.position = SCNVector3(x: 0, y: 0, z: 0.012 * a.scale)
+        holder.simdPosition = SIMD3<Float>(x: 0, y: 0, z: 0.012 * a.scale)
         rig.neck.addChildNode(holder)
         rig.collarNode = holder
 
@@ -625,8 +625,8 @@ enum CatBuilder {
         case .bandana:
             let cloth = MeshBuilder.blob(radius: r * 1.25, scaleX: 1.0, scaleY: 0.55, scaleZ: 0.9, rings: ring(8), segments: seg(14))
             let cn = SCNNode.make(cloth, Materials.linen(a.collarColor, key: "bandana-\(a.collarColor.hashValue)"))
-            cn.position = SCNVector3(x: 0, y: -r * 0.6, z: r * 0.25)
-            cn.eulerAngles = SCNVector3(x: deg(90), y: 0, z: 0)
+            cn.simdPosition = SIMD3<Float>(x: 0, y: -r * 0.6, z: r * 0.25)
+            cn.simdEulerAngles = SIMD3<Float>(x: deg(90), y: 0, z: 0)
             holder.addChildNode(cn)
         default:
             let band = SCNTorus(ringRadius: CGFloat(r), pipeRadius: CGFloat(r * 0.16)).sized()
@@ -634,14 +634,14 @@ enum CatBuilder {
                 ? Materials.linen(a.collarColor, key: "ribbon-\(a.collarColor.hashValue)")
                 : Materials.pbr(diffuse: UIColor(a.collarColor), roughness: 0.5)
             let bn = SCNNode.make(band, mat)
-            bn.eulerAngles = SCNVector3(x: deg(74), y: 0, z: 0)
+            bn.simdEulerAngles = SIMD3<Float>(x: deg(74), y: 0, z: 0)
             holder.addChildNode(bn)
         }
 
         if a.collarHasBell || a.collarStyle == .bell {
             let bell = SCNSphere(radius: CGFloat(r * 0.30)).sized()
             let bn = SCNNode.make(bell, Materials.metal(a.bellColor, roughness: 0.18))
-            bn.position = SCNVector3(x: 0, y: -r * 0.95, z: r * 0.20)
+            bn.simdPosition = SIMD3<Float>(x: 0, y: -r * 0.95, z: r * 0.20)
             bn.name = "bell"
             holder.addChildNode(bn)
         }
@@ -649,7 +649,7 @@ enum CatBuilder {
             let tag = SCNBox(width: CGFloat(r * 0.42), height: CGFloat(r * 0.42),
                              length: CGFloat(r * 0.05), chamferRadius: CGFloat(r * 0.08))
             let tn = SCNNode.make(tag, Materials.metal(RGBColor(hex: 0xD9C07A), roughness: 0.2))
-            tn.position = SCNVector3(x: 0, y: -r * 0.95, z: r * 0.28)
+            tn.simdPosition = SIMD3<Float>(x: 0, y: -r * 0.95, z: r * 0.28)
             holder.addChildNode(tn)
         }
     }
@@ -666,7 +666,7 @@ enum CatBuilder {
             // what the old `copy()` dance was for.
             let shell = SCNNode.make(mesh, Materials.furShell(a, layer: i))
             let s = 1 + (0.035 + 0.075 * a.effectiveFurLength) * Float(i + 1) * scaleBoost
-            shell.scale = SCNVector3(x: s, y: s, z: s)
+            shell.simdScale = SIMD3<Float>(x: s, y: s, z: s)
             shell.castsShadow = false
             shell.renderingOrder = 10 + i
             node.addChildNode(shell)

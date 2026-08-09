@@ -11,8 +11,8 @@ struct PoseState {
     var headPitch: Float = 0
     var headYaw: Float = 0
     var headRoll: Float = 0
-    var frontFoot = SCNVector3.zero  // offset from the rest stance, in body space
-    var hindFoot = SCNVector3.zero
+    var frontFoot = SIMD3<Float>.zero  // offset from the rest stance, in body space
+    var hindFoot = SIMD3<Float>.zero
     var tuckFront: Float = 0         // front legs folding under the chest
     var tuckHind: Float = 0          // hind legs folding under the haunches
     var tailBasePitch: Float = 0
@@ -75,8 +75,8 @@ final class CatAnimator {
         clock += dt
 
         // ---- Root placement --------------------------------------------
-        rig.root.position = motion.position
-        rig.root.eulerAngles = SCNVector3(x: 0, y: motion.yaw, z: 0)
+        rig.root.simdPosition = motion.position
+        rig.root.simdEulerAngles = SIMD3<Float>(x: 0, y: motion.yaw, z: 0)
 
         // ---- Pose blending ---------------------------------------------
         var target = CatAnimator.targets(for: motion.pose, appearance: rig.appearance)
@@ -103,15 +103,15 @@ final class CatAnimator {
         // ---- Body -------------------------------------------------------
         let bodyY = rig.bodyHeight * pose.bodyHeight
         let bob = motion.speed > 0.02 ? sinf(gait * 4 * .pi) * 0.006 * min(1, motion.speed) : 0
-        rig.body.position = SCNVector3(x: 0,
+        rig.body.simdPosition = SIMD3<Float>(x: 0,
                                        y: bodyY + bob + purrJitter + motion.jumpHeight * 0.05,
                                        z: 0)
         let sway = motion.speed > 0.02 ? sinf(gait * 2 * .pi) * 0.05 * min(1, motion.speed) : 0
-        rig.spine.eulerAngles = SCNVector3(x: pose.bodyPitch + breath * 0.008,
+        rig.spine.simdEulerAngles = SIMD3<Float>(x: pose.bodyPitch + breath * 0.008,
                                            y: sway * 0.35,
                                            z: pose.bodyRoll + sway)
 
-        rig.chestNode.scale = SCNVector3(x: pose.torsoHeight * 0.5 + 0.5,
+        rig.chestNode.simdScale = SIMD3<Float>(x: pose.torsoHeight * 0.5 + 0.5,
                                          y: pose.torsoHeight,
                                          z: pose.torsoLength)
 
@@ -131,13 +131,13 @@ final class CatAnimator {
         updateEyes(motion: motion)
 
         // ---- Jaw ------------------------------------------------------------
-        rig.jaw.eulerAngles = SCNVector3(x: pose.jawOpen * deg(26), y: 0, z: 0)
+        rig.jaw.simdEulerAngles = SIMD3<Float>(x: pose.jawOpen * deg(26), y: 0, z: 0)
 
         // ---- Whisker idle ------------------------------------------------
         let whiskerTwitch = noise.value(clock * 0.9, 5.5) * 0.06
         for (i, pad) in rig.whiskerRoots.enumerated() {
             let s: Float = i == 0 ? -1 : 1
-            pad.eulerAngles = SCNVector3(x: whiskerTwitch, y: s * motion.purr * 0.05, z: 0)
+            pad.simdEulerAngles = SIMD3<Float>(x: whiskerTwitch, y: s * motion.purr * 0.05, z: 0)
         }
     }
 
@@ -151,7 +151,7 @@ final class CatAnimator {
 
         for (i, leg) in rig.legs.enumerated() {
             // Hip position in body space (unaffected by spine pitch/roll).
-            let hipInBody = rig.body.convertPosition(leg.hip.position, from: rig.spine)
+            let hipInBody = rig.body.simdConvertPosition(leg.hip.simdPosition, from: rig.spine)
             let baseOffset = leg.isFront ? pose.frontFoot : pose.hindFoot
 
             var footX = hipInBody.x + baseOffset.x * leg.side
@@ -188,15 +188,15 @@ final class CatAnimator {
                 footZ += pose.frontPawLift * 0.02
             }
 
-            let ankleTargetBody = SCNVector3(x: footX, y: footY + leg.pawLength * 0.55, z: footZ)
-            let ankleTarget = rig.spine.convertPosition(ankleTargetBody, from: rig.body)
+            let ankleTargetBody = SIMD3<Float>(x: footX, y: footY + leg.pawLength * 0.55, z: footZ)
+            let ankleTarget = rig.spine.simdConvertPosition(ankleTargetBody, from: rig.body)
             solveTwoBone(leg, ankleTarget: ankleTarget)
         }
     }
 
     /// Analytic two-bone IK in the leg's sagittal plane.
-    private func solveTwoBone(_ leg: LegRig, ankleTarget: SCNVector3) {
-        let hip = leg.hip.position
+    private func solveTwoBone(_ leg: LegRig, ankleTarget: SIMD3<Float>) {
+        let hip = leg.hip.simdPosition
         let dy = ankleTarget.y - hip.y
         let dz = ankleTarget.z - hip.z
         let u = leg.upperLength
@@ -214,10 +214,10 @@ final class CatAnimator {
         let hipAngle = thetaAim + leg.bendSign * alpha
         let kneeAngle = -leg.bendSign * (.pi - interior)
 
-        leg.hip.eulerAngles = SCNVector3(x: hipAngle, y: 0, z: 0)
-        leg.knee.eulerAngles = SCNVector3(x: kneeAngle, y: 0, z: 0)
+        leg.hip.simdEulerAngles = SIMD3<Float>(x: hipAngle, y: 0, z: 0)
+        leg.knee.simdEulerAngles = SIMD3<Float>(x: kneeAngle, y: 0, z: 0)
         // Keep the paw roughly flat on the floor.
-        leg.ankle.eulerAngles = SCNVector3(x: -(hipAngle + kneeAngle) * 0.92, y: 0, z: 0)
+        leg.ankle.simdEulerAngles = SIMD3<Float>(x: -(hipAngle + kneeAngle) * 0.92, y: 0, z: 0)
     }
 
     private func phaseOffsets(for pose: CatPose) -> [Float] {
@@ -251,18 +251,18 @@ final class CatAnimator {
         if let targetWorld = motion.lookTarget, motion.lookWeight > 0.01 {
             // Solve in spine space, not neck space: the neck's own rotation must not
             // feed back into the angle we are about to give it.
-            let targetInSpine = rig.spine.convertPosition(targetWorld, from: nil)
-            let d = targetInSpine - rig.neck.position
+            let targetInSpine = rig.spine.simdConvertPosition(targetWorld, from: nil)
+            let d = targetInSpine - rig.neck.simdPosition
             let flat = sqrtf(d.x * d.x + d.z * d.z)
             if flat > 1e-4 || abs(d.y) > 1e-4 {
                 let yaw = min(max(atan2f(d.x, d.z), -deg(78)), deg(78))
                 let pitch = min(max(-atan2f(d.y, max(flat, 1e-4)), -deg(48)), deg(52))
                 let w = motion.lookWeight
                 // Split the turn between neck and head so it reads as one motion.
-                rig.neck.eulerAngles = SCNVector3(x: mix(neckPitch, pitch * 0.35, w),
+                rig.neck.simdEulerAngles = SIMD3<Float>(x: mix(neckPitch, pitch * 0.35, w),
                                                   y: yaw * 0.40 * w,
                                                   z: 0)
-                rig.head.eulerAngles = SCNVector3(x: mix(headPitch, pitch * 0.65, w),
+                rig.head.simdEulerAngles = SIMD3<Float>(x: mix(headPitch, pitch * 0.65, w),
                                                   y: mix(headYaw, yaw * 0.60, w),
                                                   z: headRoll)
                 return
@@ -272,8 +272,8 @@ final class CatAnimator {
         // Idle: tiny head drift so the cat never looks frozen.
         let drift = noise.fbm(clock * 0.13, 1.7, octaves: 2)
         let drift2 = noise.fbm(clock * 0.11, 9.3, octaves: 2)
-        rig.neck.eulerAngles = SCNVector3(x: neckPitch + breath * 0.010, y: drift * 0.05, z: 0)
-        rig.head.eulerAngles = SCNVector3(x: headPitch + drift2 * 0.05,
+        rig.neck.simdEulerAngles = SIMD3<Float>(x: neckPitch + breath * 0.010, y: drift * 0.05, z: 0)
+        rig.head.simdEulerAngles = SIMD3<Float>(x: headPitch + drift2 * 0.05,
                                           y: headYaw + drift * 0.10,
                                           z: headRoll)
     }
@@ -294,7 +294,7 @@ final class CatAnimator {
         let swayAmp: Float = 0.05 + agitation * 0.30 + tailFlickImpulse * 0.28
 
         // Negative X lifts the tail, because tailPitch sits inside the root's 180° yaw.
-        rig.tailPitch.eulerAngles = SCNVector3(x: -(deg(30) + pose.tailBasePitch),
+        rig.tailPitch.simdEulerAngles = SIMD3<Float>(x: -(deg(30) + pose.tailBasePitch),
                                                y: 0,
                                                z: pose.tailSide * 0.4)
 
@@ -307,7 +307,7 @@ final class CatAnimator {
             let curlUp = pose.tailCurl * (0.10 + 0.26 * t)
             let droop = (1 - pose.tailCurl) * 0.06 * t
             let wave = noise.value(clock * 0.5 + Float(i), 3.3) * 0.05
-            seg.eulerAngles = SCNVector3(x: curlUp * 0.40 - droop + wave * 0.4,
+            seg.simdEulerAngles = SIMD3<Float>(x: curlUp * 0.40 - droop + wave * 0.4,
                                          y: side,
                                          z: 0)
         }
@@ -331,7 +331,7 @@ final class CatAnimator {
         for (idx, ear) in [rig.earL, rig.earR].enumerated() {
             let side: Float = idx == 0 ? -1 : 1
             let twitch = (idx == 0 ? earTwitch : earTwitch * 0.6) * 0.18
-            ear.eulerAngles = SCNVector3(x: deg(-72) + base + pin * deg(46) + twitch,
+            ear.simdEulerAngles = SIMD3<Float>(x: deg(-72) + base + pin * deg(46) + twitch,
                                          y: side * (deg(24) + pin * deg(28)),
                                          z: side * (tilt + pin * deg(20)))
         }
@@ -343,21 +343,21 @@ final class CatAnimator {
         let closed = 1 - clamp(motion.eyeOpen)
         let upper = deg(-90) + closed * deg(72)
         let lower = deg(90) - closed * deg(58)
-        rig.lidUpperL.eulerAngles = SCNVector3(x: upper, y: 0, z: 0)
-        rig.lidUpperR.eulerAngles = SCNVector3(x: upper, y: 0, z: 0)
-        rig.lidLowerL.eulerAngles = SCNVector3(x: lower, y: 0, z: 0)
-        rig.lidLowerR.eulerAngles = SCNVector3(x: lower, y: 0, z: 0)
+        rig.lidUpperL.simdEulerAngles = SIMD3<Float>(x: upper, y: 0, z: 0)
+        rig.lidUpperR.simdEulerAngles = SIMD3<Float>(x: upper, y: 0, z: 0)
+        rig.lidLowerL.simdEulerAngles = SIMD3<Float>(x: lower, y: 0, z: 0)
+        rig.lidLowerR.simdEulerAngles = SIMD3<Float>(x: lower, y: 0, z: 0)
 
         // Eyes converge slightly on whatever the cat is watching.
         if let target = motion.lookTarget, motion.lookWeight > 0.2 {
             for (idx, socket) in [rig.eyeL, rig.eyeR].enumerated() {
                 let side: Float = idx == 0 ? -1 : 1
-                let local = rig.head.convertPosition(target, from: nil)
+                let local = rig.head.simdConvertPosition(target, from: nil)
                 let yaw = clamp(atan2f(local.x, max(0.02, local.z)), -0.35, 0.35)
                 let pitch = clamp(-atan2f(local.y, max(0.02, local.z)), -0.28, 0.28)
-                socket.eulerAngles = SCNVector3(x: pitch * 0.6,
+                socket.simdEulerAngles = SIMD3<Float>(x: pitch * 0.6,
                                                 y: side * deg(16) + yaw * 0.6,
-                                                z: socket.eulerAngles.z)
+                                                z: socket.simdEulerAngles.z)
             }
         }
     }
@@ -398,8 +398,8 @@ final class CatAnimator {
             p.bodyPitch = deg(-26)
             p.neckPitch = deg(-16)
             p.tuckHind = 0.80
-            p.hindFoot = SCNVector3(x: 0.006, y: 0.018, z: 0.048)
-            p.frontFoot = SCNVector3(x: 0, y: 0, z: -0.012)
+            p.hindFoot = SIMD3<Float>(x: 0.006, y: 0.018, z: 0.048)
+            p.frontFoot = SIMD3<Float>(x: 0, y: 0, z: -0.012)
             p.tailBasePitch = deg(-24)
             p.tailCurl = 0.55
             p.tailSide = 0.5
@@ -412,8 +412,8 @@ final class CatAnimator {
             p.neckPitch = deg(-24)
             p.headPitch = deg(14)
             p.tuckHind = 0.85
-            p.hindFoot = SCNVector3(x: 0.006, y: 0.020, z: 0.054)
-            p.frontFoot = SCNVector3(x: 0, y: 0, z: -0.016)
+            p.hindFoot = SIMD3<Float>(x: 0.006, y: 0.020, z: 0.054)
+            p.frontFoot = SIMD3<Float>(x: 0, y: 0, z: -0.016)
             p.tailBasePitch = deg(-34)
             p.tailCurl = 0.5
             p.tailSide = 0.6
@@ -437,8 +437,8 @@ final class CatAnimator {
             p.bodyRoll = deg(38)
             p.tuckFront = 0.30
             p.tuckHind = 0.35
-            p.frontFoot = SCNVector3(x: 0.045, y: 0.010, z: 0.055)
-            p.hindFoot = SCNVector3(x: 0.050, y: 0.008, z: -0.035)
+            p.frontFoot = SIMD3<Float>(x: 0.045, y: 0.010, z: 0.055)
+            p.hindFoot = SIMD3<Float>(x: 0.050, y: 0.008, z: -0.035)
             p.neckPitch = deg(14)
             p.headRoll = deg(-22)
             p.tailCurl = 0.25
@@ -474,8 +474,8 @@ final class CatAnimator {
             p.torsoLength = 1.14
             p.torsoHeight = 0.92
             p.bodyPitch = deg(22)
-            p.frontFoot = SCNVector3(x: 0, y: -0.004, z: 0.075)
-            p.hindFoot = SCNVector3(x: 0, y: 0, z: -0.045)
+            p.frontFoot = SIMD3<Float>(x: 0, y: -0.004, z: 0.075)
+            p.hindFoot = SIMD3<Float>(x: 0, y: 0, z: -0.045)
             p.neckPitch = deg(-16)
             p.headPitch = deg(-14)
             p.tailBasePitch = deg(46)
@@ -531,16 +531,16 @@ final class CatAnimator {
         case .pounce:
             p.bodyHeight = 1.12
             p.bodyPitch = deg(-16)
-            p.frontFoot = SCNVector3(x: 0.010, y: 0.085, z: 0.075)
-            p.hindFoot = SCNVector3(x: 0, y: 0.010, z: -0.030)
+            p.frontFoot = SIMD3<Float>(x: 0.010, y: 0.085, z: 0.075)
+            p.hindFoot = SIMD3<Float>(x: 0, y: 0.010, z: -0.030)
             p.neckPitch = deg(-14)
             p.tailBasePitch = deg(24)
 
         case .rearUp:
             p.bodyHeight = 1.06
             p.bodyPitch = deg(-46)
-            p.frontFoot = SCNVector3(x: 0.020, y: 0.135, z: 0.055)
-            p.hindFoot = SCNVector3(x: 0, y: 0.004, z: 0.015)
+            p.frontFoot = SIMD3<Float>(x: 0.020, y: 0.135, z: 0.055)
+            p.hindFoot = SIMD3<Float>(x: 0, y: 0.004, z: 0.015)
             p.neckPitch = deg(-22)
             p.headPitch = deg(-16)
             p.frontPawLift = 0.8
@@ -558,8 +558,8 @@ final class CatAnimator {
         case .scratchingPost:
             p.bodyHeight = 1.04
             p.bodyPitch = deg(-54)
-            p.frontFoot = SCNVector3(x: 0.024, y: 0.150, z: 0.060)
-            p.hindFoot = SCNVector3(x: 0, y: 0, z: 0.010)
+            p.frontFoot = SIMD3<Float>(x: 0.024, y: 0.150, z: 0.060)
+            p.hindFoot = SIMD3<Float>(x: 0, y: 0, z: 0.010)
             p.neckPitch = deg(-18)
             p.frontPawLift = 0.9
             p.tailBasePitch = deg(10)

@@ -51,7 +51,7 @@ func expect(_ condition: Bool, _ message: @autoclosure () -> String) {
 }
 
 func finite(_ v: Float) -> Bool { v.isFinite }
-func finite(_ v: SCNVector3) -> Bool { v.x.isFinite && v.y.isFinite && v.z.isFinite }
+func finite(_ v: SIMD3<Float>) -> Bool { v.x.isFinite && v.y.isFinite && v.z.isFinite }
 func finite(_ v: Vec3) -> Bool { v.x.isFinite && v.y.isFinite && v.z.isFinite }
 
 func section(_ name: String, _ body: () -> Void) {
@@ -75,16 +75,16 @@ section("math") {
     expect(abs(angleDelta(deg(10), deg(350)) + deg(20)) < 1e-4, "angleDelta wraps backward")
     expect(abs(approach(0, 1, rate: 10, dt: 10) - 1) < 1e-3, "approach converges")
 
-    let a = SCNVector3(x: 3, y: 4, z: 0)
+    let a = SIMD3<Float>(x: 3, y: 4, z: 0)
     expect(abs(a.length - 5) < 1e-5, "length")
     expect(abs(a.normalized.length - 1) < 1e-5, "normalized")
-    expect(abs(dot(SCNVector3(x: 1, y: 0, z: 0), SCNVector3(x: 0, y: 1, z: 0))) < 1e-6, "dot orthogonal")
-    let c = cross(SCNVector3(x: 1, y: 0, z: 0), SCNVector3(x: 0, y: 1, z: 0))
+    expect(abs(dot(SIMD3<Float>(x: 1, y: 0, z: 0), SIMD3<Float>(x: 0, y: 1, z: 0))) < 1e-6, "dot orthogonal")
+    let c = cross(SIMD3<Float>(x: 1, y: 0, z: 0), SIMD3<Float>(x: 0, y: 1, z: 0))
     expect(abs(c.z - 1) < 1e-6, "cross right-handed")
 
     // yawTowards: +Z is the cat's forward.
-    expect(abs(yawTowards(from: .zero, to: SCNVector3(x: 0, y: 0, z: 1))) < 1e-5, "yaw forward is 0")
-    expect(abs(yawTowards(from: .zero, to: SCNVector3(x: 1, y: 0, z: 0)) - .pi / 2) < 1e-5, "yaw +X is 90°")
+    expect(abs(yawTowards(from: .zero, to: SIMD3<Float>(x: 0, y: 0, z: 1))) < 1e-5, "yaw forward is 0")
+    expect(abs(yawTowards(from: .zero, to: SIMD3<Float>(x: 1, y: 0, z: 0)) - .pi / 2) < 1e-5, "yaw +X is 90°")
 
     var g = SeededGenerator(seed: 42)
     var g2 = SeededGenerator(seed: 42)
@@ -339,7 +339,7 @@ section("animator") {
     for pose in poses {
         motion.pose = pose
         motion.speed = pose.isLocomotion ? 1.2 : 0
-        motion.position = SCNVector3(x: 0.3, y: 0, z: -0.5)
+        motion.position = SIMD3<Float>(x: 0.3, y: 0, z: -0.5)
         motion.yaw = 0.7
         motion.lookTarget = RoomLayout.cameraPosition
         motion.lookWeight = 1
@@ -350,35 +350,35 @@ section("animator") {
         for _ in 0..<240 {
             animator.update(dt: 1.0 / 60, motion: motion)
         }
-        expect(finite(rig.body.position), "\(pose) body position finite")
-        expect(finite(rig.spine.eulerAngles), "\(pose) spine angles finite")
-        expect(finite(rig.head.eulerAngles), "\(pose) head angles finite")
-        expect(finite(rig.neck.eulerAngles), "\(pose) neck angles finite")
-        expect(finite(rig.tailPitch.eulerAngles), "\(pose) tail pitch finite")
+        expect(finite(rig.body.simdPosition), "\(pose) body position finite")
+        expect(finite(rig.spine.simdEulerAngles), "\(pose) spine angles finite")
+        expect(finite(rig.head.simdEulerAngles), "\(pose) head angles finite")
+        expect(finite(rig.neck.simdEulerAngles), "\(pose) neck angles finite")
+        expect(finite(rig.tailPitch.simdEulerAngles), "\(pose) tail pitch finite")
         for (i, leg) in rig.legs.enumerated() {
-            expect(finite(leg.hip.eulerAngles), "\(pose) leg \(i) hip finite")
-            expect(finite(leg.knee.eulerAngles), "\(pose) leg \(i) knee finite")
-            expect(finite(leg.ankle.eulerAngles), "\(pose) leg \(i) ankle finite")
-            expect(abs(leg.hip.eulerAngles.x) < 6.4, "\(pose) leg \(i) hip angle bounded")
-            expect(abs(leg.knee.eulerAngles.x) < 6.4, "\(pose) leg \(i) knee angle bounded")
+            expect(finite(leg.hip.simdEulerAngles), "\(pose) leg \(i) hip finite")
+            expect(finite(leg.knee.simdEulerAngles), "\(pose) leg \(i) knee finite")
+            expect(finite(leg.ankle.simdEulerAngles), "\(pose) leg \(i) ankle finite")
+            expect(abs(leg.hip.simdEulerAngles.x) < 6.4, "\(pose) leg \(i) hip angle bounded")
+            expect(abs(leg.knee.simdEulerAngles.x) < 6.4, "\(pose) leg \(i) knee angle bounded")
         }
         for seg in rig.tailSegments {
-            expect(finite(seg.eulerAngles), "\(pose) tail segment finite")
+            expect(finite(seg.simdEulerAngles), "\(pose) tail segment finite")
         }
-        expect(finite(rig.earL.eulerAngles) && finite(rig.earR.eulerAngles), "\(pose) ears finite")
-        expect(finite(rig.lidUpperL.eulerAngles), "\(pose) eyelids finite")
+        expect(finite(rig.earL.simdEulerAngles) && finite(rig.earR.simdEulerAngles), "\(pose) ears finite")
+        expect(finite(rig.lidUpperL.simdEulerAngles), "\(pose) eyelids finite")
     }
 
     // Look-at must not drift: repeated frames aimed at a fixed point should settle.
     motion.pose = .sittingTall
     motion.speed = 0
-    motion.lookTarget = SCNVector3(x: 1, y: 0.5, z: 1)
+    motion.lookTarget = SIMD3<Float>(x: 1, y: 0.5, z: 1)
     motion.lookWeight = 1
     for _ in 0..<120 { animator.update(dt: 1.0 / 60, motion: motion) }
-    let firstYaw = rig.head.eulerAngles.y
+    let firstYaw = rig.head.simdEulerAngles.y
     for _ in 0..<120 { animator.update(dt: 1.0 / 60, motion: motion) }
-    expect(abs(rig.head.eulerAngles.y - firstYaw) < 1e-3,
-           "look-at is stable, drifted \(rig.head.eulerAngles.y - firstYaw)")
+    expect(abs(rig.head.simdEulerAngles.y - firstYaw) < 1e-3,
+           "look-at is stable, drifted \(rig.head.simdEulerAngles.y - firstYaw)")
 }
 
 // MARK: - Brain
@@ -465,9 +465,9 @@ section("interaction") {
 
     // The wand must not leave the cat stuck.
     let brain2 = CatBrain(save: save)
-    brain2.setWand(active: true, tip: SCNVector3(x: 0, y: 0.2, z: 0))
+    brain2.setWand(active: true, tip: SIMD3<Float>(x: 0, y: 0.2, z: 0))
     for i in 0..<6000 {
-        brain2.setWand(active: true, tip: SCNVector3(x: sinf(Float(i) * 0.01) * 0.8,
+        brain2.setWand(active: true, tip: SIMD3<Float>(x: sinf(Float(i) * 0.01) * 0.8,
                                                      y: 0.15 + 0.3 * abs(sinf(Float(i) * 0.02)),
                                                      z: -0.4 + cosf(Float(i) * 0.013) * 0.6))
         brain2.update(dt: 1.0 / 30, sky: sky)
@@ -618,7 +618,7 @@ section("room layout") {
     }
     for x in stride(from: Float(-4), through: 4, by: 0.25) {
         for z in stride(from: Float(-4), through: 4, by: 0.25) {
-            let p = RoomLayout.clampToWalkable(SCNVector3(x: x, y: 0, z: z))
+            let p = RoomLayout.clampToWalkable(SIMD3<Float>(x: x, y: 0, z: z))
             expect(p.x >= -RoomLayout.halfWidth && p.x <= RoomLayout.halfWidth,
                    "clamped X inside room (\(p.x))")
             expect(p.z >= -RoomLayout.halfDepth && p.z <= RoomLayout.halfDepth,
@@ -1141,7 +1141,7 @@ section("sun arc") {
     // Sampled across a whole year, because the failure this guards against is
     // seasonal: the real azimuth wanders far more in June than in December, and a
     // constraint that only holds at the equinox holds for about a fortnight.
-    var samples: [(month: Int, hour: Int, dir: SCNVector3, elevation: Float)] = []
+    var samples: [(month: Int, hour: Int, dir: SIMD3<Float>, elevation: Float)] = []
     for month in [1, 4, 6, 9, 12] {
         for hour in 0..<24 {
             var comps = DateComponents()
@@ -1212,15 +1212,15 @@ section("mouth") {
         var motion = CatMotion()
         motion.pose = .sitting
         for _ in 0..<120 { animator.update(dt: 1.0 / 60, motion: motion) }
-        let closedCavity = rig.head.convertPosition(cavity.worldPosition, from: nil)
-        let closedTongue = rig.head.convertPosition(tongue.worldPosition, from: nil)
+        let closedCavity = rig.head.simdConvertPosition(cavity.simdWorldPosition, from: nil)
+        let closedTongue = rig.head.simdConvertPosition(tongue.simdWorldPosition, from: nil)
 
         animator.triggerMeow()
         for _ in 0..<8 { animator.update(dt: 1.0 / 60, motion: motion) }
-        let openCavity = rig.head.convertPosition(cavity.worldPosition, from: nil)
-        let openTongue = rig.head.convertPosition(tongue.worldPosition, from: nil)
+        let openCavity = rig.head.simdConvertPosition(cavity.simdWorldPosition, from: nil)
+        let openTongue = rig.head.simdConvertPosition(tongue.simdWorldPosition, from: nil)
 
-        expect(rig.jaw.eulerAngles.x > 0.05, "\(breed.rawValue) actually opens its jaw")
+        expect(rig.jaw.simdEulerAngles.x > 0.05, "\(breed.rawValue) actually opens its jaw")
 
         // The whole point of parenting the cavity to the head: it must stay where it
         // is while the jaw swings away, or it is not a mouth, it is a second chin.
@@ -1234,7 +1234,7 @@ section("mouth") {
 
         // The cavity has to sit inside the head, spanning the gap the jaw opens —
         // far enough back not to poke through the muzzle, not so far it misses.
-        let inHead = rig.head.convertPosition(cavity.position, from: rig.head)
+        let inHead = rig.head.simdConvertPosition(cavity.simdPosition, from: rig.head)
         let headRadius = a.headRadius
         expect(inHead.length < headRadius * 1.2,
                "\(breed.rawValue) mouth cavity is inside the head (\(inHead.length) vs \(headRadius))")
@@ -1271,9 +1271,9 @@ section("translucency") {
 
     // The geometry of the effect. The player sits at +Z looking down the room, so a
     // light beyond the cat is backlighting and a light behind the player is not.
-    let at = SCNVector3(x: 0, y: 0.2, z: -0.6)
+    let at = SIMD3<Float>(x: 0, y: 0.2, z: -0.6)
     let behindCat = (at - RoomLayout.cameraPosition).normalized
-    let behindPlayer = SCNVector3(x: -behindCat.x, y: -behindCat.y, z: -behindCat.z)
+    let behindPlayer = SIMD3<Float>(x: -behindCat.x, y: -behindCat.y, z: -behindCat.z)
     let back = Translucency.backlight(at: at, lightDirection: behindCat)
     let front = Translucency.backlight(at: at, lightDirection: behindPlayer)
     expect(back > 0.98, "a light directly beyond the cat backlights it fully (\(back))")
@@ -1283,7 +1283,7 @@ section("translucency") {
     // axis should already be most of the way gone.
     let side = Translucency.backlight(
         at: at,
-        lightDirection: SCNVector3(x: behindCat.x * 0.5 + 0.866, y: behindCat.y * 0.5,
+        lightDirection: SIMD3<Float>(x: behindCat.x * 0.5 + 0.866, y: behindCat.y * 0.5,
                                    z: behindCat.z * 0.5).normalized)
     expect(side < back * 0.3, "transmission falls off sharply off-axis (\(side) vs \(back))")
 
@@ -1314,16 +1314,16 @@ section("translucency") {
     var midday = DateComponents()
     midday.year = 2026; midday.month = 6; midday.day = 21; midday.hour = 12
     let noon = WorldClock.sky(at: cal.date(from: midday)!, timeZone: TimeZone(identifier: "UTC")!)
-    func level(at position: SCNVector3) -> Float {
-        rig.root.position = position
+    func level(at position: SIMD3<Float>) -> Float {
+        rig.root.simdPosition = position
         Translucency.apply(rig.translucentParts, sky: noon, lanternOn: false)
         return rig.translucentParts.map { Float($0.material.emission.intensity) }.max() ?? 0
     }
-    let byWindow = level(at: SCNVector3(x: 0, y: 0, z: -1.9))
-    let atPlayer = level(at: SCNVector3(x: 0, y: 0, z: 1.6))
+    let byWindow = level(at: SIMD3<Float>(x: 0, y: 0, z: -1.9))
+    let atPlayer = level(at: SIMD3<Float>(x: 0, y: 0, z: 1.6))
     expect(byWindow > atPlayer * 2,
            "a cat at the window is backlit; one beside the player is not (\(byWindow) vs \(atPlayer))")
-    rig.root.position = .zero
+    rig.root.simdPosition = .zero
 
     if CommandLine.arguments.contains("--budget") {
         print("    ear transmission by hour: " +

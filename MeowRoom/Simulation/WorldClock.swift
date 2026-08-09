@@ -35,14 +35,14 @@ struct SkyState {
     var phase: DayPhase
 
     /// Sun position on a unit sphere in world space (North = +Z, East = +X, Up = +Y).
-    var sunDirection: SCNVector3Like {
-        SCNVector3Like(x: cosf(sunElevation) * sinf(sunAzimuth),
+    var sunDirection: SIMD3<Float> {
+        SIMD3<Float>(x: cosf(sunElevation) * sinf(sunAzimuth),
                        y: sinf(sunElevation),
                        z: cosf(sunElevation) * cosf(sunAzimuth))
     }
 
-    var moonDirection: SCNVector3Like {
-        SCNVector3Like(x: cosf(moonElevation) * sinf(moonAzimuth),
+    var moonDirection: SIMD3<Float> {
+        SIMD3<Float>(x: cosf(moonElevation) * sinf(moonAzimuth),
                        y: sinf(moonElevation),
                        z: cosf(moonElevation) * cosf(moonAzimuth))
     }
@@ -93,12 +93,10 @@ struct SkyState {
     var wantsLampLight: Bool { sunElevation < 0.06 }
 }
 
-/// Minimal vector type so `SkyState` stays free of SceneKit imports at the model layer.
-struct SCNVector3Like {
-    var x: Float
-    var y: Float
-    var z: Float
-}
+// The hand-rolled vector that used to live here is gone. It existed so that
+// `SkyState` could stay free of SceneKit at the model layer, which was the right
+// instinct and the wrong remedy — `SIMD3<Float>` is in the standard library, so
+// the model layer can have vectors without importing a renderer at all.
 
 enum WorldClock {
 

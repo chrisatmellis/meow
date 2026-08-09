@@ -222,21 +222,21 @@ final class LightingRig {
     /// What is bought is that no hour of no month can put a bar of sunlight across
     /// the floor, which is worth more here than the seasonal accuracy of an object
     /// the player can never actually see.
-    static func arcDirection(azimuth: Float) -> SCNVector3 {
+    static func arcDirection(azimuth: Float) -> SIMD3<Float> {
         // Real azimuth is 0 at north and increases eastward, so a southern sun runs
         // from roughly 90 degrees at sunrise to 270 at sunset. Clamped, because in
         // midsummer at this latitude it begins and ends outside that.
         let p = clamp(remap(azimuth, deg(90), deg(270), 0, 1))
         let theta = p * .pi
-        return SCNVector3(x: cosf(theta), y: sinf(theta), z: -windowOffset).normalized
+        return SIMD3<Float>(x: cosf(theta), y: sinf(theta), z: -windowOffset).normalized
     }
 
     func apply(sky: SkyState, scene: SCNScene, room: RoomNode, lanternOn: Bool) {
         // --- Sun placement.
         let d = LightingRig.arcDirection(azimuth: sky.sunAzimuth)
-        let sunPos = SCNVector3(x: d.x * 9, y: max(0.2, d.y * 9), z: d.z * 9)
-        sunNode.position = sunPos
-        sunNode.look(at: SCNVector3(x: 0, y: 0.6, z: -0.2))
+        let sunPos = SIMD3<Float>(x: d.x * 9, y: max(0.2, d.y * 9), z: d.z * 9)
+        sunNode.simdPosition = sunPos
+        sunNode.simdLook(at: SIMD3<Float>(0, 0.6, -0.2), up: SIMD3<Float>(0, 1, 0), localFront: SIMD3<Float>(0, 0, -1))
 
         let budget = LightingRig.budget(sky: sky, lanternOn: lanternOn)
         let lit = LightingRig.intensities(for: budget)
@@ -247,8 +247,8 @@ final class LightingRig {
 
         // --- Moon.
         let m = LightingRig.arcDirection(azimuth: sky.moonAzimuth)
-        moonNode.position = SCNVector3(x: m.x * 9, y: max(0.2, m.y * 9), z: m.z * 9)
-        moonNode.look(at: SCNVector3(x: 0, y: 0.6, z: -0.2))
+        moonNode.simdPosition = SIMD3<Float>(x: m.x * 9, y: max(0.2, m.y * 9), z: m.z * 9)
+        moonNode.simdLook(at: SIMD3<Float>(0, 0.6, -0.2), up: SIMD3<Float>(0, 1, 0), localFront: SIMD3<Float>(0, 0, -1))
         moon.intensity = CGFloat(lit.moon)
 
         // --- Ambient from the sky colour.
@@ -308,9 +308,9 @@ final class LightingRig {
             let visible = smoothstep(0.02, 0.22, sky.sunElevation)
             patch.opacity = CGFloat(visible * 0.07)
             let p = RoomLayout.sunPatchPosition(sky: sky)
-            patch.position = SCNVector3(x: p.x, y: 0.033, z: p.z)
+            patch.simdPosition = SIMD3<Float>(x: p.x, y: 0.033, z: p.z)
             let stretch = 1.0 + 1.6 * (1 - clamp(sky.sunElevation / 0.9))
-            patch.scale = SCNVector3(x: stretch, y: 1.0 + 0.4 * stretch, z: 1)
+            patch.simdScale = SIMD3<Float>(x: stretch, y: 1.0 + 0.4 * stretch, z: 1)
         }
 
         // --- Dust motes only show when there is a beam to catch.

@@ -31,8 +31,8 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
     private let wandAnchor = SCNNode()
     private var lureNode = SCNNode()
     private var stringNode = SCNNode()
-    private var lurePosition = SCNVector3(x: 0, y: 0.2, z: 0.2)
-    private var lureVelocity = SCNVector3.zero
+    private var lurePosition = SIMD3<Float>(x: 0, y: 0.2, z: 0.2)
+    private var lureVelocity = SIMD3<Float>.zero
     private(set) var wandActive = false
 
     // Petting
@@ -112,15 +112,15 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
         camera.contrast = 0.05
 
         cameraNode.camera = camera
-        cameraNode.position = RoomLayout.cameraPosition
-        cameraNode.eulerAngles = SCNVector3(x: RoomLayout.cameraPitch, y: 0, z: 0)
+        cameraNode.simdPosition = RoomLayout.cameraPosition
+        cameraNode.simdEulerAngles = SIMD3<Float>(x: RoomLayout.cameraPitch, y: 0, z: 0)
         scene.rootNode.addChildNode(cameraNode)
 
         buildWand()
         Haptics.prepare()
 
         // The cat starts wherever the brain decided.
-        rig.root.position = brain.motion.position
+        rig.root.simdPosition = brain.motion.position
     }
 
     /// A bell on the collar rings whenever the cat lands or bolts.
@@ -160,21 +160,21 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
     // MARK: - Wand
 
     private func buildWand() {
-        wandRoot.position = SCNVector3(x: 0.20, y: -0.30, z: -0.22)
-        wandRoot.eulerAngles = SCNVector3(x: deg(-38), y: deg(-16), z: deg(18))
+        wandRoot.simdPosition = SIMD3<Float>(x: 0.20, y: -0.30, z: -0.22)
+        wandRoot.simdEulerAngles = SIMD3<Float>(x: deg(-38), y: deg(-16), z: deg(18))
         cameraNode.addChildNode(wandRoot)
 
         let stick = SCNCylinder(radius: 0.006, height: 0.62)
         let stickNode = SCNNode.make(stick, Materials.pbr(diffuse: UIColor(RGBColor(hex: 0x6B4A2E)), roughness: 0.6))
-        stickNode.position = SCNVector3(x: 0, y: 0.31, z: 0)
+        stickNode.simdPosition = SIMD3<Float>(x: 0, y: 0.31, z: 0)
         wandRoot.addChildNode(stickNode)
 
         let grip = SCNCylinder(radius: 0.0085, height: 0.10)
         let gripNode = SCNNode.make(grip, Materials.linen(RGBColor(hex: 0x3A3A42), key: "grip"))
-        gripNode.position = SCNVector3(x: 0, y: 0.05, z: 0)
+        gripNode.simdPosition = SIMD3<Float>(x: 0, y: 0.05, z: 0)
         wandRoot.addChildNode(gripNode)
 
-        wandAnchor.position = SCNVector3(x: 0, y: 0.63, z: 0)
+        wandAnchor.simdPosition = SIMD3<Float>(x: 0, y: 0.63, z: 0)
         wandRoot.addChildNode(wandAnchor)
 
         // The lure lives in world space so it can trail behind the wand tip.
@@ -197,7 +197,7 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
         lureNode.isHidden = !active
         stringNode.isHidden = !active
         if active {
-            lurePosition = wandAnchor.worldPosition
+            lurePosition = wandAnchor.simdWorldPosition
             lurePosition.y = max(0.06, lurePosition.y - 0.55)
             lureVelocity = .zero
         }
@@ -207,17 +207,17 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
     /// Swings the wand from a drag on screen.
     func moveWand(dx: Float, dy: Float) {
         guard wandActive else { return }
-        let yaw = clamp(wandRoot.eulerAngles.y - dx * 0.9, deg(-70), deg(50))
-        let pitch = clamp(wandRoot.eulerAngles.x - dy * 0.9, deg(-75), deg(5))
-        wandRoot.eulerAngles = SCNVector3(x: pitch, y: yaw, z: wandRoot.eulerAngles.z)
+        let yaw = clamp(wandRoot.simdEulerAngles.y - dx * 0.9, deg(-70), deg(50))
+        let pitch = clamp(wandRoot.simdEulerAngles.x - dy * 0.9, deg(-75), deg(5))
+        wandRoot.simdEulerAngles = SIMD3<Float>(x: pitch, y: yaw, z: wandRoot.simdEulerAngles.z)
     }
 
     private func updateWand(dt: Float) {
         guard wandActive else { return }
-        let anchor = wandAnchor.worldPosition
+        let anchor = wandAnchor.simdWorldPosition
 
         // Damped spring toward a point hanging below the wand tip.
-        let rest = SCNVector3(x: anchor.x, y: anchor.y - 0.60, z: anchor.z)
+        let rest = SIMD3<Float>(x: anchor.x, y: anchor.y - 0.60, z: anchor.z)
         let toRest = rest - lurePosition
         let stiffness: Float = 26
         let damping: Float = 6.5
@@ -225,20 +225,20 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
         lurePosition += lureVelocity * dt
         lurePosition.y = max(0.045, lurePosition.y)
 
-        lureNode.position = lurePosition
+        lureNode.simdPosition = lurePosition
         let dir = (lurePosition - anchor).normalized
         // Aim the feather's +Z axis down the string.
-        lureNode.eulerAngles = SCNVector3(x: -asinf(clamp(dir.y, -1, 1)),
+        lureNode.simdEulerAngles = SIMD3<Float>(x: -asinf(clamp(dir.y, -1, 1)),
                                           y: atan2f(dir.x, dir.z),
                                           z: 0)
 
         // Stretch the string between the tip and the lure.
         let mid = (anchor + lurePosition) * 0.5
         let len = (lurePosition - anchor).length
-        stringNode.position = mid
-        stringNode.scale = SCNVector3(x: 1, y: max(0.01, len), z: 1)
-        stringNode.look(at: lurePosition, up: SCNVector3(x: 0, y: 1, z: 0),
-                        localFront: SCNVector3(x: 0, y: 1, z: 0))
+        stringNode.simdPosition = mid
+        stringNode.simdScale = SIMD3<Float>(x: 1, y: max(0.01, len), z: 1)
+        stringNode.simdLook(at: lurePosition, up: SIMD3<Float>(0, 1, 0),
+                            localFront: SIMD3<Float>(0, 1, 0))
 
         brain.setWand(active: true, tip: lurePosition)
     }
@@ -251,13 +251,13 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
     }
 
     func dropTreat() {
-        let spot = SCNVector3(x: RoomLayout.playerLapSpot.x + Float.random(in: -0.25...0.25),
+        let spot = SIMD3<Float>(x: RoomLayout.playerLapSpot.x + Float.random(in: -0.25...0.25),
                               y: 0.02,
                               z: RoomLayout.playerLapSpot.z + Float.random(in: -0.15...0.15))
         treatNode?.removeFromParentNode()
         let treat = MeshBuilder.blob(radius: 0.014, scaleX: 1.0, scaleY: 0.7, scaleZ: 1.3, rings: 6, segments: 8)
         let n = SCNNode.make(treat, Materials.pbr(diffuse: UIColor(RGBColor(hex: 0xB5763C)), roughness: 0.8))
-        n.position = spot
+        n.simdPosition = spot
         scene.rootNode.addChildNode(n)
         treatNode = n
         brain.dropTreat(at: spot)
@@ -370,7 +370,7 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
             if name.hasPrefix("ear") { return .head }
             if name.hasPrefix("tail") { return .tail }
         }
-        let local = rig.spine.convertPosition(hit.worldCoordinates, from: nil)
+        let local = rig.spine.simdConvertPosition(SIMD3<Float>(hit.worldCoordinates.x, hit.worldCoordinates.y, hit.worldCoordinates.z), from: nil)
         let L = rig.torsoLength
         let R = rig.torsoRadius
 
@@ -392,7 +392,7 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
         brain.appearance = appearance
         brain.personality = personality
         scene.rootNode.addChildNode(rig.root)
-        rig.root.position = brain.motion.position
+        rig.root.simdPosition = brain.motion.position
     }
 
     // MARK: - Props
@@ -409,10 +409,10 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
             SCNAction.wait(duration: 6),
             SCNAction.fadeOut(duration: 0.4),
             SCNAction.run { [weak self] node in
-                node.position = SCNVector3(x: RoomLayout.tableCenter.x + 0.20,
+                node.simdPosition = SIMD3<Float>(x: RoomLayout.tableCenter.x + 0.20,
                                            y: RoomLayout.tableTop + 0.043,
                                            z: RoomLayout.tableCenter.z - 0.10)
-                node.eulerAngles = .zero
+                node.simdEulerAngles = .zero
                 self?.teacupFalling = false
             },
             SCNAction.fadeIn(duration: 0.4)
@@ -425,15 +425,15 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
 
         if let food = room.foodPile {
             let level = max(0.02, state.feederFood)
-            food.scale = SCNVector3(x: 1, y: level, z: 1)
-            food.position = SCNVector3(x: RoomLayout.feederBowl.x,
+            food.simdScale = SIMD3<Float>(x: 1, y: level, z: 1)
+            food.simdPosition = SIMD3<Float>(x: RoomLayout.feederBowl.x,
                                        y: 0.006 + 0.015 * level,
                                        z: RoomLayout.feederBowl.z)
             food.isHidden = state.feederFood < 0.02
         }
         if let water = room.waterSurface {
             let level = max(0.02, state.fountainWater)
-            water.position = SCNVector3(x: RoomLayout.fountainBase.x - 0.20,
+            water.simdPosition = SIMD3<Float>(x: RoomLayout.fountainBase.x - 0.20,
                                         y: 0.012 + 0.048 * level,
                                         z: RoomLayout.fountainBase.z)
             water.isHidden = state.fountainWater < 0.02
@@ -443,7 +443,7 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
             stream.isHidden = !on
             if on {
                 // Cheap shimmer.
-                stream.scale = SCNVector3(x: 1 + sinf(Float(CACurrentMediaTime()) * 22) * 0.12, y: 1, z: 1)
+                stream.simdScale = SIMD3<Float>(x: 1 + sinf(Float(CACurrentMediaTime()) * 22) * 0.12, y: 1, z: 1)
             }
         }
         if let litter = room.litterSurface, let mat = litter.geometry?.firstMaterial {
