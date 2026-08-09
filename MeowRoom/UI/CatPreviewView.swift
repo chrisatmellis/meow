@@ -210,8 +210,8 @@ final class CatPreviewController: NSObject, ObservableObject {
         posed size \(p3(size))
         bodyH \(f(rig.bodyHeight)) · body@ \(p3(bodyWorld))
         head relBody \(p3(rig.head.position(relativeTo: rig.body)))
-        head .position \(p3(rig.head.position)) · .transl \(p3(rig.head.transform.translation))
-        head .matrix col3 \(p3(SIMD3<Float>(rig.head.transform.matrix[3].x, rig.head.transform.matrix[3].y, rig.head.transform.matrix[3].z)))
+        head .position \(p3(rig.head.position))
+        \(CatShape.lastReport)
         skin \(rig.skins.first?.report ?? "-")
         gpu \(drawn.map { p3($0.extents) } ?? "nil") · headW \(p3(headWorld))
         """

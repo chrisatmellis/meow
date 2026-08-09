@@ -36,6 +36,11 @@ import RealityKit
 /// each joint from where it was to where it now is.
 enum CatShape {
 
+    #if DEBUG
+    /// The last shaping's inputs and outputs, for the on-screen diagnostic.
+    static var lastReport = ""
+    #endif
+
     /// A cat, shaped. Everything downstream — the skinning, the rig, the
     /// animator — works from this and never sees the file it came from.
     ///
@@ -287,6 +292,32 @@ enum CatShape {
         let rest = (0..<n).map { j in
             SIMD3<Float>(-bind[j][3].z, bind[j][3].y - hipY, bind[j][3].x)
         }
+
+        #if DEBUG
+        // What the shaping was working from, and what it did. The device builds a
+        // skeleton with every joint sitting on the hips while this same code
+        // offline builds a cat, so the inputs are the thing to read.
+        let ap = asset.restPositions
+        var alo = SIMD3<Float>(repeating: Float.infinity)
+        var ahi = SIMD3<Float>(repeating: -Float.infinity)
+        for p in ap {
+            alo = SIMD3<Float>(min(alo.x, p.x), min(alo.y, p.y), min(alo.z, p.z))
+            ahi = SIMD3<Float>(max(ahi.x, p.x), max(ahi.y, p.y), max(ahi.z, p.z))
+        }
+        var rlo = SIMD3<Float>(repeating: Float.infinity)
+        var rhi = SIMD3<Float>(repeating: -Float.infinity)
+        for p in rest {
+            rlo = SIMD3<Float>(min(rlo.x, p.x), min(rlo.y, p.y), min(rlo.z, p.z))
+            rhi = SIMD3<Float>(max(rhi.x, p.x), max(rhi.y, p.y), max(rhi.z, p.z))
+        }
+        lastReport = String(
+            format: "asset ext %.3f,%.3f,%.3f · restTorso %.3f · restLeg %.3f\n"
+                  + "scale %.3f…%.3f · vestigial %d · shaped ext %.3f,%.3f,%.3f",
+            ahi.x - alo.x, ahi.y - alo.y, ahi.z - alo.z,
+            asset.restTorsoLength, restLegHeight(asset),
+            localScale.min() ?? -1, localScale.max() ?? -1, vestigialWhiskers(asset).count,
+            rhi.x - rlo.x, rhi.y - rlo.y, rhi.z - rlo.z)
+        #endif
 
         var roles = [Int](repeating: -1, count: CatMeshAsset.Role.allCases.count)
         for role in CatMeshAsset.Role.allCases {
