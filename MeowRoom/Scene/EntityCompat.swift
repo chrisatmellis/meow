@@ -86,6 +86,21 @@ struct EulerAnglesComponent: Component {
     /// The orientation those angles produced. If the entity's current orientation
     /// is not this, someone set `orientation` directly and the cache is stale.
     var orientation: simd_quatf
+
+    /// Registration, which RealityKit requires once per custom component type and
+    /// does not warn about. An unregistered component is silently ignored, so the
+    /// symptom would be every angle reading back as whatever its quaternion
+    /// decomposes to — correct as a rotation, wrong as a number, and the wand
+    /// creeping a little on every frame of a drag.
+    ///
+    /// `MeowApp` calls this at launch, which is where the documentation says to do
+    /// it and where a reader will look for it. This exists as well because there is
+    /// more than one way into the scene — the character creator builds a cat of its
+    /// own, and the assertion suite builds hundreds — and a requirement that fails
+    /// silently should not also be a requirement to remember.
+    static let ensureRegistered: Void = {
+        EulerAnglesComponent.registerComponent()
+    }()
 }
 
 extension Entity {
@@ -105,6 +120,7 @@ extension Entity {
             return EulerRotation.angles(current)
         }
         set {
+            _ = EulerAnglesComponent.ensureRegistered
             let q = EulerRotation.quaternion(newValue)
             orientation = q
             components[EulerAnglesComponent.self] = EulerAnglesComponent(angles: newValue,

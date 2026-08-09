@@ -6,6 +6,15 @@ struct MeowApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
+        // Custom components have to be registered once, before anything uses one.
+        // RealityKit does not complain if you forget — it silently ignores the
+        // component, which here would mean every pose the animator writes as Euler
+        // angles reading back as whatever the quaternion decomposes to. That is
+        // correct as a rotation and wrong as a number: angles outside the
+        // principal range come back renormalised, and the wand accumulates its own
+        // yaw across a drag, so it would creep every frame.
+        EulerAnglesComponent.registerComponent()
+
 #if DEBUG
         WorldClock.applyDebugEnvironment()
 #endif
