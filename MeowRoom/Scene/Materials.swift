@@ -280,10 +280,23 @@ enum Materials {
         m.roughness = .init(scale: 1)
         m.metallic = .init(scale: 0)
         m.faceCulling = .none
-        m.emissiveColor = .init(color: .white,
-                                texture: TextureBridge.tiling(TextureFactory.gardenBackdrop(sky: sky),
-                                                              semantic: .color))
+        m.emissiveColor = gardenEmission(sky: sky)
         m.emissiveIntensity = 1        // LightingRig drives this from the sky.
         return m
+    }
+
+    /// The garden, as an emissive colour.
+    ///
+    /// Tinted by the sky rather than by white, which matters when the texture
+    /// fails to upload. `EmissiveColor(color:texture:)` multiplies the two, so a
+    /// white tint with a missing texture is a *white emissive panel* — a flat grey
+    /// card exactly the size of the window, unaffected by any light in the room,
+    /// which is precisely what a window with nothing behind it looks like and
+    /// precisely what was there. Tinted by the sky it degrades to the sky's own
+    /// colour instead: still wrong, but wrong in a way that reads as sky.
+    static func gardenEmission(sky: SkyState) -> PhysicallyBasedMaterial.EmissiveColor {
+        .init(color: UIColor(sky.skyHorizonColor.mixed(with: sky.skyZenithColor, 0.4)),
+              texture: TextureBridge.tiling(TextureFactory.gardenBackdrop(sky: sky),
+                                            semantic: .color))
     }
 }

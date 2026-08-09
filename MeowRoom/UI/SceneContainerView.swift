@@ -29,7 +29,13 @@ struct SceneContainerView: View {
             // Non-AR: a virtual camera looking at a room, not the device's camera
             // looking at the world.
             content.camera = .virtual
-            content.environment = .default
+            // Not `.default`. Whatever a non-AR RealityView puts behind an empty
+            // frame, it is a flat unlit grey — and the one place in this room you
+            // can see past the walls is the window, which is the one place a flat
+            // unlit grey is unmistakable. The room is closed except for that
+            // opening, so the background is only ever visible through it, and it
+            // should be the same sky the garden is painted from.
+            if let sky = controller.skybox { content.environment = .skybox(sky) }
 
             // Depth of field and HDR survive the move off SceneKit's camera.
             // Bloom, vignette and colour fringing do not, and are not faked here.

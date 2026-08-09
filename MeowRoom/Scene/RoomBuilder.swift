@@ -233,25 +233,21 @@ enum RoomBuilder {
             frameBarInto(node, lattice, shojiW - 0.04, 0.014, 0.016, openLeft / 2, y, -hd + 0.068)
         }
 
-        // Right half: slid open. A thin pane of glass and the garden beyond.
+        // Right half: slid open, and nothing in it.
         //
-        // The roughness here has to stay well away from zero. At 0.02 the pane is
-        // effectively a mirror, and the paper lantern a metre away in the corner
-        // reflected across the whole opening — at night the open half of the
-        // window came out brighter than it does at noon, which read as sunlight
-        // outside at 10pm. Transparency does not damp that: a mirrored point
-        // light is bright enough that even a few percent of it blows out.
-        // Real glazing seen head-on reflects only a few percent, so scatter it.
-        var glass = PhysicallyBasedMaterial()
-        glass.baseColor = .init(tint: .white)
-        glass.roughness = .init(scale: 0.35)
-        glass.metallic = .init(scale: 0.0)
-        glass.blending = .transparent(opacity: .init(scale: 0.05))
-        glass.writesDepth = false
-        let pane = MeshBuilder.plane(width: openRight - 0.04, height: shojiH - 0.04)
-        let paneNode = Entity.make(pane, glass)
-        paneNode.position = SIMD3<Float>(x: openRight / 2, y: (openTop + openBottom) / 2, z: -hd + 0.05)
-        node.addChild(paneNode)
+        // There used to be a pane of glass here — white, five percent opaque, not
+        // writing depth. It is gone, and the window is an actual hole now.
+        //
+        // It earned that twice over. Real glazing seen head-on reflects a few
+        // percent and is invisible; this one was neither. Its specular outlived
+        // its transparency, so a mirrored paper lantern a metre away once made the
+        // open half of the window brighter at ten at night than at noon — patched
+        // at the time by roughening the glass rather than by asking what the glass
+        // was for. And a transparent sheet directly in front of the one thing in
+        // the room the player looks *through* is the worst place in the scene to
+        // have to reason about blend ordering.
+        //
+        // What is behind it is the garden, and the garden is what should be there.
 
         return node
     }

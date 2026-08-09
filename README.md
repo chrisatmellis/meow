@@ -202,6 +202,32 @@ and sleep, then tells you what happened when you come back. This runs both on a
 cold launch and when the app returns from the background, so an afternoon away is
 an afternoon away either way.
 
+## The cat
+
+The cat is a modelled mesh — the only art asset in the project — shaped at build
+time into whatever the player asked for.
+
+`Tools/usd/export-cat.py` takes a skinned USDZ and produces `cat.catmesh`: the
+geometry untouched, plus the two things it was missing. Texture coordinates,
+because the file had none and every pattern, marking and material map in this
+game is painted at runtime and applied through UVs; they are generated per bone
+using the skin weights, so the legs unwrap around the legs rather than collapsing
+into a sliver of belly. And named roles, because the FBX conversion stripped the
+joint names — the skull, jaw, ears, tail and four legs are inferred from the rest
+pose and checked against the shape of a cat.
+
+`CatShape` then turns one animal into seventy parameters, two ways. Bones move
+for anything that is a proportion — leg length, tail length, body length, ear
+fold — because moving a joint drags the skin with it and cannot tear the surface.
+Flesh swells for anything that is not — girth, chonk, chest depth, cheek fluff,
+the bulk a long coat adds — as radial displacement in the bone's own frame,
+blended by skin weight. The shaped skeleton becomes the new bind pose, so the
+mesh and the joints that drive it stay in agreement.
+
+Eyes, whiskers, a collar, fur shells and the inner ears are still generated,
+because one closed surface cannot blink, and translucency is driven per material
+so the parts that glow when backlit have to be their own meshes.
+
 ## A note on RealityKit
 
 The game was built on SceneKit and now runs on RealityKit. Apple soft-deprecated

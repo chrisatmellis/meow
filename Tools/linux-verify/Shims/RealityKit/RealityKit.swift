@@ -1240,7 +1240,7 @@ public struct RealityViewCamera {
 
 public struct RealityViewEnvironment {
     public static let `default` = RealityViewEnvironment()
-    public static func skybox(_ resource: EnvironmentResource?) -> RealityViewEnvironment {
+    public static func skybox(_ resource: EnvironmentResource) -> RealityViewEnvironment {
         RealityViewEnvironment()
     }
 }

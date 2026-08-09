@@ -76,6 +76,9 @@ final class LightingRig {
             color: UIColor(red: 0.62, green: 0.72, blue: 0.95, alpha: 1), intensity: 0))
     }
 
+    /// The baked sky, for anyone who wants it as a background as well as a light.
+    var skybox: EnvironmentResource? { environmentCache?.resource }
+
     /// Applies a new exposure to the lights already placed.
     ///
     /// RealityKit's camera has no exposure, so this is where the room's overall
@@ -398,10 +401,10 @@ final class LightingRig {
         // white throws away the garden behind it, which is drawn and then never
         // seen. Bright enough to read as outside, dim enough to still be a garden.
         let outdoor = min(0.34, 0.16 + budget.sky * 0.00027)
-        let garden = TextureBridge.tiling(TextureFactory.gardenBackdrop(sky: sky), semantic: .color)
+        let garden = Materials.gardenEmission(sky: sky)
         for panel in room.backdropPanels {
             panel.withMaterial {
-                $0.emissiveColor = .init(color: .white, texture: garden)
+                $0.emissiveColor = garden
                 $0.emissiveIntensity = outdoor
             }
         }

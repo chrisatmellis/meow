@@ -19,6 +19,10 @@ final class GameSceneController: NSObject {
 
     weak var viewModel: GameViewModel?
 
+    /// The sky behind the window, as an environment the view can use for its
+    /// background. Nil until the first bake lands, which is a frame or two.
+    var skybox: EnvironmentResource? { lighting.skybox }
+
     /// The frame-loop subscription, held here for the same reason a timer is: it
     /// is not documented whether the view's content retains it, and an
     /// unretained one is a frame loop that quietly stops — a still room with a
