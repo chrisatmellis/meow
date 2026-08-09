@@ -658,6 +658,23 @@ public final class MeshResource {
         MeshResource(contents: contents)
     }
 
+    /// The box the vertices occupy, in the mesh's own space. Real, rather than a
+    /// stub, because it is used to compare what the GPU holds against what we
+    /// think we handed it — a stub would answer that question with our own belief.
+    public var bounds: BoundingBox {
+        var lo = SIMD3<Float>(repeating: Float.infinity)
+        var hi = SIMD3<Float>(repeating: -Float.infinity)
+        for model in contents.models {
+            for part in model.parts {
+                for p in part.positions {
+                    lo = SIMD3<Float>(Swift.min(lo.x, p.x), Swift.min(lo.y, p.y), Swift.min(lo.z, p.z))
+                    hi = SIMD3<Float>(Swift.max(hi.x, p.x), Swift.max(hi.y, p.y), Swift.max(hi.z, p.z))
+                }
+            }
+        }
+        return lo.x <= hi.x ? BoundingBox(min: lo, max: hi) : BoundingBox()
+    }
+
     public func replace(with contents: Contents) throws {
         self.contents = contents
     }

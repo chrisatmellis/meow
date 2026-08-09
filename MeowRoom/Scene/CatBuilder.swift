@@ -141,9 +141,13 @@ enum CatBuilder {
         rig.skinJoints = joints
         rig.skinMesh = shaped.mesh
         if let skin = CatSkin(shaped, mesh: shaped.mesh, entity: body) { rig.skins.append(skin) }
-        syncPose(rig)
 
         // --- Fur shells: offset copies of the same surface, for long coats.
+        //
+        // Built before the first `syncPose`, because a shell is an offset copy of
+        // the coat and `CatSkin` takes whatever it is handed as that surface's
+        // rest pose. Posing first would hand it a posed cat to call a rest one,
+        // and every frame after would deform an already-deformed shell.
         if !a.hairless, a.effectiveFurLength > 0.30, RenderQuality.maxFurShells > 0 {
             let layers = min(RenderQuality.maxFurShells, a.effectiveFurLength > 0.65 ? 2 : 1)
             for i in 0..<layers {
@@ -162,6 +166,8 @@ enum CatBuilder {
                 if let skin = CatSkin(shaped, mesh: shell, entity: node) { rig.skins.append(skin) }
             }
         }
+
+        syncPose(rig)
 
         addFace(rig, a, shaped: shaped, joints: joints, preview: preview)
         addCollar(rig, a, shaped: shaped, joints: joints)

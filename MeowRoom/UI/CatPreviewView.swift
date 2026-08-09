@@ -166,12 +166,52 @@ final class CatPreviewController: NSObject, ObservableObject {
 
         animator.update(dt: dt, motion: motion)
         CatBuilder.syncPose(rig)
+        #if DEBUG
+        measure()
+        #endif
     }
+
+    #if DEBUG
+    /// What the cat actually is, on the machine that is actually drawing it.
+    ///
+    /// The offline rasteriser draws the same buffers and shows a cat; the phone
+    /// showed a thumb-sized knot of fur. One of those two is being lied to and
+    /// pixels cannot say which, so the numbers come off the live scene and go on
+    /// the screen, where the screenshot pipeline already looks.
+    @Published private(set) var diagnostics: String = "…"
+
+    private func measure() {
+        guard let mesh = rig.skinMesh, !mesh.positions.isEmpty else {
+            diagnostics = "no skin mesh · asset \(CatAsset.shared == nil ? "MISSING" : "ok")"
+            return
+        }
+        var lo = SIMD3<Float>(repeating: .infinity)
+        var hi = SIMD3<Float>(repeating: -.infinity)
+        for p in mesh.positions {
+            lo = SIMD3<Float>(min(lo.x, p.x), min(lo.y, p.y), min(lo.z, p.z))
+            hi = SIMD3<Float>(max(hi.x, p.x), max(hi.y, p.y), max(hi.z, p.z))
+        }
+        let size = hi - lo
+        func f(_ v: Float) -> String { String(format: "%.3f", v) }
+        func p3(_ v: SIMD3<Float>) -> String { "\(f(v.x)),\(f(v.y)),\(f(v.z))" }
+        let bodyWorld = rig.body.position(relativeTo: nil)
+        let headWorld = rig.head.position(relativeTo: nil)
+        let drawn = (rig.skinnedBody as? ModelEntity)?.model?.mesh.bounds
+        diagnostics = """
+        verts \(mesh.positions.count) · skins \(rig.skins.count) · joints \(rig.skinJoints.count)
+        posed size \(p3(size))  lo \(p3(lo))
+        bodyH \(f(rig.bodyHeight)) · scale \(f(appearance.scale)) · stage \(appearance.lifeStage.rawValue)
+        body@ \(p3(bodyWorld)) · head@ \(p3(headWorld))
+        rootScale \(p3(rig.root.scale)) · bodyScale \(p3(rig.body.scale))
+        gpu bounds \(drawn.map { "\(p3($0.extents))" } ?? "nil")
+        """
+    }
+    #endif
 }
 
 struct CatPreviewView: View {
     let appearance: CatAppearance
-    let controller: CatPreviewController
+    @ObservedObject var controller: CatPreviewController
 
     var body: some View {
         RealityView { content in
@@ -184,5 +224,14 @@ struct CatPreviewView: View {
             controller.request(appearance: appearance)
         }
         .onTapGesture { controller.cyclePose() }
+        #if DEBUG
+        .overlay(alignment: .topLeading) {
+            Text(controller.diagnostics)
+                .font(.caption2)
+                .foregroundColor(.green)
+                .padding(6)
+                .background(Color.black.opacity(0.55))
+        }
+        #endif
     }
 }
