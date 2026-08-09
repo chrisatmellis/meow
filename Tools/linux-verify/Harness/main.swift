@@ -1451,6 +1451,44 @@ section("modelled cat") {
         expect(abs(fl.gaitPhase - fr.gaitPhase) > 0.4, "feet on the same end do not")
     }
 
+    // The shaped skeleton is still a cat's skeleton.
+    //
+    // Everything downstream is measured off it — the animator's bone lengths, the
+    // rig's body height, the size of the eyes and whiskers — so a shaping pass
+    // that quietly collapses it produces a five-centimetre knot of fur that still
+    // has the right vertex count, the right joint count, the right roles and the
+    // right hip height. Every one of those was checked while the cat on the phone
+    // was a knot, because none of them is a measurement of the animal.
+    do {
+        let shaped = CatShape.shape(asset, to: a)
+        func span(_ ps: [SIMD3<Float>]) -> SIMD3<Float> {
+            var lo = SIMD3<Float>(repeating: Float.infinity)
+            var hi = SIMD3<Float>(repeating: -Float.infinity)
+            for p in ps {
+                lo = SIMD3<Float>(min(lo.x, p.x), min(lo.y, p.y), min(lo.z, p.z))
+                hi = SIMD3<Float>(max(hi.x, p.x), max(hi.y, p.y), max(hi.z, p.z))
+            }
+            return hi - lo
+        }
+        let before = span(asset.restPositions)
+        let after = span(shaped.rest)
+        // The asset's axes are the model's and the shaped one's are the game's, so
+        // they are compared by how much skeleton there is rather than axis by axis.
+        let asked = max(before.x, max(before.y, before.z))
+        let got = max(after.x, max(after.y, after.z))
+        expect(got > asked * 0.6 && got < asked * 1.8,
+               "shaping keeps the skeleton (\(got) m from \(asked) m)")
+        expect(after.x > 0.02 && after.y > 0.05 && after.z > 0.2,
+               "the shaped skeleton is cat-shaped (\(after))")
+        // And no two joints on top of each other, which is what a collapse is.
+        var coincident = 0
+        for j in 0..<shaped.jointCount where shaped.parents[j] >= 0 {
+            if simd_length(shaped.restLocal(j)) < 1e-5 { coincident += 1 }
+        }
+        expect(coincident <= 2,
+               "bones have length — \(coincident) of \(shaped.jointCount) joints sit on their parent")
+    }
+
     // Nothing on the head may reach further out to the side than the head does.
     //
     // The model has whiskers of its own — two flat cards on joints of their own,
