@@ -82,6 +82,12 @@ final class GameSceneController: NSObject {
         room.toyMouse?.enableInput()
         room.toyBall?.enableInput()
 
+        // Both the room and the cat, because the cat is a sibling of the room and
+        // not a child of it — and with no ambient light to fall back on, anything
+        // that receives no environment is lit by the sun alone and goes black on
+        // its shadow side.
+        lighting.attachEnvironment(to: root)
+
         // Portrait phones are narrow: pin the field of view to the horizontal axis so
         // the whole room fits, instead of a keyhole view of the far wall. RealityKit
         // defaults to vertical and derives the other axis from the aspect ratio,

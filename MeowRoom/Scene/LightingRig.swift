@@ -31,12 +31,29 @@ final class LightingRig {
     /// renders without it — just flat.
     private let environment = Entity()
 
+    /// The environment is rebuilt from a drawn sky, and drawing it is cheap
+    /// because `TextureFactory` caches it — turning it into an `EnvironmentResource`
+    /// is not, and the sky refreshes every four seconds. Keyed on the drawn image
+    /// so it cannot disagree with the cache upstream about which sky it is holding.
+    private var environmentCache: (key: ObjectIdentifier, resource: EnvironmentResource)?
+
     /// The last budget applied, so a change of exposure alone can be re-applied
     /// without needing the sky to move.
     private var lastBudget = LightBudget(sun: 0, sky: 0, moon: 0, lantern: 0)
     private var exposure: Float = 1
     private var lastRoom: RoomNode?
     private var lastSky: SkyState = WorldClock.sky()
+
+    /// Points a subtree at the environment map.
+    ///
+    /// Necessary because there is no ambient light to fall back on: an entity that
+    /// receives no image-based light is lit by the sun and nothing else, so its
+    /// shadow side goes to black. Easy to miss, too — the scene renders, it just
+    /// renders flat. The cat is a sibling of the room rather than a child of it,
+    /// so this is called on the root that holds both.
+    func attachEnvironment(to entity: Entity) {
+        entity.components.set(ImageBasedLightReceiverComponent(imageBasedLight: environment))
+    }
 
     init() {
         root.addChild(sunEntity)
@@ -265,15 +282,19 @@ final class LightingRig {
         // way it faces, which is what makes a room read as a paper cut-out. The
         // environment map is what puts the shape back without putting a bulb in
         // the room — and RealityKit does not offer the flat option anyway.
-        if let cg = TextureFactory.skyEnvironment(sky: sky).cgImage,
-           let resource = try? EnvironmentResource(equirectangular: cg, withName: "sky") {
+        let image = TextureFactory.skyEnvironment(sky: sky)
+        let key = ObjectIdentifier(image)
+        if environmentCache?.key != key, let cg = image.cgImage,
+           let made = try? EnvironmentResource(equirectangular: cg, withName: "sky") {
+            environmentCache = (key, made)
+        }
+        if let resource = environmentCache?.resource {
             // The intensity is an exponent of two, not a multiplier, so the
             // conversion from a linear share of the budget is a log.
             let linear = max(0.02, min(0.85, lastBudget.sky * 0.0014) * exposure)
             environment.components.set(ImageBasedLightComponent(
                 source: .single(resource),
                 intensityExponent: log2f(linear)))
-            room.root.components.set(ImageBasedLightReceiverComponent(imageBasedLight: environment))
         }
 
         // --- Dust motes only show when there is a beam to catch.

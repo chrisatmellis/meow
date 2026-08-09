@@ -36,7 +36,12 @@ enum Materials {
                 m.normal = .init(texture: t)
             }
             if let r = maps.roughness, let t = TextureBridge.tiling(r, semantic: .raw) {
-                m.roughness = .init(scale: roughness, texture: t)
+                // Scale 1, not `roughness`. RealityKit multiplies the scalar by
+                // the texture, where SceneKit replaced one with the other, and the
+                // maps are authored as absolute values — `SurfaceMaps` gives each
+                // surface its own base and variation. Passing both would quietly
+                // polish every mapped surface by whatever its scalar happened to be.
+                m.roughness = .init(scale: 1, texture: t)
             }
             if let o = maps.occlusion, let t = TextureBridge.tiling(o, semantic: .raw) {
                 m.ambientOcclusion = .init(texture: t)
