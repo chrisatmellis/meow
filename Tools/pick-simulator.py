@@ -13,6 +13,12 @@ import json
 import re
 import sys
 
+# The app's deployment target. Anything older cannot install it, and the error
+# simctl gives when you try does not mention the version — so a runtime that is
+# too old is filtered out here rather than becoming a puzzling install failure
+# twenty lines further down.
+MINIMUM = (18, 0)
+
 
 def newest_first(devices):
     """All available iPhones, worst candidate first."""
@@ -22,6 +28,8 @@ def newest_first(devices):
         if not match:
             continue
         version = (int(match.group(1)), int(match.group(2)))
+        if version < MINIMUM:
+            continue
         for dev in devs:
             if not dev.get("isAvailable"):
                 continue
@@ -54,9 +62,13 @@ def main():
         return 0
 
     if mode == "runtime":
-        runtimes = sorted(r for r in devices if re.search(r"iOS-\d+-\d+", r))
+        runtimes = []
+        for r in devices:
+            match = re.search(r"iOS-(\d+)-(\d+)", r)
+            if match and (int(match.group(1)), int(match.group(2))) >= MINIMUM:
+                runtimes.append(((int(match.group(1)), int(match.group(2))), r))
         if runtimes:
-            print(runtimes[-1])
+            print(sorted(runtimes)[-1][1])
         return 0
 
     return 1
