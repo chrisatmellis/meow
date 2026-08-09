@@ -203,8 +203,8 @@ extension Entity {
     /// and now only what asks gets seen. The trap is that forgetting this is
     /// silent: the scene renders exactly as before and simply never responds.
     func enableInput(recursive: Bool = true) {
-        if let model = (self as? ModelEntity)?.model,
-           let shape = try? ShapeResource.generateConvex(from: model.mesh) {
+        if let model = (self as? ModelEntity)?.model {
+            let shape = ShapeResource.generateConvex(from: model.mesh)
             components.set(CollisionComponent(shapes: [shape], isStatic: true))
             components.set(InputTargetComponent())
         }

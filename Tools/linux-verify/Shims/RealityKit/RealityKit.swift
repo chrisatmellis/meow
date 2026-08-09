@@ -1313,7 +1313,7 @@ public struct CollisionComponent: Component {
 public struct ShapeResource {
     public static func generateBox(size: SIMD3<Float>) -> ShapeResource { ShapeResource() }
     public static func generateSphere(radius: Float) -> ShapeResource { ShapeResource() }
-    public static func generateConvex(from mesh: MeshResource) throws -> ShapeResource { ShapeResource() }
+    public static func generateConvex(from mesh: MeshResource) -> ShapeResource { ShapeResource() }
 }
 
 public struct RealityView<Content: View>: View {
