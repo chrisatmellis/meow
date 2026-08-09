@@ -167,7 +167,14 @@ final class CatPreviewController: NSObject, ObservableObject {
         animator.update(dt: dt, motion: motion)
         CatBuilder.syncPose(rig)
         #if DEBUG
-        measure()
+        // Twice a second, not sixty times. Publishing every frame makes SwiftUI
+        // re-evaluate the whole character creator at frame rate, which turns a
+        // diagnostic into a performance problem large enough to time out the
+        // simulator that was meant to display it.
+        if clock - lastMeasured > 0.5 {
+            lastMeasured = clock
+            measure()
+        }
         #endif
     }
 
@@ -179,6 +186,7 @@ final class CatPreviewController: NSObject, ObservableObject {
     /// pixels cannot say which, so the numbers come off the live scene and go on
     /// the screen, where the screenshot pipeline already looks.
     @Published private(set) var diagnostics: String = "…"
+    private var lastMeasured: TimeInterval = -1
 
     private func measure() {
         guard let mesh = rig.skinMesh, !mesh.positions.isEmpty else {
