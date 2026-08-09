@@ -67,6 +67,20 @@ APP=$(find "$DERIVED/Build/Products/Debug-iphonesimulator" -maxdepth 1 -name '*.
 [ -n "$APP" ] || { echo "error: no .app produced" >&2; exit 1; }
 echo "    app: $APP"
 
+# The cat is the one art asset in the game, and it is carried into the bundle by
+# a file-system synchronized group, which decides for itself what an unknown
+# extension is. If it decides `.catmesh` is not a resource, the app still builds,
+# still launches, and quietly draws the generated cat instead — a failure that
+# looks exactly like success unless you know both cats by sight.
+if [ ! -f "$APP/cat.catmesh" ]; then
+  echo "error: cat.catmesh is missing from the app bundle." >&2
+  echo "       The app would fall back to the generated cat without saying so." >&2
+  echo "       Bundle contents:" >&2
+  ls -1 "$APP" | sed 's/^/         /' >&2
+  exit 1
+fi
+echo "    cat: $(wc -c < "$APP/cat.catmesh") bytes of mesh in the bundle"
+
 echo "==> booting"
 xcrun simctl boot "$UDID" || true
 xcrun simctl bootstatus "$UDID" -b
