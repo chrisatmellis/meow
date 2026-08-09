@@ -1509,6 +1509,47 @@ section("modelled cat") {
         expect(finite(j.eulerAngles), "joint \(i) has finite angles after 400 frames")
     }
 
+    // Every pose the game can put the cat in, with something to look at.
+    //
+    // The character creator does exactly this — sits the cat up and gives it the
+    // camera to watch — and it is where the collapse showed up on device while
+    // the standing cat rendered here perfectly well. A pose the assertion suite
+    // never combined with a gaze is a pose the assertion suite never checked.
+    do {
+        let shaped = CatShape.shape(asset, to: a)
+        let restLength = shaped.mesh.positions.map(\.z).max()! - shaped.mesh.positions.map(\.z).min()!
+        let watched: [CatPose] = [.standing, .walking, .trotting, .running, .sitting,
+                                  .sittingTall, .loaf, .lyingSide, .curled, .crouch,
+                                  .stretching, .grooming, .eating, .drinking,
+                                  .litterCrouch, .playCrouch, .pounce, .rearUp,
+                                  .kneading, .scratchingPost]
+        for pose in watched {
+            let r = CatBuilder.build(a, using: asset)
+            let anim = CatAnimator(rig: r)
+            var m = CatMotion()
+            m.pose = pose
+            m.speed = pose.isLocomotion ? 0.6 : 0
+            m.lookTarget = SIMD3<Float>(0, 0.30, 1.2)
+            m.lookWeight = 0.55
+            m.eyeOpen = 1
+            for _ in 0..<300 { anim.update(dt: 1.0 / 60, motion: m) }
+            CatBuilder.syncPose(r)
+            guard let posedMesh = r.skinMesh else { continue }
+            let zs = posedMesh.positions.map(\.z)
+            let ys = posedMesh.positions.map(\.y)
+            let xs = posedMesh.positions.map(\.x)
+            let length = zs.max()! - zs.min()!
+            let height = ys.max()! - ys.min()!
+            let width = xs.max()! - xs.min()!
+            expect(length > restLength * 0.5,
+                   "\(pose) watching the player keeps the cat's length "
+                   + "(\(length) m against \(restLength) m at rest)")
+            expect(height > 0.05 && width > 0.03,
+                   "\(pose) watching the player keeps the cat's bulk "
+                   + "(\(width) × \(height) m)")
+        }
+    }
+
     // ...and the skin has to survive it too, which is a different claim and the
     // one that actually matters. Every check above passed while the cat was
     // rendering as a ball of fur: the joints were finite, the roles were right,

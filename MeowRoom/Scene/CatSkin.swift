@@ -42,6 +42,11 @@ final class CatSkin {
     private let mesh: MeshData
     private weak var entity: ModelEntity?
 
+    #if DEBUG
+    /// What the last pose put into the blend, for the on-screen diagnostic.
+    private(set) var report = ""
+    #endif
+
     /// Scratch, kept between frames so a pose costs no allocation.
     private var posed: [Vec3]
     private var normals: [Vec3]
@@ -78,6 +83,21 @@ final class CatSkin {
             if parents[j] >= 0 { m = skin[parents[j]] * m }
             skin[j] = m
         }
+        #if DEBUG
+        // What the accumulation actually saw. The offline harness runs this same
+        // code and produces a cat; the device produces a five-centimetre knot, so
+        // the numbers that go into it are the thing to look at rather than the
+        // picture that comes out.
+        var maxLocal: Float = 0, maxWorld: Float = 0, maxRest: Float = 0
+        for j in 0..<joints.count {
+            maxLocal = max(maxLocal, simd_length(joints[j].transform.translation))
+            maxWorld = max(maxWorld, simd_length(SIMD3<Float>(skin[j][3].x, skin[j][3].y, skin[j][3].z)))
+            maxRest = max(maxRest, simd_length(restJoints[j]))
+        }
+        report = String(format: "local %.3f · world %.3f · rest %.3f · n %d",
+                        maxLocal, maxWorld, maxRest, joints.count)
+        #endif
+
         // Then composed with the bind, which for a skeleton of points is the
         // subtraction of where the joint started: `world · translate(-rest)`,
         // whose translation is `t - R·rest` and not `t + R·rest`. The rotation is

@@ -207,11 +207,13 @@ final class CatPreviewController: NSObject, ObservableObject {
         let drawn = (rig.skinnedBody as? ModelEntity)?.model?.mesh.bounds
         diagnostics = """
         verts \(mesh.positions.count) · skins \(rig.skins.count) · joints \(rig.skinJoints.count)
-        posed size \(p3(size))  lo \(p3(lo))
-        bodyH \(f(rig.bodyHeight)) · scale \(f(appearance.scale)) · stage \(appearance.lifeStage.rawValue)
-        body@ \(p3(bodyWorld)) · head@ \(p3(headWorld))
-        rootScale \(p3(rig.root.scale)) · bodyScale \(p3(rig.body.scale))
-        gpu bounds \(drawn.map { "\(p3($0.extents))" } ?? "nil")
+        posed size \(p3(size))
+        bodyH \(f(rig.bodyHeight)) · body@ \(p3(bodyWorld))
+        head relBody \(p3(rig.head.position(relativeTo: rig.body)))
+        head .position \(p3(rig.head.position)) · .transl \(p3(rig.head.transform.translation))
+        head .matrix col3 \(p3(SIMD3<Float>(rig.head.transform.matrix[3].x, rig.head.transform.matrix[3].y, rig.head.transform.matrix[3].z)))
+        skin \(rig.skins.first?.report ?? "-")
+        gpu \(drawn.map { p3($0.extents) } ?? "nil") · headW \(p3(headWorld))
         """
     }
     #endif
