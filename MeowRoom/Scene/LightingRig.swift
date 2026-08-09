@@ -50,18 +50,26 @@ final class LightingRig {
         // --- Warm bounce off the tatami, sitting low in the room.
         bounce.type = .omni
         bounce.intensity = 0
-        bounce.attenuationStartDistance = 0.5
-        bounce.attenuationEndDistance = 6
+        // Raised, and with a much gentler falloff, because of what it now carries.
+        //
+        // At 45 cm above the tatami holding 15% of the sun this was a plausible
+        // warm kick off the floor. Holding 55% it became a floodlight pointed
+        // straight down: the render came out with a bright pool in the middle of
+        // the room and the floor's texture washed out inside it, while the level
+        // as a whole measured fine. Bounced light does not have a hotspot — that
+        // is the one thing it is definitionally free of.
+        bounce.attenuationStartDistance = 2.0
+        bounce.attenuationEndDistance = 8
         bounce.color = UIColor(red: 1.0, green: 0.90, blue: 0.72, alpha: 1)
         bounceNode.light = bounce
-        bounceNode.position = SCNVector3(x: 0.1, y: 0.45, z: -0.4)
+        bounceNode.position = SCNVector3(x: 0.1, y: 0.95, z: -0.5)
         root.addChildNode(bounceNode)
 
         // --- Soft light spilling in through the shoji, so the window reads as a source.
         windowGlow.type = .omni
         windowGlow.intensity = 0
-        windowGlow.attenuationStartDistance = 0.4
-        windowGlow.attenuationEndDistance = 5.5
+        windowGlow.attenuationStartDistance = 1.8
+        windowGlow.attenuationEndDistance = 7
         windowGlowNode.light = windowGlow
         // Nearly a metre in from the shoji, not a quarter of one.
         //
@@ -162,11 +170,15 @@ final class LightingRig {
         // the light arrive from the whole window rather than from a point 9 metres
         // away, which is both what actually happens and what stops the room reading
         // as though someone opened a skylight.
+        // The sky's share leans toward ambient now: 0.42/0.28/0.30 rather than
+        // 0.30/0.45/0.25. Ambient is the only source in the room with no position,
+        // so it is the only one that cannot put a bright patch anywhere, and
+        // daylight through paper is the case with least business having one.
         return LightIntensities(sun: b.sun * 0.45 * k,
                                 moon: b.moon * 1.00 * k,
-                                ambient: (b.sky * 0.30 + b.lantern * 0.10) * k,
-                                windowGlow: b.sky * 0.45 * k,
-                                bounce: (b.sun * 0.55 + b.sky * 0.25 + b.lantern * 0.15) * k,
+                                ambient: (b.sky * 0.42 + b.lantern * 0.10) * k,
+                                windowGlow: b.sky * 0.28 * k,
+                                bounce: (b.sun * 0.55 + b.sky * 0.30 + b.lantern * 0.15) * k,
                                 lantern: b.lantern * 0.75 * k)
     }
 
@@ -243,7 +255,12 @@ final class LightingRig {
         // the entire room — walls, ceiling, cat and all. A bounce light's colour
         // has to get weaker as its share gets stronger, or it stops being bounce
         // and becomes a colour filter.
-        bounce.color = UIColor(sky.sunColor.mixed(with: RGBColor(hex: 0xC9B383), 0.16))
+        // Back up from 0.16, which overcorrected. The green cast that prompted
+        // that cut was a product of this tint *and* a room rendering at mean 182;
+        // with the exposure fixed the room came out grey instead, the tatami
+        // reading as pale concrete rather than as straw. This is a room whose
+        // floor is dried rush — daylight in it should carry some of that.
+        bounce.color = UIColor(sky.sunColor.mixed(with: RGBColor(hex: 0xC9B383), 0.30))
         windowGlow.intensity = CGFloat(lit.windowGlow)
         windowGlow.color = UIColor(sky.skyHorizonColor.lightened(0.25))
 
