@@ -13,7 +13,7 @@ the table at 3am, and occasionally comes over to sit with you.
 ## Running it
 
 Open `Meow.xcodeproj` in Xcode 16 or newer and run the `Meow` scheme on an
-iOS 17+ device or simulator. There is nothing to install and no package
+iOS 18+ device or simulator. There is nothing to install and no package
 dependencies — every mesh, texture and sound in the game is generated at
 runtime in Swift.
 
@@ -113,7 +113,7 @@ MeowRoom/
   Model/          Cat appearance (≈70 parameters), personality, needs, save file
   Simulation/     Solar clock, utility-AI cat brain, offline catch-up
   Scene/          Procedural meshes, textures, materials, the room, the cat rig,
-                  the animator, lighting, and the SceneKit controller
+                  the animator, lighting, and the RealityKit controller
   Audio/          Runtime synthesis: meow, trill, chirp, purr, hiss, yowl, …
                   plus the haptics that go with them
   Notifications/  Local notification scheduling
@@ -202,19 +202,33 @@ and sleep, then tells you what happened when you come back. This runs both on a
 cold launch and when the app returns from the background, so an afternoon away is
 an afternoon away either way.
 
-## A note on SceneKit
+## A note on RealityKit
 
-Apple soft-deprecated SceneKit at WWDC25 in favour of RealityKit. It is in
-maintenance mode, not removed — existing apps keep working, and no removal date
-has been announced. Because this project's deployment target is iOS 17.0, well
-below the 26.0 deprecation, the build stays warning-free; you would only start
-seeing deprecation warnings if you raised the target to 26.
+The game was built on SceneKit and now runs on RealityKit. Apple soft-deprecated
+SceneKit at WWDC25; that alone was not a reason to move, since it still works and
+no removal date has been announced. The reason was material response — every
+surface here was albedo-only, with roughness and metalness as flat scalars, and
+`PhysicallyBasedMaterial` has normal, roughness, occlusion, clearcoat and
+subsurface scattering as first-class properties.
 
-SceneKit is still the right choice here: the entire game is procedural geometry
-generated at runtime, which is exactly what `SCNGeometry` from raw vertex sources
-is for. If you ever want to port, `CatAnimator` drives named joints and would
-move across; `CatBuilder` and `RoomBuilder` are where the SceneKit-specific work
-lives.
+The move cost one deployment target (iOS 17 → 18, for `RealityView` and
+image-based lighting) and a handful of screen effects: bloom, vignette, colour
+fringing and screen-space ambient occlusion are gone, along with the saturation
+lift that compensated for SceneKit's tone curve. Depth of field and HDR survive
+as view-level rendering effects.
+
+Most of the app never noticed. `Core/`, `Model/`, `Simulation/`, `Audio/` and
+`Notifications/` contain no renderer types at all, and `MeshData` — the layer
+every mesh in the game is generated into — is plain arrays of floats. That is
+what made the port a change at the boundary rather than a rewrite, and it is why
+the assertion suite could check the whole thing on a machine with no graphics
+framework installed.
+
+Two things RealityKit does not generate, the room needed: a torus and a hollow
+tube. Both are in `MeshBuilder` now, along with a box whose edges can be
+chamfered — which SceneKit could also do and this project never used, leaving
+every wall, floor and ceiling edge in the room at a perfect right angle that
+could not catch a highlight.
 
 ## Verifying it
 
