@@ -133,17 +133,32 @@ shot_at_hour() {
   # is far slower than the -O the harness uses. A fixed 18 second sleep captured
   # the blank window four times and produced four byte-identical white images,
   # which look exactly like an overexposed room and are not one.
-  local waited=0 sawProcess=0
+  local waited=0 sawProcess=0 firstFrame=0
   while [ "$waited" -lt 90 ]; do
     sleep 6
     waited=$((waited + 6))
     if running; then sawProcess=1; else continue; fi
     xcrun simctl io "$UDID" screenshot "$OUT/$label.png" >/dev/null 2>&1 || true
     if ! blank "$OUT/$label.png"; then
-      echo "    rendered after ${waited}s"
+      firstFrame=$waited
       break
     fi
   done
+
+  # Let it settle, then take the frame that actually gets measured.
+  #
+  # The first non-blank frame is not the room, it is the room part-way through
+  # arriving. Textures and material maps are still being drawn, and the sky's
+  # environment map is baked asynchronously — there is no synchronous way to make
+  # one — so a shot taken the instant something appears is lit differently from
+  # one taken ten seconds later. The previous run caught golden hour at 12s and
+  # night at 30s and the two are not comparable: the earlier one had no
+  # environment yet and no clock in its HUD.
+  if [ "$firstFrame" != "0" ]; then
+    sleep 8
+    xcrun simctl io "$UDID" screenshot "$OUT/$label.png" >/dev/null 2>&1 || true
+    echo "    first frame at ${firstFrame}s, measured at $((firstFrame + 8))s"
+  fi
   if [ "$sawProcess" = "0" ]; then
     echo "    !! the app never appeared in launchctl — anything captured is not it"
     rm -f "$OUT/$label.png"

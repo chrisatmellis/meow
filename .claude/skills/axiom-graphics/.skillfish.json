@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "axiom-graphics",
+  "owner": "charleswiltgen",
+  "repo": "axiom",
+  "path": ".claude-plugin/plugins/axiom/skills/axiom-graphics",
+  "branch": "main",
+  "sha": "4466ce8bebe9b35c8f9d407f5d59c09f54003a9a",
+  "source": "manual"
+}
