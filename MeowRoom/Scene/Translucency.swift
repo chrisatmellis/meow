@@ -6,13 +6,30 @@ import UIKit
 ///
 /// Ears mostly, but also the nose leather, the paw pads and the toe webbing —
 /// anywhere the tissue is a couple of millimetres thick over blood.
-struct TranslucentPart {
+/// A class rather than a struct, for one reason: it remembers what it last
+/// applied.
+///
+/// Writing a material means replacing the whole `ModelComponent`, since materials
+/// are values — so doing it unconditionally every frame is component churn, on
+/// six parts, sixty times a second, to say the same thing over and over. What is
+/// being computed here moves very slowly: the window does not move at all and the
+/// sun barely does, so the level only really changes as the cat walks around.
+/// Holding the last value costs four bytes and turns most frames into a compare.
+final class TranslucentPart {
     let entity: Entity
     /// 0 is opaque, 1 is an ear held up to a window.
     let amount: Float
     /// The colour that comes through. Always warmer and redder than the surface,
     /// because what you are seeing is light that has been through blood.
     let tint: RGBColor
+    /// The last level written, or -1 if nothing has been written yet.
+    fileprivate var applied: Float = -1
+
+    init(entity: Entity, amount: Float, tint: RGBColor) {
+        self.entity = entity
+        self.amount = amount
+        self.tint = tint
+    }
 }
 
 /// Drives translucency from where the sun actually is.
@@ -111,6 +128,11 @@ enum Translucency {
                 + backlight(at: p, lightDirection: moon) * moonPower
                 + lanternPower
             let level = min(0.55, part.amount * min(1, transmitted))
+            // A thousandth of the range. Below that it is not a visible change in
+            // an ear, and it is certainly not worth rebuilding a model component
+            // for.
+            guard abs(level - part.applied) > 0.0005 else { continue }
+            part.applied = level
             part.entity.withMaterial {
                 $0.emissiveColor = .init(color: UIColor(part.tint))
                 $0.emissiveIntensity = level

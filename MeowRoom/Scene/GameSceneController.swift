@@ -60,6 +60,8 @@ final class GameSceneController: NSObject {
     // Props
     private var treatNode: Entity?
     private var teacupFalling = false
+    /// The litter's last applied tint, so it is only written when it moves.
+    private var litterTint: Float = -1
 
     var appearance: CatAppearance { rig.appearance }
 
@@ -466,8 +468,16 @@ final class GameSceneController: NSObject {
             // Soiled litter is darker. SceneKit dimmed the diffuse channel's
             // intensity; RealityKit tints the base colour instead, which is the
             // same idea said in the place it belongs.
-            let v = CGFloat(0.55 + 0.45 * state.litterCleanliness)
-            litter.withMaterial { $0.baseColor.tint = UIColor(white: v, alpha: 1) }
+            //
+            // Only when it moves. Cleanliness changes over hours, and writing a
+            // material means replacing the whole model component — doing that
+            // sixty times a second to say the same number is the component churn
+            // RealityKit's own performance guidance warns about.
+            let v = 0.55 + 0.45 * state.litterCleanliness
+            if abs(v - litterTint) > 0.002 {
+                litterTint = v
+                litter.withMaterial { $0.baseColor.tint = UIColor(white: CGFloat(v), alpha: 1) }
+            }
         }
         if let treat = treatNode, brain.treatPosition == nil {
             treat.removeFromParent()
