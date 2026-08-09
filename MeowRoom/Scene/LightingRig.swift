@@ -183,7 +183,20 @@ final class LightingRig {
     /// The day/night difference belongs in the lights, where it is a property of
     /// the room, not in the camera, where it silently rescales everything else
     /// as well. So the budget drives `intensities(for:)` and this stays put.
-    static func exposureOffset(for budget: LightBudget) -> CGFloat { -0.35 }
+    /// Still fixed. Just lower, and measured rather than guessed.
+    ///
+    /// Cutting `noonIntensity` from 430 to 290 — a third of the light gone —
+    /// moved the rendered mean from 182 to 176. Three percent. That is the tone
+    /// mapper saturating: past a certain point more or less intensity buys almost
+    /// nothing, which is the same wall three earlier attempts hit from the other
+    /// side when they tried to *raise* intensities to pay for a negative exposure.
+    ///
+    /// So in daylight the light level is not the lever at all, and exposure is the
+    /// only thing left that still moves the picture. Fixed is what matters — a
+    /// value that varies with the sky rescales every emissive in the room and is
+    /// what once made midnight brighter than midday. A constant cannot do that to
+    /// the ordering; it only ever stops the whole day down together.
+    static func exposureOffset(for budget: LightBudget) -> CGFloat { -1.5 }
 
     static func exposureOffset(sky: SkyState, lanternOn: Bool) -> CGFloat {
         exposureOffset(for: budget(sky: sky, lanternOn: lanternOn))

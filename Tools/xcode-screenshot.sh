@@ -121,19 +121,23 @@ shot_at_hour() {
       echo "    rendered after ${waited}s"
       break
     fi
-    # If the app has gone away, no amount of waiting will help. Say why.
-    if ! xcrun simctl spawn "$UDID" launchctl list 2>/dev/null | grep -q "$BUNDLE_ID"; then
-      echo "    !! the app is no longer running — it launched and then stopped"
-      xcrun simctl spawn "$UDID" log show --last 120s --style compact \
-        --predicate 'process == "Meow"' 2>/dev/null | tail -30
-      local report
-      report=$(ls -t "$HOME/Library/Logs/DiagnosticReports/"Meow* 2>/dev/null | head -1)
-      [ -n "$report" ] && sed -n '1,40p' "$report"
-      break
-    fi
   done
+
+  # Diagnose only once the wait is actually over.
+  #
+  # This used to check `launchctl list` for the bundle id each time round and
+  # break out if it did not find it. It gave a false negative on the night shot
+  # and abandoned the poll after six seconds — while the log it then printed
+  # showed the app running perfectly well. A liveness check that aborts the thing
+  # it is checking is worse than no liveness check, and the whole point of a
+  # timeout is that it is allowed to expire.
   if blank "$OUT/$label.png"; then
     echo "    !! still blank after ${waited}s — this shot is not a render"
+    xcrun simctl spawn "$UDID" log show --last 150s --style compact \
+      --predicate 'process == "Meow"' 2>/dev/null | tail -30
+    local report
+    report=$(ls -t "$HOME/Library/Logs/DiagnosticReports/"Meow* 2>/dev/null | head -1)
+    [ -n "$report" ] && sed -n '1,40p' "$report"
   fi
 
   xcrun simctl terminate "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
