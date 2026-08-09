@@ -449,7 +449,7 @@ enum CatBuilder {
         guard var model = contents.models.first, var part = model.parts.first else { return nil }
 
         let joints = (0..<shaped.jointCount).map { j in
-            MeshResource.Joint(name: "joint\(j)",
+            MeshResource.Skeleton.Joint(name: "joint\(j)",
                                parentIndex: shaped.parents[j] >= 0 ? shaped.parents[j] : nil,
                                // The shaped bind pose, inverted — the whole matrix,
                                // because this skeleton's bind rotations are not the
@@ -471,8 +471,11 @@ enum CatBuilder {
         }
 
         part.skeletonID = "cat"
-        part.jointInfluences = MeshResource.JointInfluences(influences: influences,
-                                                            influencesPerVertex: n)
+        // A mesh buffer, not a bare array — `MeshResource.JointInfluences` takes
+        // `MeshBuffers.JointInfluences`, and `Joint` lives under `Skeleton`. Both
+        // were spelled from the stand-in and both only exist the other way round.
+        part.jointInfluences = MeshResource.JointInfluences(
+            influences: MeshBuffers.JointInfluences(influences), influencesPerVertex: n)
         model.parts = [part]
         contents.models = [model]
         contents.skeletons = [MeshResource.Skeleton(id: "cat", joints: joints)]

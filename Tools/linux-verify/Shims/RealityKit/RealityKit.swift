@@ -545,7 +545,12 @@ public struct MeshJointInfluence {
 }
 
 public final class MeshResource {
-    public struct Joint {
+    /// Nested under `Skeleton` in the real framework, and only reachable as
+    /// `MeshResource.Skeleton.Joint`. The alias keeps existing shim code working
+    /// while the app uses the spelling that exists on device.
+    public typealias Joint = Skeleton.Joint
+
+    public struct _Joint {
         public var name: String
         public var parentIndex: Int?
         public var inverseBindPoseMatrix: simd_float4x4
@@ -563,6 +568,7 @@ public final class MeshResource {
     }
 
     public struct Skeleton {
+        public typealias Joint = _Joint
         public var id: String
         public var joints: [Joint]
 
