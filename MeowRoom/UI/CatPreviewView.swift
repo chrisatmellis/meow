@@ -165,6 +165,7 @@ final class CatPreviewController: NSObject, ObservableObject {
         }
 
         animator.update(dt: dt, motion: motion)
+        ModelCatBuilder.syncPose(rig)
     }
 }
 

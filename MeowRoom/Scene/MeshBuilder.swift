@@ -39,6 +39,18 @@ final class MeshData {
     /// Empty means the whole mesh takes one material, which is nearly everything.
     private(set) var groupStarts: [(material: Int, start: Int)] = []
 
+    init() {}
+
+    /// Adopts buffers that were built somewhere else — the one asset in the game
+    /// arrives already triangulated, with normals and texture coordinates, and
+    /// there is nothing for the generators to do to it.
+    init(positions: [Vec3], normals: [Vec3], uvs: [Vec2], indices: [Int32]) {
+        self.positions = positions
+        self.normals = normals
+        self.uvs = uvs
+        self.indices = indices
+    }
+
     func addVertex(_ p: Vec3, uv: Vec2) -> Int32 {
         positions.append(p)
         normals.append(.zero)

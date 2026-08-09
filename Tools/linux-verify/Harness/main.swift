@@ -1281,6 +1281,141 @@ section("euler convention") {
     }
 }
 
+// MARK: - The modelled cat
+
+// The one art asset in the game, and therefore the one thing here that cannot be
+// re-derived if it is wrong. Everything else is generated from parameters; this
+// is a file, and a file can be exported badly, exported from the wrong model, or
+// silently truncated.
+//
+// The bundle does not exist on this machine, so the file is read from the source
+// tree — which is the same bytes the app ships.
+section("modelled cat") {
+    guard let data = FileManager.default.contents(atPath: "MeowRoom/Resources/cat.catmesh"),
+          let asset = try? CatMeshAsset(data: data) else {
+        expect(false, "the exported cat mesh is present and parses")
+        return
+    }
+
+    let mesh = asset.mesh
+    expect(mesh.positions.count > 1000, "the cat has vertices (\(mesh.positions.count))")
+    expect(mesh.indices.count % 3 == 0, "the cat is whole triangles")
+    expect(mesh.normals.count == mesh.positions.count, "a normal per vertex")
+    expect(mesh.uvs.count == mesh.positions.count, "a uv per vertex")
+    expect(mesh.indices.allSatisfy { $0 >= 0 && Int($0) < mesh.positions.count },
+           "every index is in range")
+    expect(mesh.positions.allSatisfy { finite($0) }, "positions are finite")
+    expect(mesh.normals.allSatisfy { abs($0.length - 1) < 1e-2 }, "normals are unit length")
+
+    // The UVs are the entire reason this file exists — the mesh arrived without
+    // any, which would have made every coat pattern and material map inapplicable
+    // and left one flat grey cat.
+    expect(mesh.uvs.allSatisfy { $0.x >= -0.001 && $0.x <= 2.001 },
+           "u stays within one wrap and its seam duplicates")
+    expect(mesh.uvs.contains { $0.x > 0.6 } && mesh.uvs.contains { $0.x < 0.4 },
+           "u actually goes around the body rather than collapsing")
+    let vSpan = (mesh.uvs.map(\.y).max() ?? 0) - (mesh.uvs.map(\.y).min() ?? 0)
+    expect(vSpan > 0.5, "v runs along the cat (\(vSpan) of a texture repeat)")
+
+    // Skinning. A weight that does not sum to one is a vertex that shrinks toward
+    // the origin as soon as anything moves.
+    let n = asset.influencesPerVertex
+    expect(n >= 1 && n <= 8, "a sane number of influences per vertex (\(n))")
+    expect(asset.jointIndices.count == mesh.positions.count * n, "an index per influence")
+    expect(asset.jointWeights.count == mesh.positions.count * n, "a weight per influence")
+    var worstWeight: Float = 0
+    for v in 0..<mesh.positions.count {
+        var sum: Float = 0
+        for k in 0..<n { sum += asset.jointWeights[v * n + k] }
+        worstWeight = max(worstWeight, abs(sum - 1))
+    }
+    expect(worstWeight < 0.02, "skin weights sum to one (worst error \(worstWeight))")
+    expect(asset.jointIndices.allSatisfy { Int($0) < asset.jointCount },
+           "every influence names a joint that exists")
+
+    // The skeleton is a tree with exactly one root, and no joint precedes its
+    // parent — which is what lets the pose be evaluated in one pass.
+    expect(asset.parents.filter { $0 < 0 }.count == 1, "exactly one root joint")
+    expect(asset.parents.enumerated().allSatisfy { $0.element < $0.offset },
+           "parents come before their children")
+
+    // Every role the animator can drive resolved. This is the part that was
+    // inferred from the rest pose rather than read from the file, because the
+    // conversion stripped the joint names.
+    for role in CatMeshAsset.Role.allCases {
+        expect(asset.joint(role) != nil, "the skeleton has a \(role)")
+    }
+
+    // ...and resolved to the *right* joints, which is a different claim. Checked
+    // against the shape of a cat rather than against the numbers that came out:
+    // the head is forward of the hips, the ears above the head, the jaw below it,
+    // the tail behind, and all four feet on the floor.
+    func at(_ r: CatMeshAsset.Role) -> SIMD3<Float> { asset.restPositions[asset.joint(r)!] }
+    let hips = at(.hips), head = at(.head)
+    expect(head.x > hips.x, "the head is in front of the hips")
+    expect(at(.earL).y > head.y && at(.earR).y > head.y, "the ears are above the head")
+    expect(at(.jaw).y < head.y, "the jaw is below the head")
+    expect(at(.jaw).x > hips.x, "the jaw is at the front end")
+    expect(at(.tail3).x < at(.tail0).x, "the tail runs backwards")
+    expect(at(.tail3).x < hips.x, "the tail is behind the hips")
+    let floor = min(at(.forePawL).y, min(at(.forePawR).y,
+                    min(at(.hindPawL).y, at(.hindPawR).y)))
+    expect(floor < hips.y * 0.25, "all four feet reach the floor")
+    expect(at(.foreHipL).z * at(.foreHipR).z < 0, "the fore legs are on opposite sides")
+    expect(at(.hindHipL).z * at(.hindHipR).z < 0, "the hind legs are on opposite sides")
+    expect(at(.foreHipL).x > at(.hindHipL).x, "the fore legs are in front of the hind legs")
+
+    // The rig the animator is handed.
+    var a = BreedPresets.appearance(for: .domesticShorthair)
+    a.seed = 11
+    guard let rig = ModelCatBuilder.build(a, using: asset) else {
+        expect(false, "a rig builds from the asset")
+        return
+    }
+    expect(rig.legs.count == 4, "four legs (\(rig.legs.count))")
+    expect(rig.tailSegments.count >= 3, "a tail with segments (\(rig.tailSegments.count))")
+    expect(rig.skinnedBody != nil, "the rig carries a skinned surface")
+    expect(rig.skinJoints.count == asset.jointCount, "a posable entity per joint")
+
+    // The frame conversion, which is where a quarter turn in the wrong direction
+    // would leave the cat walking sideways for the rest of the project. The model
+    // faces +X and the game's body space faces +Z, so after conversion the nose
+    // must lead and the feet must stand on the floor the animator measures to.
+    let noseZ = rig.head.position(relativeTo: rig.body).z
+    let hipZ = rig.legs.first(where: { !$0.isFront })!.hip.position(relativeTo: rig.body).z
+    expect(noseZ > hipZ, "the cat faces +Z once framed (head \(noseZ), hip \(hipZ))")
+    for leg in rig.legs {
+        expect(abs(leg.restFoot.y + rig.bodyHeight) < 1e-5,
+               "a resting foot is on the floor, not at the ankle")
+        let x = leg.hip.position(relativeTo: rig.body).x
+        expect(x * leg.side > 0,
+               "leg side matches where the leg actually is (side \(leg.side), x \(x))")
+    }
+    // Diagonal pairs, the same as the generated cat's. Getting this wrong gives a
+    // cat that paces like a camel instead of trotting like a cat.
+    let fl = rig.legs.first { $0.isFront && $0.side < 0 }!
+    let br = rig.legs.first { !$0.isFront && $0.side > 0 }!
+    let fr = rig.legs.first { $0.isFront && $0.side > 0 }!
+    expect(abs(fl.gaitPhase - br.gaitPhase) < 1e-6, "diagonal feet share a gait phase")
+    expect(abs(fl.gaitPhase - fr.gaitPhase) > 0.4, "feet on the same end do not")
+
+    // It has to survive being animated, which is the only way to find out whether
+    // the joints the animator addresses are the joints it thinks they are.
+    let animator = CatAnimator(rig: rig)
+    var motion = CatMotion()
+    motion.pose = .standing
+    motion.speed = 0.9
+    for i in 0..<400 {
+        motion.position = SIMD3<Float>(0, 0, Float(i) * 0.002)
+        animator.update(dt: 1.0 / 60, motion: motion)
+    }
+    ModelCatBuilder.syncPose(rig)
+    for (i, j) in rig.skinJoints.enumerated() {
+        expect(finite(j.position), "joint \(i) has a finite position after 400 frames")
+        expect(finite(j.eulerAngles), "joint \(i) has finite angles after 400 frames")
+    }
+}
+
 section("height fields") {
 
     func decode(_ b: UInt8) -> Float { Float(b) / 255 * 2 - 1 }

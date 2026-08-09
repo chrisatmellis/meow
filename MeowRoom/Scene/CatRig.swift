@@ -27,12 +27,12 @@ final class CatRig {
 
     let root = Entity()          // world placement (position + yaw)
     let body = Entity()          // vertical bob, crouch, lean
-    let spine = Entity()         // torso, pitch/roll
-    let neck = Entity()
-    let head = Entity()
-    let jaw = Entity()
-    let tailRoot = Entity()      // fixed 180° yaw: local +Z runs down the tail
-    let tailPitch = Entity()     // animated lift / sway of the tail base
+    var spine = Entity()         // torso, pitch/roll
+    var neck = Entity()
+    var head = Entity()
+    var jaw = Entity()
+    var tailRoot = Entity()      // fixed 180° yaw: local +Z runs down the tail
+    var tailPitch = Entity()     // animated lift / sway of the tail base
 
     var tailSegments: [Entity] = []
     var legs: [LegRig] = []
@@ -51,6 +51,13 @@ final class CatRig {
     /// `Translucency` drives their emission from where the sun actually is.
     var translucentParts: [TranslucentPart] = []
     var collarNode: Entity?
+
+    /// Set when the cat is the modelled one rather than the generated one: the
+    /// single skinned surface, and the joint entities the animator poses. The
+    /// animator never looks at either — `ModelCatBuilder.syncPose` copies the one
+    /// into the other after it has run.
+    var skinnedBody: Entity?
+    var skinJoints: [Entity] = []
 
     /// Which part of the cat an entity belongs to.
     ///
@@ -110,7 +117,24 @@ enum CatBuilder {
         max(0.05, length / max(0.05, a.torsoLength))
     }
 
+    /// The cat, however it is made.
+    ///
+    /// There are two cats now. The modelled one is a single skinned mesh and is
+    /// what ships; the generated one is thirty-odd lofts and is what everything
+    /// was built against, including thirteen million assertions and an offline
+    /// rasteriser that has no renderer to ask.
+    ///
+    /// The generated cat is not a fallback in the apologetic sense. It is the one
+    /// the character creator's seventy parameters actually reshape — different
+    /// breeds, different muzzles, different fur lengths — where the modelled cat
+    /// can only be scaled. It is also the only one that exists on a machine with
+    /// no app bundle, which is where the assertions run.
     static func build(_ a: CatAppearance, preview: Bool = false) -> CatRig {
+        if let modelled = ModelCatBuilder.build(a, preview: preview) { return modelled }
+        return generate(a, preview: preview)
+    }
+
+    static func generate(_ a: CatAppearance, preview: Bool = false) -> CatRig {
         let rig = CatRig(appearance: a)
 
         // Segment counts below are written for the high tier and scaled from here,

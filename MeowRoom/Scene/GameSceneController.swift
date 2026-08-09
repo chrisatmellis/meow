@@ -517,6 +517,10 @@ final class GameSceneController: NSObject {
 
         brain.update(dt: dt, sky: sky)
         animator.update(dt: dt, motion: brain.motion)
+        // The modelled cat is one skinned surface, so posing its joint entities
+        // is not enough — the pose has to be handed to the skin. A no-op for the
+        // generated cat, whose joints *are* the geometry.
+        ModelCatBuilder.syncPose(rig)
 
         // After the animator, because it reads where the ears actually ended up,
         // and every frame rather than with the sky refresh: the sun barely moves in

@@ -1,0 +1,176 @@
+import Foundation
+import RealityKit
+
+/// The one art asset in the game.
+///
+/// Everything else here is generated at runtime — the room, the textures, the
+/// sounds, and until now the cat. This is a modelled cat, exported by
+/// `Tools/usd/export-cat.py` from a USDZ with its texture coordinates added and
+/// nothing else about it changed.
+///
+/// It arrives as a flat binary rather than as a USDZ the renderer loads, for one
+/// reason: the coat. Every pattern, marking and material map in this game is
+/// painted at runtime from ~70 appearance parameters and applied through UVs, and
+/// the file had none — so the unwrap happens offline, deterministically, and what
+/// ships is the result. Loading the USDZ directly would hand RealityKit the mesh
+/// without them and give back one grey cat.
+///
+/// The format is deliberately dull: counts, then plain arrays, little-endian, no
+/// compression. It is 141 KB and parses in a couple of milliseconds, which is
+/// less than the room's textures take to draw.
+struct CatMeshAsset {
+
+    /// The joints the animator knows how to drive. The exported skeleton has
+    /// thirty-six; these are the twenty-nine that mean something to a cat.
+    ///
+    /// Order is the file format. Appending is safe, reordering is not.
+    enum Role: Int, CaseIterable {
+        case hips, spineBase, spineMid, chest, neck, head, jaw, earL, earR
+        case tail0, tail1, tail2, tail3
+        case foreHipL, foreKneeL, foreAnkleL, forePawL
+        case hindHipL, hindKneeL, hindAnkleL, hindPawL
+        case foreHipR, foreKneeR, foreAnkleR, forePawR
+        case hindHipR, hindKneeR, hindAnkleR, hindPawR
+    }
+
+    /// Geometry, in the game's renderer-free form, so everything downstream — the
+    /// materials, the fur shells, the triangle budget, the offline rasteriser —
+    /// treats it exactly like a generated mesh.
+    let mesh: MeshData
+    /// Per-vertex bone indices and weights, `influencesPerVertex` of each.
+    let jointIndices: [UInt16]
+    let jointWeights: [Float]
+    let influencesPerVertex: Int
+    /// Parent index per joint, -1 for the root.
+    let parents: [Int]
+    /// Rest position of each joint in the model's own space, metres.
+    let restPositions: [SIMD3<Float>]
+    /// Joint index for each role, or -1 where the skeleton has no such joint.
+    private let roleJoints: [Int]
+
+    func joint(_ role: Role) -> Int? {
+        let j = roleJoints[role.rawValue]
+        return j >= 0 ? j : nil
+    }
+
+    var jointCount: Int { parents.count }
+
+    /// The rest pose's own measurements, so an appearance can be scaled onto it
+    /// rather than assumed to match.
+    var restTorsoLength: Float {
+        guard let hips = joint(.hips), let neck = joint(.neck) else { return 0.26 }
+        return (restPositions[neck] - restPositions[hips]).length
+    }
+
+    var restShoulderHeight: Float {
+        guard let chest = joint(.chest) else { return 0.22 }
+        return restPositions[chest].y
+    }
+
+    // MARK: - Loading
+
+    enum LoadError: Error { case missing, malformed }
+
+    static func load(_ name: String = "cat", in bundle: Bundle = .main) throws -> CatMeshAsset {
+        guard let url = bundle.url(forResource: name, withExtension: "catmesh") else {
+            throw LoadError.missing
+        }
+        return try CatMeshAsset(data: try Data(contentsOf: url))
+    }
+
+    init(data: Data) throws {
+        var at = 0
+
+        func need(_ n: Int) throws {
+            guard at + n <= data.count else { throw LoadError.malformed }
+        }
+        func u32() throws -> Int {
+            try need(4)
+            defer { at += 4 }
+            return Int(UInt32(data[at]) | UInt32(data[at + 1]) << 8
+                       | UInt32(data[at + 2]) << 16 | UInt32(data[at + 3]) << 24)
+        }
+        func u16() throws -> UInt16 {
+            try need(2)
+            defer { at += 2 }
+            return UInt16(data[at]) | UInt16(data[at + 1]) << 8
+        }
+        func i16() throws -> Int {
+            let raw = try u16()
+            return Int(Int16(bitPattern: raw))
+        }
+        func f32() throws -> Float {
+            try need(4)
+            defer { at += 4 }
+            let bits = UInt32(data[at]) | UInt32(data[at + 1]) << 8
+                | UInt32(data[at + 2]) << 16 | UInt32(data[at + 3]) << 24
+            return Float(bitPattern: bits)
+        }
+
+        try need(8)
+        guard data[0..<8].elementsEqual("MEOWCAT1".utf8) else { throw LoadError.malformed }
+        at = 8
+
+        let vertexCount = try u32()
+        let indexCount = try u32()
+        let jointCount = try u32()
+        influencesPerVertex = try u32()
+        guard vertexCount > 0, indexCount % 3 == 0, jointCount > 0,
+              influencesPerVertex > 0 else { throw LoadError.malformed }
+
+        var positions: [Vec3] = []
+        positions.reserveCapacity(vertexCount)
+        for _ in 0..<vertexCount {
+            positions.append(Vec3(x: try f32(), y: try f32(), z: try f32()))
+        }
+        var normals: [Vec3] = []
+        normals.reserveCapacity(vertexCount)
+        for _ in 0..<vertexCount {
+            normals.append(Vec3(x: try f32(), y: try f32(), z: try f32()))
+        }
+        var uvs: [Vec2] = []
+        uvs.reserveCapacity(vertexCount)
+        for _ in 0..<vertexCount {
+            uvs.append(Vec2(x: try f32(), y: try f32()))
+        }
+        var indices: [Int32] = []
+        indices.reserveCapacity(indexCount)
+        for _ in 0..<indexCount {
+            let v = try u32()
+            guard v < vertexCount else { throw LoadError.malformed }
+            indices.append(Int32(v))
+        }
+
+        var ji: [UInt16] = []
+        ji.reserveCapacity(vertexCount * influencesPerVertex)
+        for _ in 0..<(vertexCount * influencesPerVertex) {
+            let j = try u16()
+            guard Int(j) < jointCount else { throw LoadError.malformed }
+            ji.append(j)
+        }
+        var jw: [Float] = []
+        jw.reserveCapacity(vertexCount * influencesPerVertex)
+        for _ in 0..<(vertexCount * influencesPerVertex) { jw.append(try f32()) }
+
+        var par: [Int] = []
+        var rest: [SIMD3<Float>] = []
+        for _ in 0..<jointCount {
+            par.append(try i16())
+            rest.append(SIMD3<Float>(try f32(), try f32(), try f32()))
+        }
+
+        let roleCount = try u32()
+        var roles = [Int](repeating: -1, count: Role.allCases.count)
+        for i in 0..<roleCount {
+            let j = try i16()
+            if i < roles.count { roles[i] = j }
+        }
+
+        mesh = MeshData(positions: positions, normals: normals, uvs: uvs, indices: indices)
+        jointIndices = ji
+        jointWeights = jw
+        parents = par
+        restPositions = rest
+        roleJoints = roles
+    }
+}

@@ -5,6 +5,25 @@
 import Foundation
 import RealityKit
 
+/// Builds the cat the app would ship — the modelled one — falling back to the
+/// generated one when the export is not present.
+///
+/// The app finds the asset in its bundle. There is no bundle here, so the file is
+/// read from the source tree; the point of this renderer is to look at what the
+/// player will look at, and since the port that is a skinned mesh rather than
+/// thirty lofts.
+private let shippedAsset: CatMeshAsset? = {
+    guard let d = FileManager.default.contents(atPath: "MeowRoom/Resources/cat.catmesh")
+    else { return nil }
+    return try? CatMeshAsset(data: d)
+}()
+
+private func buildCat(_ a: CatAppearance, preview: Bool = false) -> CatRig {
+    if let asset = shippedAsset,
+       let rig = ModelCatBuilder.build(a, preview: preview, using: asset) { return rig }
+    return CatBuilder.generate(a, preview: preview)
+}
+
 // MARK: - Triangle soup
 
 private struct Tri {
@@ -279,7 +298,7 @@ func runRender(outputDirectory: String) {
                                       ("walk", .walking), ("stretch", .stretching)]
     for (label, pose) in poses {
         let appearance = BreedPresets.appearance(for: .domesticShorthair)
-        let rig = CatBuilder.build(appearance)
+        let rig = buildCat(appearance)
         let animator = CatAnimator(rig: rig)
         var motion = CatMotion()
         motion.position = .zero
@@ -301,12 +320,13 @@ func runRender(outputDirectory: String) {
     // inside the skull, so if they drift out the ears read as floating.
     for breed in [CatBreed.domesticShorthair, .maineCoon, .persian, .siamese] {
         let a = BreedPresets.appearance(for: breed)
-        let rig = CatBuilder.build(a)
+        let rig = buildCat(a)
         let animator = CatAnimator(rig: rig)
         var motion = CatMotion()
         motion.position = .zero
         motion.pose = .sittingTall
         for _ in 0..<200 { animator.update(dt: 1.0 / 60, motion: motion) }
+        ModelCatBuilder.syncPose(rig)
 
         let head = rig.head.convert(position: SIMD3<Float>(repeating: 0), to: nil)
         let d = a.headRadius * 11
@@ -323,12 +343,13 @@ func runRender(outputDirectory: String) {
 
     // --- A few breeds, so the silhouettes can be compared.
     for breed in [CatBreed.maineCoon, .siamese, .persian, .munchkin, .sphynx, .britishShorthair] {
-        let rig = CatBuilder.build(BreedPresets.appearance(for: breed))
+        let rig = buildCat(BreedPresets.appearance(for: breed))
         let animator = CatAnimator(rig: rig)
         var motion = CatMotion()
         motion.position = .zero
         motion.pose = .standing
         for _ in 0..<200 { animator.update(dt: 1.0 / 60, motion: motion) }
+        ModelCatBuilder.syncPose(rig)
         shot("breed-\(breed.rawValue)", rig.root,
              eye: SIMD3<Float>(x: 1.0, y: 0.22, z: 0.10), target: SIMD3<Float>(x: 0, y: 0.16, z: 0),
              fov: 34, size: (420, 320))
@@ -341,7 +362,7 @@ func runRender(outputDirectory: String) {
     let sky = WorldClock.sky(at: cal.date(from: comps)!, timeZone: TimeZone(identifier: "UTC")!)
     let room = RoomBuilder.build(sky: sky)
 
-    let catRig = CatBuilder.build(BreedPresets.appearance(for: .domesticShorthair))
+    let catRig = buildCat(BreedPresets.appearance(for: .domesticShorthair))
     let catAnim = CatAnimator(rig: catRig)
     var catMotion = CatMotion()
     catMotion.pose = .sittingTall
@@ -369,7 +390,7 @@ func runRender(outputDirectory: String) {
     // --- The cat where it sits when called over, checked against the HUD.
     // The bottom bar, status line and home indicator together occupy roughly the
     // lowest 150 pt of an 844 pt frame; the cat has to stay clear of that.
-    let closeRig = CatBuilder.build(BreedPresets.appearance(for: .domesticShorthair))
+    let closeRig = buildCat(BreedPresets.appearance(for: .domesticShorthair))
     let closeAnim = CatAnimator(rig: closeRig)
     var closeMotion = CatMotion()
     closeMotion.pose = .sittingTall
@@ -388,7 +409,12 @@ func runRender(outputDirectory: String) {
     // clear. The whole-body box is reported too, but a tail tip that sprawls
     // toward the camera and slips under the bar is not worth moving the cat for.
     let hudTop: Float = 844 - 150
-    for (label, node) in [("head", closeRig.head), ("whole cat", closeRig.root)] {
+    // The head is a bone on the modelled cat and carries no geometry of its own,
+    // so measuring "is the head behind the HUD" from its mesh finds nothing and
+    // prints a confident "not on screen". Ask the skinned surface instead when the
+    // joint has nothing to measure.
+    let headNode: Entity = closeRig.skinnedBody ?? closeRig.head
+    for (label, node) in [("head", headNode), ("whole cat", closeRig.root)] {
         guard let b = screenBounds(node, eye: eye, target: aim,
                                    fovDegrees: vertical, width: 390, height: 844) else {
             print("  \(label) at lap spot: not on screen")
