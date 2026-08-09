@@ -84,14 +84,55 @@ mkdir -p "$CONTAINER/Library/Application Support"
 cp "$HERE/ci-save.json" "$CONTAINER/Library/Application Support/meowroom-save.json"
 echo "    seeded save into $CONTAINER"
 
+# A blank window is white, and so is an overexposed room, so "did it render" cannot
+# be answered by looking at brightness alone — but a frame that is *entirely* white
+# to the last pixel is never a render of anything. That is the test.
+blank() {
+  local f=$1
+  [ -s "$f" ] || return 0
+  local clip
+  clip=$(python3 "$HERE/shot-stats.py" stats "$f" 2>/dev/null | awk 'NR==2 {print $3}')
+  [ -n "$clip" ] || return 0
+  awk -v c="$clip" 'BEGIN { exit !(c > 99.5) }'
+}
+
 shot_at_hour() {
   local hour=$1 label=$2
   echo "==> room at ${hour}:00 ($label)"
   # Freshen lastSeen so the "while you were away" sheet does not cover the room.
   python3 "$HERE/touch-save.py" "$CONTAINER/Library/Application Support/meowroom-save.json"
   SIMCTL_CHILD_MEOW_FORCE_HOUR="$hour" xcrun simctl launch "$UDID" "$BUNDLE_ID" >/dev/null || true
-  sleep 18
-  xcrun simctl io "$UDID" screenshot "$OUT/$label.png" >/dev/null 2>&1 || true
+
+  # Wait for a frame with something in it, rather than for a fixed number of
+  # seconds. The room builds every one of its textures and material maps at
+  # launch, and these are Debug builds — unoptimised Swift over big float arrays
+  # is far slower than the -O the harness uses. A fixed 18 second sleep captured
+  # the blank window four times and produced four byte-identical white images,
+  # which look exactly like an overexposed room and are not one.
+  local waited=0
+  while [ "$waited" -lt 90 ]; do
+    sleep 6
+    waited=$((waited + 6))
+    xcrun simctl io "$UDID" screenshot "$OUT/$label.png" >/dev/null 2>&1 || true
+    if ! blank "$OUT/$label.png"; then
+      echo "    rendered after ${waited}s"
+      break
+    fi
+    # If the app has gone away, no amount of waiting will help. Say why.
+    if ! xcrun simctl spawn "$UDID" launchctl list 2>/dev/null | grep -q "$BUNDLE_ID"; then
+      echo "    !! the app is no longer running — it launched and then stopped"
+      xcrun simctl spawn "$UDID" log show --last 120s --style compact \
+        --predicate 'process == "Meow"' 2>/dev/null | tail -30
+      local report
+      report=$(ls -t "$HOME/Library/Logs/DiagnosticReports/"Meow* 2>/dev/null | head -1)
+      [ -n "$report" ] && sed -n '1,40p' "$report"
+      break
+    fi
+  done
+  if blank "$OUT/$label.png"; then
+    echo "    !! still blank after ${waited}s — this shot is not a render"
+  fi
+
   xcrun simctl terminate "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
   sleep 2
 }
