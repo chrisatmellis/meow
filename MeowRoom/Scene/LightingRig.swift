@@ -63,7 +63,13 @@ final class LightingRig {
         windowGlow.attenuationStartDistance = 0.4
         windowGlow.attenuationEndDistance = 5.5
         windowGlowNode.light = windowGlow
-        windowGlowNode.position = SCNVector3(x: 0.2, y: 1.2, z: -RoomLayout.halfDepth + 0.25)
+        // Nearly a metre in from the shoji, not a quarter of one.
+        //
+        // The point of this light is the room, but at 0.25 m the nearest surface to
+        // it by far was the paper itself, so the panels were lit from inside and
+        // came out white with their own texture washed off them. Backing it into
+        // the room lights the room.
+        windowGlowNode.position = SCNVector3(x: 0.2, y: 1.15, z: -RoomLayout.halfDepth + 0.95)
         root.addChildNode(windowGlowNode)
     }
 
@@ -120,7 +126,10 @@ final class LightingRig {
     }
 
     /// Total SceneKit intensity at full daylight, and the lux that corresponds to.
-    private static let noonIntensity: Float = 430
+    /// Measured, not guessed: at 430 the room rendered at mean luma 182 with the
+    /// tatami blown to near-white and no detail left in it. A lit interior sits
+    /// closer to 110-120 — bright, but with the floor still made of something.
+    private static let noonIntensity: Float = 290
     private static let noonLux: Float = 2563
 
     /// How much of the budget's range reaches the lights.
@@ -213,7 +222,15 @@ final class LightingRig {
 
         // --- Bounce and window glow.
         bounce.intensity = CGFloat(lit.bounce)
-        bounce.color = UIColor(sky.sunColor.mixed(with: RGBColor(hex: 0xC9B383), 0.45))
+        // Barely tinted, because this light is now doing most of the work.
+        //
+        // Mixing 45% toward tatami straw was reasonable while bounce carried 15%
+        // of the sun. It carries 55% now, and at that share the tint stopped
+        // reading as warmth off the floor and started reading as a green cast over
+        // the entire room — walls, ceiling, cat and all. A bounce light's colour
+        // has to get weaker as its share gets stronger, or it stops being bounce
+        // and becomes a colour filter.
+        bounce.color = UIColor(sky.sunColor.mixed(with: RGBColor(hex: 0xC9B383), 0.16))
         windowGlow.intensity = CGFloat(lit.windowGlow)
         windowGlow.color = UIColor(sky.skyHorizonColor.lightened(0.25))
 

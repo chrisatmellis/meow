@@ -84,16 +84,19 @@ mkdir -p "$CONTAINER/Library/Application Support"
 cp "$HERE/ci-save.json" "$CONTAINER/Library/Application Support/meowroom-save.json"
 echo "    seeded save into $CONTAINER"
 
-# A blank window is white, and so is an overexposed room, so "did it render" cannot
-# be answered by looking at brightness alone — but a frame that is *entirely* white
-# to the last pixel is never a render of anything. That is the test.
+# A frame that is *entirely* one value is never a render of anything. Both ends:
+# the first version of this checked only for white, having just been burned by
+# four white frames, and promptly accepted four black ones instead. A blank window
+# is whatever colour the window happens to be.
 blank() {
   local f=$1
   [ -s "$f" ] || return 0
-  local clip
-  clip=$(python3 "$HERE/shot-stats.py" stats "$f" 2>/dev/null | awk 'NR==2 {print $3}')
-  [ -n "$clip" ] || return 0
-  awk -v c="$clip" 'BEGIN { exit !(c > 99.5) }'
+  local line clip dark
+  line=$(python3 "$HERE/shot-stats.py" stats "$f" 2>/dev/null | awk 'NR==2 {print $3, $5}')
+  [ -n "$line" ] || return 0
+  clip=$(echo "$line" | cut -d' ' -f1)
+  dark=$(echo "$line" | cut -d' ' -f2)
+  awk -v c="$clip" -v d="$dark" 'BEGIN { exit !(c > 99.5 || d > 99.5) }'
 }
 
 shot_at_hour() {
