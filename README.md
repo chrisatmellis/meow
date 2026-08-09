@@ -225,15 +225,17 @@ blended by skin weight. The shaped skeleton becomes the new bind pose, so the
 mesh and the joints that drive it stay in agreement.
 
 The skinning is done on the CPU, in `CatSkin`, once a frame. RealityKit will do
-it — a `MeshResource.Skeleton`, per-vertex joint influences, a
-`SkeletalPosesComponent` — and that was the first implementation; on device the
-cat drew as a crumpled clump at the skeleton's origin, every vertex pulled toward
-one point, which is what a mesh looks like when the inverse bind matrices are
-applied and the joint transforms are not. The same pose through the same
-arithmetic here produces a cat. Two thousand vertices cost well under a tenth of a
-millisecond to blend, and doing it here buys something the GPU path cannot: the
-offline rasteriser draws the very same buffers, so a picture of the cat is a
-picture of what the phone draws.
+it, and did at first; it was moved here on a wrong diagnosis, while the cat was
+drawing as a crumpled clump on a phone and correctly everywhere else. The cause
+turned out to be upstream of both — see below — and the GPU path had been drawing
+exactly what it was handed.
+
+It stayed on the CPU for a different reason. The offline rasteriser draws these
+very buffers, so a picture of the cat is a picture of what the phone draws, and
+the assertion suite measures the deformation that ships rather than a second,
+correct copy of it living in the test. Neither was true before, and that is
+precisely how a skinning fault survived two TestFlight builds. Two thousand
+vertices cost well under a tenth of a millisecond to blend.
 
 The mesh and the skeleton come out of `CatShape` in the game's body space — the
 cat facing +Z, hips at the origin, floor at `-bodyHeight` — and **every joint's
@@ -247,6 +249,23 @@ rather than composing with it — threw the rest orientation away in the process
 The first animated frame folded the whole skeleton into a heap: the cat rendered
 as a ball of fur. Joints that are points have no orientation to lose, and a
 rotation about X is a pitch on every bone in the animal.
+
+### One line about `simd_quatf()`
+
+It is not the identity. Apple's no-argument initialiser zeroes all four lanes,
+w included, and a zero quaternion is not a rotation — feed it to
+`simd_float4x4` and the upper block comes back empty, which passes a parent's
+translation through while dropping the bone. `CatShape` filled its per-joint
+turn array with `simd_quatf()` and only the ears and tail overwrote their
+entries, so on device every other bone lost its length and the whole skeleton
+collapsed onto the hips. The cat rendered as a five-centimetre knot of fur.
+
+The stand-in this project compiles against offline returned the identity for it,
+so the difference could not appear until the code was on a phone — and every
+number that gets checked around it stayed right: the file parsed, all
+twenty-nine joint roles resolved, the hip height came out to the millimetre,
+the vertex count was exact. What was never checked was whether the skeleton had
+any *size*. It is now, along with whether its bones have length.
 
 Eyes, whiskers, a collar, fur shells and the inner ears are still generated,
 because one closed surface cannot blink, and translucency is driven per material

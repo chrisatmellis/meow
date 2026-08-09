@@ -7,24 +7,25 @@ import RealityKit
 ///
 /// RealityKit will do this: a `MeshResource.Skeleton` on the mesh, per-vertex
 /// `jointInfluences`, and a `SkeletalPosesComponent` on the entity. That was the
-/// first implementation and it did not work — on device the cat drew as a small
-/// crumpled clump at the skeleton's origin, every vertex pulled toward one point,
-/// which is what you get when the inverse bind matrices are applied and the joint
-/// transforms are not. The same pose, run through the same arithmetic here,
-/// produces a cat; so the fault is in how the pose reaches RealityKit's skinning,
-/// somewhere in an API surface that is a year old, sparsely documented, and
-/// impossible to step through from this side of the fence.
+/// first implementation, and it was replaced by this one on the strength of a
+/// wrong diagnosis — the cat drew as a crumpled clump on device, which looked
+/// like RealityKit applying the inverse bind matrices and ignoring the pose. It
+/// was not. The skeleton being handed to it had every joint on the same point
+/// (see `CatShape`, and `simd_quatf()` not being the identity), so the GPU path
+/// was drawing exactly what it was given, and so was this one until the same fix
+/// reached both.
 ///
-/// It is not worth finding out. The cat is about two thousand vertices — blending
-/// them costs well under a tenth of a millisecond, against a frame budget of
-/// eight — and doing it here buys something the GPU path cannot: the offline
-/// rasteriser draws the very same buffers, so a picture of the cat is now a
-/// picture of what the phone will draw, and the assertion suite exercises the
-/// code that actually ships rather than a stand-in for it. The bug that started
-/// this was invisible for exactly that reason.
+/// This stayed anyway, for a reason that has nothing to do with that bug: the
+/// offline rasteriser draws these very buffers. A picture of the cat is now a
+/// picture of what the phone draws, and the assertion suite measures the shipped
+/// deformation rather than a second, correct copy of it. Both of those failed to
+/// exist for the whole of the previous arrangement, and both are why the next
+/// fault of this kind gets caught on a Linux box in ninety seconds rather than
+/// on a phone in a day.
 ///
-/// If the skinning ever costs enough to matter, `LowLevelMesh` is the next step
-/// and this class is the thing that fills it.
+/// The cost is nothing to speak of: about two thousand vertices, well under a
+/// tenth of a millisecond against a frame budget of eight. If it ever does
+/// matter, `LowLevelMesh` is the next step and this class is what fills it.
 final class CatSkin {
     /// The surface as modelled, which every frame is computed from afresh. Skinning
     /// is not incremental — blending yesterday's pose into today's compounds.
@@ -41,11 +42,6 @@ final class CatSkin {
     /// The live buffers, handed to RealityKit and read by the offline renderer.
     private let mesh: MeshData
     private weak var entity: ModelEntity?
-
-    #if DEBUG
-    /// What the last pose put into the blend, for the on-screen diagnostic.
-    private(set) var report = ""
-    #endif
 
     /// Scratch, kept between frames so a pose costs no allocation.
     private var posed: [Vec3]
@@ -83,21 +79,6 @@ final class CatSkin {
             if parents[j] >= 0 { m = skin[parents[j]] * m }
             skin[j] = m
         }
-        #if DEBUG
-        // What the accumulation actually saw. The offline harness runs this same
-        // code and produces a cat; the device produces a five-centimetre knot, so
-        // the numbers that go into it are the thing to look at rather than the
-        // picture that comes out.
-        var maxLocal: Float = 0, maxWorld: Float = 0, maxRest: Float = 0
-        for j in 0..<joints.count {
-            maxLocal = max(maxLocal, simd_length(joints[j].transform.translation))
-            maxWorld = max(maxWorld, simd_length(SIMD3<Float>(skin[j][3].x, skin[j][3].y, skin[j][3].z)))
-            maxRest = max(maxRest, simd_length(restJoints[j]))
-        }
-        report = String(format: "local %.3f · world %.3f · rest %.3f · n %d",
-                        maxLocal, maxWorld, maxRest, joints.count)
-        #endif
-
         // Then composed with the bind, which for a skeleton of points is the
         // subtraction of where the joint started: `world · translate(-rest)`,
         // whose translation is `t - R·rest` and not `t + R·rest`. The rotation is

@@ -36,11 +36,6 @@ import RealityKit
 /// each joint from where it was to where it now is.
 enum CatShape {
 
-    #if DEBUG
-    /// The last shaping's inputs and outputs, for the on-screen diagnostic.
-    static var lastReport = ""
-    #endif
-
     /// A cat, shaped. Everything downstream — the skinning, the rig, the
     /// animator — works from this and never sees the file it came from.
     ///
@@ -299,45 +294,6 @@ enum CatShape {
         let rest = (0..<n).map { j in
             SIMD3<Float>(-bind[j][3].z, bind[j][3].y - hipY, bind[j][3].x)
         }
-
-        #if DEBUG
-        // What the shaping was working from, and what it did. The device builds a
-        // skeleton with every joint sitting on the hips while this same code
-        // offline builds a cat, so the inputs are the thing to read.
-        let ap = asset.restPositions
-        var alo = SIMD3<Float>(repeating: Float.infinity)
-        var ahi = SIMD3<Float>(repeating: -Float.infinity)
-        for p in ap {
-            alo = SIMD3<Float>(min(alo.x, p.x), min(alo.y, p.y), min(alo.z, p.z))
-            ahi = SIMD3<Float>(max(ahi.x, p.x), max(ahi.y, p.y), max(ahi.z, p.z))
-        }
-        var rlo = SIMD3<Float>(repeating: Float.infinity)
-        var rhi = SIMD3<Float>(repeating: -Float.infinity)
-        for p in rest {
-            rlo = SIMD3<Float>(min(rlo.x, p.x), min(rlo.y, p.y), min(rlo.z, p.z))
-            rhi = SIMD3<Float>(max(rhi.x, p.x), max(rhi.y, p.y), max(rhi.z, p.z))
-        }
-        // The step that loses the cat, tested directly. `restLocal` is
-        // `bind[parent].inverse * bind[joint]`, so if either the inverse or the
-        // multiply is not what it is here, the bone lengths all come out zero and
-        // every joint lands on its parent.
-        let j1 = min(1, asset.jointCount - 1)
-        let idt = asset.bind[j1].inverse * asset.bind[j1]
-        let rl = asset.restLocal(j1)
-        lastReport = String(
-            format: "asset ext %.3f,%.3f,%.3f · restTorso %.3f · restLeg %.3f\n"
-                  + "scale %.3f…%.3f · shaped ext %.3f,%.3f,%.3f\n"
-                  + "b1 t %.3f,%.3f,%.3f c0 %.3f,%.3f,%.3f\n"
-                  + "inv·b diag %.3f,%.3f t %.3f,%.3f,%.3f · rl1 t %.3f,%.3f,%.3f",
-            ahi.x - alo.x, ahi.y - alo.y, ahi.z - alo.z,
-            asset.restTorsoLength, restLegHeight(asset),
-            localScale.min() ?? -1, localScale.max() ?? -1,
-            rhi.x - rlo.x, rhi.y - rlo.y, rhi.z - rlo.z,
-            asset.bind[j1][3].x, asset.bind[j1][3].y, asset.bind[j1][3].z,
-            asset.bind[j1][0].x, asset.bind[j1][0].y, asset.bind[j1][0].z,
-            idt[0].x, idt[1].y, idt[3].x, idt[3].y, idt[3].z,
-            rl[3].x, rl[3].y, rl[3].z)
-        #endif
 
         var roles = [Int](repeating: -1, count: CatMeshAsset.Role.allCases.count)
         for role in CatMeshAsset.Role.allCases {
