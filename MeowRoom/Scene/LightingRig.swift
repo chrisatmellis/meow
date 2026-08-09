@@ -36,6 +36,9 @@ final class LightingRig {
     /// is not, and the sky refreshes every four seconds. Keyed on the drawn image
     /// so it cannot disagree with the cache upstream about which sky it is holding.
     private var environmentCache: (key: ObjectIdentifier, resource: EnvironmentResource)?
+    /// The sky currently being baked, so four seconds later does not start a second
+    /// bake of the same image while the first is still running.
+    private var environmentPending: ObjectIdentifier?
 
     /// The last budget applied, so a change of exposure alone can be re-applied
     /// without needing the sky to move.
@@ -85,6 +88,7 @@ final class LightingRig {
     func setExposure(_ value: Float) {
         exposure = value
         if let room = lastRoom { applyIntensities(budget: lastBudget, sky: lastSky, room: room) }
+        applyEnvironmentIntensity()
     }
 
     // MARK: - Light budget
@@ -307,19 +311,35 @@ final class LightingRig {
         // way it faces, which is what makes a room read as a paper cut-out. The
         // environment map is what puts the shape back without putting a bulb in
         // the room — and RealityKit does not offer the flat option anyway.
+        // Baking an equirectangular image into an environment is `async` and has
+        // no synchronous form — the initialiser that is not async wants a cube
+        // texture that is already built. So the bake is kicked off and the sky
+        // arrives a frame or two later, which for a sky is fine; what matters is
+        // not doing it again for a sky that has not changed, since this runs every
+        // four seconds and the drawn image is cached upstream.
         let image = TextureFactory.skyEnvironment(sky: sky)
         let key = ObjectIdentifier(image)
-        if environmentCache?.key != key, let cg = image.cgImage,
-           let made = try? EnvironmentResource(
-               equirectangular: cg,
-               // The `withName:` initialiser is `async`, and this runs inside a
-               // synchronous frame loop. `options:` has a throwing form that does
-               // not, and it lets the quality be chosen besides — the sky is a
-               // smooth gradient, so a fast bake of it is indistinguishable from
-               // a slow one and this happens while the player is watching.
-               options: .init(samplingQuality: .fast, specularCubeDimension: 64)) {
-            environmentCache = (key, made)
+        if environmentCache?.key != key, environmentPending != key, let cg = image.cgImage {
+            environmentPending = key
+            Task { @MainActor [weak self] in
+                guard let made = try? await EnvironmentResource(equirectangular: cg,
+                                                                withName: "sky") else { return }
+                guard let self else { return }
+                self.environmentCache = (key, made)
+                self.environmentPending = nil
+                // The intensity is set alongside the resource, so a sky that
+                // finishes baking after the light level moved still lands lit
+                // correctly rather than at whatever it was when the bake started.
+                self.applyEnvironmentIntensity()
+            }
         }
+        applyEnvironmentIntensity()
+
+        // --- Dust motes only show when there is a beam to catch.
+        room.dustMotes?.isHidden = sky.daylight < 0.12 && !lanternOn
+    }
+
+    private func applyEnvironmentIntensity() {
         if let resource = environmentCache?.resource {
             // An exponent of two applied to the environment as authored, so zero
             // means "the sky, as drawn". The sky is drawn for the hour already, so
@@ -331,9 +351,6 @@ final class LightingRig {
                 source: .single(resource),
                 intensityExponent: log2f(relative)))
         }
-
-        // --- Dust motes only show when there is a beam to catch.
-        room.dustMotes?.isHidden = sky.daylight < 0.12 && !lanternOn
     }
 
     /// Everything that scales with the light level, split out so a change of

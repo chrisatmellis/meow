@@ -820,14 +820,11 @@ public struct DragGesture: Gesture {
         public var location: CGPoint
         public var startLocation: CGPoint
         public var translation: CGSize
-        public var location3D: SIMD3<Float>
         public init(location: CGPoint = .zero, startLocation: CGPoint = .zero,
-                    translation: CGSize = CGSize(width: 0, height: 0),
-                    location3D: SIMD3<Float> = SIMD3<Float>(repeating: 0)) {
+                    translation: CGSize = CGSize(width: 0, height: 0)) {
             self.location = location
             self.startLocation = startLocation
             self.translation = translation
-            self.location3D = location3D
         }
     }
 
@@ -838,14 +835,12 @@ public struct DragGesture: Gesture {
 }
 
 public struct SpatialTapGesture: Gesture {
+    /// No `location3D`. It exists on visionOS and not on iOS, and taking it on
+    /// faith is what sent the first port of this file to the compiler with a
+    /// three-dimensional touch point that iOS does not have.
     public struct Value {
         public var location: CGPoint
-        public var location3D: SIMD3<Float>
-        public init(location: CGPoint = .zero,
-                    location3D: SIMD3<Float> = SIMD3<Float>(repeating: 0)) {
-            self.location = location
-            self.location3D = location3D
-        }
+        public init(location: CGPoint = .zero) { self.location = location }
     }
 
     public init(count: Int = 1, coordinateSpace: Int = 0) {}

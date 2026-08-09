@@ -24,7 +24,10 @@
 //     than gone.
 //   PhysicallyBasedMaterial has subsurfaceColor / subsurfaceWeight /
 //     subsurfaceRadius — real subsurface scattering, which is what `Translucency`
-//     has been faking with driven emission.
+//     fakes with driven emission. **iOS 26, so out of reach at this target** —
+//     noted here because reading the property list without checking each entry's
+//     own availability is what put it in the "available" column to begin with,
+//     and the compiler is what corrected that.
 //   PhysicallyBasedMaterial.textureCoordinateTransform (iOS 15) gives per-material
 //     tiling, so the room's tile factors do not have to be baked into UVs.
 //
@@ -796,7 +799,7 @@ public enum MaterialParameters {
             public init() {}
             public init(_ descriptor: MTLSamplerDescriptor) { self.descriptor = descriptor }
             @discardableResult
-            public func modify<R>(_ body: (MTLSamplerDescriptor) throws -> R) rethrows -> R {
+            public mutating func modify<R>(_ body: (MTLSamplerDescriptor) throws -> R) rethrows -> R {
                 try body(descriptor)
             }
             @discardableResult
@@ -1045,8 +1048,12 @@ public final class EnvironmentResource {
     /// the sky is rebuilt from inside a synchronous frame loop — so taking the
     /// convenient-looking initialiser would have compiled here, against a
     /// stand-in that forgot to be async, and failed on device.
-    public convenience init(equirectangular image: CGImage, options: CreateOptions) throws {
-        self.init(name: "equirectangular")
+    /// Async, and there is no synchronous form that takes an equirectangular
+    /// image — the `options:` initialiser that is not async takes an already-built
+    /// cube texture instead. So the sky arrives a frame or two late, which for a
+    /// sky is fine.
+    public convenience init(equirectangular image: CGImage, withName name: String? = nil) async throws {
+        self.init(name: name ?? "equirectangular")
     }
 
     public convenience init(named name: String, in bundle: Bundle? = nil) throws {
@@ -1238,18 +1245,20 @@ public struct RealityViewEnvironment {
     }
 }
 
-public struct RealityViewRenderingEffects {
-    public enum Antialiasing { case none, msaa, temporal, automatic }
-    public enum DepthOfField { case disabled, automatic }
-    public enum DynamicRange { case standard, high, automatic }
-    public enum CameraGrain { case disabled, automatic }
-    public enum MotionBlur { case disabled, automatic }
+/// One mode type for every effect, with three states — not an enum per effect.
+public struct RealityViewRenderingEffectMode: Equatable {
+    public static let `default` = RealityViewRenderingEffectMode()
+    public static let enabled = RealityViewRenderingEffectMode()
+    public static let disabled = RealityViewRenderingEffectMode()
+    private init() {}
+}
 
-    public var antialiasing: Antialiasing = .automatic
-    public var depthOfField: DepthOfField = .automatic
-    public var dynamicRange: DynamicRange = .automatic
-    public var cameraGrain: CameraGrain = .automatic
-    public var motionBlur: MotionBlur = .automatic
+public struct RealityViewRenderingEffects {
+    public var antialiasing = RealityViewRenderingEffectMode.default
+    public var depthOfField = RealityViewRenderingEffectMode.default
+    public var dynamicRange = RealityViewRenderingEffectMode.default
+    public var cameraGrain = RealityViewRenderingEffectMode.default
+    public var motionBlur = RealityViewRenderingEffectMode.default
     public init() {}
 }
 
@@ -1344,15 +1353,6 @@ public struct EntityTargetValue<Value> {
         self.entity = entity
     }
 
-    public enum CoordinateSpace { case local, scene }
-
-    public func convert(_ point: SIMD3<Float>, from: CoordinateSpace, to: CoordinateSpace) -> SIMD3<Float> {
-        switch (from, to) {
-        case (.local, .scene): return entity.convert(position: point, to: nil)
-        case (.scene, .local): return entity.convert(position: point, from: nil)
-        default: return point
-        }
-    }
 }
 
 public struct TargetedGesture<G: SwiftUI.Gesture> {
@@ -1370,10 +1370,8 @@ public extension SwiftUI.Gesture {
 
 public extension EntityTargetValue where Value == SwiftUI.DragGesture.Value {
     var location: CGPoint { gestureValue.location }
-    var location3D: SIMD3<Float> { gestureValue.location3D }
 }
 
 public extension EntityTargetValue where Value == SwiftUI.SpatialTapGesture.Value {
     var location: CGPoint { gestureValue.location }
-    var location3D: SIMD3<Float> { gestureValue.location3D }
 }

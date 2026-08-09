@@ -1624,7 +1624,7 @@ section("translucency") {
         comps.year = 2026; comps.month = 6; comps.day = 21; comps.hour = hour
         let sky = WorldClock.sky(at: cal.date(from: comps)!, timeZone: TimeZone(identifier: "UTC")!)
         Translucency.apply(rig.translucentParts, sky: sky, lanternOn: false)
-        let level = rig.translucentParts.map { $0.entity.pbrMaterial?.subsurfaceWeight.scale ?? 0 }.max() ?? 0
+        let level = rig.translucentParts.map { $0.entity.pbrMaterial?.emissiveIntensity ?? 0 }.max() ?? 0
         expect(level.isFinite && level >= 0 && level <= 0.55,
                "transmitted light at \(hour):00 is in range (\(level))")
         levels.append((hour, level))
@@ -1644,7 +1644,7 @@ section("translucency") {
     func level(at position: SIMD3<Float>) -> Float {
         rig.root.position = position
         Translucency.apply(rig.translucentParts, sky: noon, lanternOn: false)
-        return rig.translucentParts.map { $0.entity.pbrMaterial?.subsurfaceWeight.scale ?? 0 }.max() ?? 0
+        return rig.translucentParts.map { $0.entity.pbrMaterial?.emissiveIntensity ?? 0 }.max() ?? 0
     }
     let byWindow = level(at: SIMD3<Float>(x: 0, y: 0, z: -1.9))
     let atPlayer = level(at: SIMD3<Float>(x: 0, y: 0, z: 1.6))
@@ -1662,9 +1662,9 @@ section("translucency") {
     midnight.year = 2026; midnight.month = 6; midnight.day = 21; midnight.hour = 1
     let night = WorldClock.sky(at: cal.date(from: midnight)!, timeZone: TimeZone(identifier: "UTC")!)
     Translucency.apply(rig.translucentParts, sky: night, lanternOn: false)
-    let lanternOff = rig.translucentParts.map { $0.entity.pbrMaterial?.subsurfaceWeight.scale ?? 0 }.max() ?? 0
+    let lanternOff = rig.translucentParts.map { $0.entity.pbrMaterial?.emissiveIntensity ?? 0 }.max() ?? 0
     Translucency.apply(rig.translucentParts, sky: night, lanternOn: true)
-    let lanternOn = rig.translucentParts.map { $0.entity.pbrMaterial?.subsurfaceWeight.scale ?? 0 }.max() ?? 0
+    let lanternOn = rig.translucentParts.map { $0.entity.pbrMaterial?.emissiveIntensity ?? 0 }.max() ?? 0
     expect(lanternOn > lanternOff, "the lantern warms the ears at night (\(lanternOff) → \(lanternOn))")
 
     // The same both-ends check as the triangle budget, for the same reason: the
@@ -1672,10 +1672,8 @@ section("translucency") {
     // report zero and quietly satisfy every comparison above.
     var wrote = 0
     Translucency.apply(rig.translucentParts, sky: WorldClock.sky(), lanternOn: true)
-    for part in rig.translucentParts where (part.entity.pbrMaterial?.subsurfaceWeight.scale ?? 0) > 0 {
+    for part in rig.translucentParts where (part.entity.pbrMaterial?.emissiveIntensity ?? 0) > 0 {
         wrote += 1
-        expect(part.entity.pbrMaterial?.subsurfaceRadius.scale ?? 0 > 0,
-               "a part that transmits light has a thickness to transmit it through")
     }
     expect(wrote > 0, "translucency actually reaches the materials (\(wrote) parts)")
 

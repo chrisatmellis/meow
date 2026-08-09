@@ -300,9 +300,9 @@ final class GameSceneController: NSObject {
     // MARK: - Touch handling
 
     /// A tap on an entity, resolved by the view's gesture.
-    func handleTap(on entity: Entity, at worldPoint: SIMD3<Float>) {
+    func handleTap(on entity: Entity) {
         if isCatEntity(entity) {
-            let zone = petZone(entity: entity, worldPoint: worldPoint)
+            let zone = rig.zone(for: entity)
             if brain.canBePet {
                 brain.beginPetting(zone: zone)
                 brain.updatePetting(zone: zone, intensity: 0.3)
@@ -318,18 +318,17 @@ final class GameSceneController: NSObject {
         if named(entity, prefix: "toy") { brain.startle(intensity: 0.2) }
     }
 
-    func beginPan(at point: CGPoint, on entity: Entity?, worldPoint: SIMD3<Float>) {
+    func beginPan(at point: CGPoint, on entity: Entity?) {
         lastPetPoint = point
         petSpeed = 0
         strokeDistance = 0
         guard !wandActive else { return }
         guard let entity, isCatEntity(entity), brain.canBePet else { return }
         pettingActive = true
-        brain.beginPetting(zone: petZone(entity: entity, worldPoint: worldPoint))
+        brain.beginPetting(zone: rig.zone(for: entity))
     }
 
-    func updatePan(at point: CGPoint, translationDelta: CGPoint,
-                   on entity: Entity?, worldPoint: SIMD3<Float>) {
+    func updatePan(at point: CGPoint, translationDelta: CGPoint, on entity: Entity?) {
         if wandActive {
             moveWand(dx: Float(translationDelta.x) * 0.012, dy: Float(translationDelta.y) * 0.012)
             return
@@ -343,8 +342,7 @@ final class GameSceneController: NSObject {
             endPan()          // hand slipped off the cat
             return
         }
-        brain.updatePetting(zone: petZone(entity: entity, worldPoint: worldPoint),
-                            intensity: min(1, petSpeed))
+        brain.updatePetting(zone: rig.zone(for: entity), intensity: min(1, petSpeed))
         strokeDistance += Float(d)
         if strokeDistance > 55 {
             strokeDistance = 0
@@ -380,24 +378,6 @@ final class GameSceneController: NSObject {
             n = current.parent
         }
         return false
-    }
-
-    /// Works out which part of the cat was touched from where the touch landed.
-    private func petZone(entity: Entity, worldPoint: SIMD3<Float>) -> PetZone {
-        if named(entity, prefix: "ear") { return .head }
-        if named(entity, prefix: "tail") { return .tail }
-
-        let local = rig.spine.convert(position: worldPoint, from: nil)
-        let L = rig.torsoLength
-        let R = rig.torsoRadius
-
-        if local.z > L * 0.52 {
-            return abs(local.x) > R * 0.55 ? .cheek : (local.y < -R * 0.25 ? .chin : .head)
-        }
-        if local.z < -L * 0.48 { return .tail }
-        if local.y < -R * 0.30 { return .belly }
-        if local.y < -R * 0.75 { return .paw }
-        return .back
     }
 
     // MARK: - Cat rebuild (used when the player edits their cat)

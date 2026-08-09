@@ -27,13 +27,17 @@ struct TranslucentPart {
 /// meshes with their own materials, so "where" is free, and this supplies the part a
 /// map cannot.
 ///
-/// What this drives changed with the renderer, and it is the one place the port
-/// makes something genuinely better rather than merely equivalent.
-/// `PhysicallyBasedMaterial` has real subsurface scattering — a colour, a weight
-/// and a radius — where SceneKit had nothing of the kind and this had to fake it
-/// by adding light to the surface. Emission is a poor stand-in: it does not fall
-/// off with thickness, it does not tint with distance travelled, and it survives
-/// being in shadow. Subsurface weight is the same *when*, driving the right *how*.
+/// This still drives emission, and an earlier version of this comment claimed
+/// otherwise. `PhysicallyBasedMaterial` does have real subsurface scattering — a
+/// colour, a weight and a radius — and it is exactly what this wants: emission
+/// does not fall off with thickness, does not tint with distance travelled, and
+/// survives being in shadow. But those properties are iOS 26, and the app targets
+/// 18. Reading the property list without checking each one's availability is how
+/// that got written down as available; the compiler is what corrected it.
+///
+/// Worth coming back for the moment the deployment target can move, and the
+/// change is three lines — the hard part, which is knowing *when* a part is
+/// backlit, is already here and is renderer-independent.
 ///
 /// The test is simply whether the light and the viewer are on opposite sides of the
 /// part. The player never moves, so that reduces to one dot product per part, and it
@@ -108,11 +112,8 @@ enum Translucency {
                 + lanternPower
             let level = min(0.55, part.amount * min(1, transmitted))
             part.entity.withMaterial {
-                $0.subsurfaceColor = .init(tint: UIColor(part.tint))
-                $0.subsurfaceWeight = .init(scale: level)
-                // Millimetres of tissue, roughly, which is what sets how far light
-                // spreads before it comes back out. An ear is thinner than a nose.
-                $0.subsurfaceRadius = .init(scale: 0.002 + 0.004 * part.amount)
+                $0.emissiveColor = .init(color: UIColor(part.tint))
+                $0.emissiveIntensity = level
             }
         }
     }

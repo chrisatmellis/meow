@@ -91,14 +91,19 @@ final class CatPreviewController: NSObject, ObservableObject {
                     upVector: SIMD3<Float>(0, 1, 0), relativeTo: nil)
         root.addChild(camera)
 
-        if let cg = TextureFactory.skyEnvironment(sky: WorldClock.sky()).cgImage,
-           let resource = try? EnvironmentResource(
-               equirectangular: cg,
-               options: .init(samplingQuality: .normal, specularCubeDimension: 64)) {
-            environment.components.set(ImageBasedLightComponent(source: .single(resource),
-                                                               intensityExponent: log2f(0.28)))
-            root.addChild(environment)
-            root.components.set(ImageBasedLightReceiverComponent(imageBasedLight: environment))
+        // Baked asynchronously, because there is no synchronous form that takes an
+        // equirectangular image. The preview is a studio rather than a room, so
+        // the first frame or two before it lands are lit by the key alone.
+        root.addChild(environment)
+        root.components.set(ImageBasedLightReceiverComponent(imageBasedLight: environment))
+        if let cg = TextureFactory.skyEnvironment(sky: WorldClock.sky()).cgImage {
+            Task { @MainActor [weak self] in
+                guard let resource = try? await EnvironmentResource(equirectangular: cg,
+                                                                    withName: "studio") else { return }
+                self?.environment.components.set(
+                    ImageBasedLightComponent(source: .single(resource),
+                                             intensityExponent: log2f(0.28)))
+            }
         }
     }
 
