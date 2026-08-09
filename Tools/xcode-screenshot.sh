@@ -88,6 +88,8 @@ echo "    seeded save into $CONTAINER"
 # the first version of this checked only for white, having just been burned by
 # four white frames, and promptly accepted four black ones instead. A blank window
 # is whatever colour the window happens to be.
+#
+# Necessary and nowhere near sufficient — see `running` below.
 blank() {
   local f=$1
   [ -s "$f" ] || return 0
@@ -97,6 +99,25 @@ blank() {
   clip=$(echo "$line" | cut -d' ' -f1)
   dark=$(echo "$line" | cut -d' ' -f2)
   awk -v c="$clip" -v d="$dark" 'BEGIN { exit !(c > 99.5 || d > 99.5) }'
+}
+
+# Is the app actually the thing on screen?
+#
+# The dawn shot of the last SceneKit build was a photograph of the simulator's
+# home screen. It sailed through `blank` — a springboard full of app icons is
+# about as far from a uniform frame as a picture gets — and was then measured,
+# compared against midday, and would have been reasoned about as if it were the
+# room. A screenshot loop that can hand back the wrong app is worse than one that
+# hands back nothing.
+#
+# An earlier version of this check existed and was removed for good reason: it
+# was wired as an *abort*, so one false negative on the night shot ended the poll
+# after six seconds while the log showed the app running perfectly. The fix is
+# not to delete it but to invert it — a liveness check belongs in the accept
+# condition, where being wrong costs another six seconds, not in the exit
+# condition, where being wrong costs the shot.
+running() {
+  xcrun simctl spawn "$UDID" launchctl list 2>/dev/null | grep -q "$BUNDLE_ID"
 }
 
 shot_at_hour() {
@@ -112,16 +133,21 @@ shot_at_hour() {
   # is far slower than the -O the harness uses. A fixed 18 second sleep captured
   # the blank window four times and produced four byte-identical white images,
   # which look exactly like an overexposed room and are not one.
-  local waited=0
+  local waited=0 sawProcess=0
   while [ "$waited" -lt 90 ]; do
     sleep 6
     waited=$((waited + 6))
+    if running; then sawProcess=1; else continue; fi
     xcrun simctl io "$UDID" screenshot "$OUT/$label.png" >/dev/null 2>&1 || true
     if ! blank "$OUT/$label.png"; then
       echo "    rendered after ${waited}s"
       break
     fi
   done
+  if [ "$sawProcess" = "0" ]; then
+    echo "    !! the app never appeared in launchctl — anything captured is not it"
+    rm -f "$OUT/$label.png"
+  fi
 
   # Diagnose only once the wait is actually over.
   #
@@ -131,8 +157,8 @@ shot_at_hour() {
   # showed the app running perfectly well. A liveness check that aborts the thing
   # it is checking is worse than no liveness check, and the whole point of a
   # timeout is that it is allowed to expire.
-  if blank "$OUT/$label.png"; then
-    echo "    !! still blank after ${waited}s — this shot is not a render"
+  if [ ! -s "$OUT/$label.png" ] || blank "$OUT/$label.png"; then
+    echo "    !! no usable frame after ${waited}s — this shot is not a render"
     xcrun simctl spawn "$UDID" log show --last 150s --style compact \
       --predicate 'process == "Meow"' 2>/dev/null | tail -30
     local report
