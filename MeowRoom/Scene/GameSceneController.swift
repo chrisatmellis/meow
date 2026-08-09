@@ -101,7 +101,14 @@ final class GameSceneController: NSObject, SCNSceneRendererDelegate {
         camera.colorFringeStrength = 0.25
         camera.vignettingIntensity = 0.45
         camera.vignettingPower = 1.2
-        camera.saturation = 1.04
+        // Tone mapping desaturates as it compresses, and it compresses hardest at
+        // the top — so the brighter a surface, the greyer it comes out. Measured:
+        // at midday the tatami rendered rgb(168,167,164), a neutral grey, from an
+        // albedo of (201,179,131) that is anything but; the same floor at night,
+        // sitting low on the curve, came out rgb(119,97,69) and looked like straw.
+        // Pairing a filmic curve with a saturation lift is the standard remedy for
+        // exactly this, and it is the only one that treats the actual cause.
+        camera.saturation = 1.22
         camera.contrast = 0.05
 
         cameraNode.camera = camera

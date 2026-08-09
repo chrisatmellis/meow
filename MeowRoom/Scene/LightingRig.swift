@@ -111,7 +111,13 @@ final class LightingRig {
         return LightBudget(sun: above * powf(max(0, sky.daylight), 1.5) * 1900,
                            sky: 3 + 660 * sky.daylight,
                            moon: moonUp * 9 * (1 - sky.daylight),
-                           lantern: lanternOn ? 26 : 0)
+                           // Raised with the exposure cut, not independently of
+                           // it. A lamp is the only source that exists solely at
+                           // night, so it is the one place night can be paid back
+                           // for a stop taken off the whole day — and paying it
+                           // back here cannot touch daylight, where the lantern is
+                           // off and contributes nothing at all.
+                           lantern: lanternOn ? 38 : 0)
     }
 
     /// How the budget is split across the actual lights.
@@ -208,7 +214,7 @@ final class LightingRig {
     /// value that varies with the sky rescales every emissive in the room and is
     /// what once made midnight brighter than midday. A constant cannot do that to
     /// the ordering; it only ever stops the whole day down together.
-    static func exposureOffset(for budget: LightBudget) -> CGFloat { -1.5 }
+    static func exposureOffset(for budget: LightBudget) -> CGFloat { -1.75 }
 
     static func exposureOffset(sky: SkyState, lanternOn: Bool) -> CGFloat {
         exposureOffset(for: budget(sky: sky, lanternOn: lanternOn))
