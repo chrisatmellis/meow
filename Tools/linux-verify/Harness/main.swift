@@ -1857,6 +1857,120 @@ section("height fields") {
     }
 }
 
+section("screen projection") {
+    // What the petting hand is aimed by. RealityKit will not answer "what is under
+    // this point" on iOS — a gesture resolves its entity when it *begins*, so it
+    // cannot say whether a finger is still on the cat halfway through a stroke —
+    // so the projection is ours, and being ours it can be checked.
+    let size = CGSize(width: 390, height: 844)
+    let p = ScreenProjector(eye: RoomLayout.cameraPosition,
+                            pitch: RoomLayout.cameraPitch,
+                            horizontalFieldOfView: deg(54),
+                            size: size)
+
+    // Straight down the barrel lands in the middle. The camera is pitched down, so
+    // "ahead" is not level — taking the aim from the pitch is the whole test.
+    do {
+        let ahead = RoomLayout.cameraPosition
+            + SIMD3<Float>(0, sinf(RoomLayout.cameraPitch), -cosf(RoomLayout.cameraPitch)) * 2
+        guard let c = p.project(ahead) else { expect(false, "the view axis projects"); return }
+        expect(abs(c.x - size.width / 2) < 0.5, "the view axis lands on the centre line (\(c.x))")
+        expect(abs(c.y - size.height / 2) < 0.5, "...and halfway down (\(c.y))")
+    }
+
+    // Behind the lens is not "far off to the side", it is nowhere.
+    expect(p.project(RoomLayout.cameraPosition + SIMD3<Float>(0, 0, 1)) == nil,
+           "a point behind the camera does not project")
+    expect(p.project(RoomLayout.cameraPosition) == nil, "the eye itself does not project")
+
+    // Right is right, up is up. Screen y grows downward, which is the sign most
+    // likely to be inverted and the one nothing else here would notice.
+    do {
+        let ahead = RoomLayout.cameraPosition
+            + SIMD3<Float>(0, sinf(RoomLayout.cameraPitch), -cosf(RoomLayout.cameraPitch)) * 2
+        guard let centre = p.project(ahead),
+              let right = p.project(ahead + SIMD3<Float>(0.5, 0, 0)),
+              let above = p.project(ahead + SIMD3<Float>(0, 0.5, 0)) else {
+            expect(false, "the neighbourhood of the axis projects"); return
+        }
+        expect(right.x > centre.x, "+X is to the right (\(right.x) vs \(centre.x))")
+        expect(above.y < centre.y, "+Y is up the screen (\(above.y) vs \(centre.y))")
+    }
+
+    // Twice as far is half the size, which is the whole of perspective and the
+    // reason the hit box can be padded in metres rather than in points.
+    do {
+        let near = p.pointsPerMetre(atDepth: 1)
+        let far = p.pointsPerMetre(atDepth: 2)
+        expect(abs(near / max(1e-6, far) - 2) < 1e-3, "twice the depth, half the size")
+        expect(near > 0, "a metre covers some points")
+    }
+
+    // A wider frame does not change how tall things are: the lens is specified
+    // horizontally, so a taller phone crops the room rather than narrowing it.
+    do {
+        let tall = ScreenProjector(eye: RoomLayout.cameraPosition, pitch: RoomLayout.cameraPitch,
+                                   horizontalFieldOfView: deg(54),
+                                   size: CGSize(width: 390, height: 1200))
+        expect(abs(tall.pointsPerMetre(atDepth: 1) - p.pointsPerMetre(atDepth: 1)) < 1e-3,
+               "the horizontal scale is the same on a taller screen")
+    }
+
+    // And the hit box the hand is drawn against: a cat where a cat can be petted
+    // has to be somewhere a thumb can reach, and the whole point of the hand is
+    // that what it reports is what the game will act on.
+    do {
+        guard let asset = CatAsset.shared else { expect(false, "the cat asset loads"); return }
+        var a = BreedPresets.appearance(for: .domesticShorthair)
+        a.seed = 5
+        let rig = CatBuilder.build(a, using: asset)
+        let animator = CatAnimator(rig: rig)
+        var motion = CatMotion()
+        motion.pose = .sitting
+        // The lap spot: where the cat sits when it comes to be petted.
+        motion.position = SIMD3<Float>(x: 0.10, y: 0, z: 1.10)
+        for _ in 0..<120 { animator.update(dt: 1.0 / 60, motion: motion) }
+        CatBuilder.syncPose(rig)
+
+        let joints = rig.skinJoints.map { $0.position(relativeTo: nil) }
+        let bones = p.box(of: joints, paddedBy: 0)
+        guard let box = p.box(of: joints, paddedBy: rig.appearance.torsoRadius),
+              let bare = bones else {
+            expect(false, "the cat has a box on screen"); return
+        }
+        expect(box.width > 44 && box.height > 44,
+               "the cat is a target a thumb can find "
+               + "(\(Int(box.width))x\(Int(box.height)) points)")
+        expect(box.width < size.width && box.height < size.height,
+               "...and not larger than the screen (\(Int(box.width))x\(Int(box.height)))")
+        // The padding is the difference between a skeleton and an animal, and it
+        // has to be worth something: the bones alone are 29 points across on a cat
+        // facing the camera, which is a third of a fingertip.
+        expect(box.width > bare.width * 1.5,
+               "girth widens the target (\(Int(bare.width)) → \(Int(box.width)) points)")
+        expect(box.midX > 0 && box.midX < size.width && box.midY > 0 && box.midY < size.height,
+               "the cat's middle is on the screen (\(Int(box.midX)), \(Int(box.midY)))")
+        // A finger in the far corner is not on the cat, which is the report the
+        // hand exists to make.
+        expect(!box.contains(CGPoint(x: 6, y: 6)), "the top corner is not the cat")
+        expect(box.contains(CGPoint(x: box.midX, y: box.midY)), "the middle of the cat is the cat")
+
+        // Further away is a smaller target, in proportion. A pad in points would
+        // break this and nothing else would notice.
+        motion.position = SIMD3<Float>(x: 0.10, y: 0, z: -0.60)
+        for _ in 0..<120 { animator.update(dt: 1.0 / 60, motion: motion) }
+        CatBuilder.syncPose(rig)
+        if let far = p.box(of: rig.skinJoints.map { $0.position(relativeTo: nil) },
+                           paddedBy: rig.appearance.torsoRadius) {
+            expect(far.height < box.height * 0.8,
+                   "a cat across the room is a smaller target "
+                   + "(\(Int(far.height)) against \(Int(box.height)) points)")
+        } else {
+            expect(false, "the cat across the room still has a box")
+        }
+    }
+}
+
 section("sun arc") {
     var cal = Calendar(identifier: .gregorian)
     cal.timeZone = TimeZone(identifier: "UTC")!

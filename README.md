@@ -155,6 +155,25 @@ so.
 The cat notices too — it's crepuscular, so it's liveliest around dawn and dusk
 and sleeps through the middle of the day and the small hours.
 
+### Petting shows its aim
+
+A swipe that misses the cat and a swipe at a cat that has had enough look
+identical from the player's side: nothing moves, and there is no cursor, no
+highlight and no sound to tell the two apart. So a small gloved hand follows
+the finger and reports it — solid and stroking when the touch is inside the
+cat's hit box, faint and still when it is not, red when the cat is done being
+handled.
+
+Working out whether the finger is on the cat is ours to do. RealityKit will not
+answer it: SwiftUI's spatial gestures resolve an entity when the gesture
+*begins* and hand that over, so nothing in the framework can say whether a
+finger is still on the cat halfway through a stroke, and there is no
+screen-point hit test on iOS at all. `ScreenProjector` projects the cat's
+joints into screen points and pads the box by the cat's own girth, worked out
+at the cat's distance — a cat by the window is half the size on screen of one
+in your lap, and a margin in points would quietly make the far one the easier
+target. It is plain arithmetic, so the assertion suite checks it.
+
 ### The cat decides for itself
 
 `CatBrain` scores every activity it could be doing against eight needs (food,

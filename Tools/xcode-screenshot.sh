@@ -135,11 +135,16 @@ running() {
 }
 
 shot_at_hour() {
-  local hour=$1 label=$2
+  local hour=$1 label=$2 hand=${3:-}
   echo "==> room at ${hour}:00 ($label)"
   # Freshen lastSeen so the "while you were away" sheet does not cover the room.
   python3 "$HERE/touch-save.py" "$CONTAINER/Library/Application Support/meowroom-save.json"
-  SIMCTL_CHILD_MEOW_FORCE_HOUR="$hour" xcrun simctl launch "$UDID" "$BUNDLE_ID" >/dev/null || true
+  # MEOW_SHOW_HAND parks the petting hand on the cat without a touch. A simulator
+  # cannot be given one — `simctl` has no way to synthesise a drag — so without
+  # this the hand is a drawing nobody has ever looked at, which is how the last
+  # several defects in this project got as far as a phone.
+  SIMCTL_CHILD_MEOW_FORCE_HOUR="$hour" SIMCTL_CHILD_MEOW_SHOW_HAND="$hand" \
+    xcrun simctl launch "$UDID" "$BUNDLE_ID" >/dev/null || true
 
   # Wait for a frame with something in it, rather than for a fixed number of
   # seconds. The room builds every one of its textures and material maps at
@@ -203,6 +208,7 @@ shot_at_hour 6  "02-dawn"
 shot_at_hour 12 "03-midday"
 shot_at_hour 18 "04-golden-hour"
 shot_at_hour 22 "05-night"
+shot_at_hour 14 "06-petting" 1
 
 echo
 echo "==> captured:"

@@ -363,6 +363,49 @@ final class GameSceneController: NSObject {
         }
     }
 
+    // MARK: - Where the cat is on screen
+
+    /// What the petting hand should be showing, for a finger at this point.
+    ///
+    /// The hand exists because a swipe at a cat you cannot reach and a swipe at a
+    /// cat you can look identical from the player's side — nothing moves, and
+    /// there is no way to tell a miss from a cat that is simply not in the mood.
+    struct PetPointer {
+        /// The finger is inside the cat's hit box.
+        var onCat: Bool
+        /// The cat is close enough and willing.
+        var canPet: Bool
+        /// It has had enough, so this is a hand to withdraw rather than aim.
+        var overstimulated: Bool
+        /// How hard the stroking is landing, 0...1, for how briskly the hand moves.
+        var intensity: Float
+    }
+
+    func petPointer(at point: CGPoint, in size: CGSize) -> PetPointer {
+        PetPointer(onCat: catScreenRect(in: size)?.contains(point) ?? false,
+                   canPet: brain.canBePet,
+                   overstimulated: brain.isOverstimulated,
+                   intensity: pettingActive ? min(1, petSpeed) : 0)
+    }
+
+    /// The cat's hit box, in screen points.
+    ///
+    /// Every joint is projected and the result padded by the cat's own girth,
+    /// because joints are a skeleton and the player is aiming at an animal. The
+    /// padding is worked out at the cat's depth rather than being a constant, so
+    /// it stays honest as the cat crosses the room — a cat by the window is half
+    /// the size on screen of one in your lap, and a fixed pad would make the far
+    /// one a much easier target than it looks.
+    func catScreenRect(in size: CGSize) -> CGRect? {
+        guard !rig.skinJoints.isEmpty, size.width > 1, size.height > 1 else { return nil }
+        let projector = ScreenProjector(eye: RoomLayout.cameraPosition,
+                                        pitch: RoomLayout.cameraPitch,
+                                        horizontalFieldOfView: deg(54),
+                                        size: size)
+        return projector.box(of: rig.skinJoints.map { $0.position(relativeTo: nil) },
+                             paddedBy: rig.appearance.torsoRadius)
+    }
+
     private func isCatEntity(_ entity: Entity) -> Bool {
         var n: Entity? = entity
         while let current = n {

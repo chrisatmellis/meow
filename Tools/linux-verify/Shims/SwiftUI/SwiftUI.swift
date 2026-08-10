@@ -322,8 +322,38 @@ public struct RoundedRectangle: Shape {
 }
 public enum RoundedCornerStyle { case circular, continuous }
 
+/// A shape built from segments, and the protocol requirement that makes a custom
+/// one possible. `Shape` in SwiftUI is `path(in:) -> Path`; without `Path` here,
+/// anything drawn rather than composed from the stock shapes cannot be compiled
+/// off-device at all.
+public struct Path {
+    public init() {}
+    public init(_ build: (inout Path) -> Void) { var p = Path(); build(&p) }
+    public mutating func move(to: CGPoint) {}
+    public mutating func addLine(to: CGPoint) {}
+    public mutating func addQuadCurve(to: CGPoint, control: CGPoint) {}
+    public mutating func addCurve(to: CGPoint, control1: CGPoint, control2: CGPoint) {}
+    public mutating func addRect(_ rect: CGRect) {}
+    public mutating func addEllipse(in rect: CGRect) {}
+    public mutating func addRoundedRect(in rect: CGRect, cornerSize: CGSize,
+                                        style: RoundedCornerStyle = .circular) {}
+    public mutating func addArc(center: CGPoint, radius: CGFloat, startAngle: AngleShim,
+                                endAngle: AngleShim, clockwise: Bool) {}
+    public mutating func closeSubpath() {}
+}
+
+public struct StrokeStyle {
+    public init(lineWidth: CGFloat = 1, lineCap: CGLineCapShim = .butt,
+                lineJoin: CGLineJoinShim = .miter, dash: [CGFloat] = []) {}
+}
+
+public enum CGLineCapShim { case butt, round, square }
+public enum CGLineJoinShim { case miter, round, bevel }
+
 extension Shape {
+    public func path(in rect: CGRect) -> Path { Path() }
     public func fill<S: ShapeStyle>(_ style: S) -> some View { self }
+    public func stroke<S: ShapeStyle>(_ style: S, style strokeStyle: StrokeStyle) -> some View { self }
     public func stroke<S: ShapeStyle>(_ style: S, lineWidth: CGFloat = 1) -> some View { self }
     public func strokeBorder<S: ShapeStyle>(_ style: S, lineWidth: CGFloat = 1) -> some View { self }
     public func inset(by amount: CGFloat) -> some Shape { self }
@@ -643,6 +673,10 @@ public struct Animation {
     public static func linear(duration: Double) -> Animation { Animation() }
     public static func spring(duration: Double = 0.5, bounce: Double = 0) -> Animation { Animation() }
     public static let easeInOut = Animation()
+    public func repeatForever(autoreverses: Bool = true) -> Animation { self }
+    public func repeatCount(_ count: Int, autoreverses: Bool = true) -> Animation { self }
+    public func delay(_ seconds: Double) -> Animation { self }
+    public func speed(_ speed: Double) -> Animation { self }
 }
 
 @discardableResult
@@ -720,7 +754,11 @@ extension View {
     public func shadow(color: Color = .black, radius: CGFloat, x: CGFloat = 0, y: CGFloat = 0) -> some View { self }
     public func offset(x: CGFloat = 0, y: CGFloat = 0) -> some View { self }
     public func scaleEffect(_ s: CGFloat) -> some View { self }
-    public func rotationEffect(_ a: AngleShim) -> some View { self }
+    public func rotationEffect(_ a: AngleShim, anchor: UnitPoint = .center) -> some View { self }
+    public func position(_ point: CGPoint) -> some View { self }
+    public func position(x: CGFloat = 0, y: CGFloat = 0) -> some View { self }
+    public func compositingGroup() -> some View { self }
+    public func accessibilityHidden(_ hidden: Bool) -> some View { self }
     public func fixedSize(horizontal: Bool = false, vertical: Bool = false) -> some View { self }
     public func contentShape<S: Shape>(_ shape: S) -> some View { self }
     public func disabled(_ disabled: Bool) -> some View { self }

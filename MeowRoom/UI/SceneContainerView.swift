@@ -24,6 +24,13 @@ struct SceneContainerView: View {
     /// rather than how far the hand travels in the room.
     @State private var lastDrag: CGPoint?
 
+    /// Where to draw the gloved hand, and what it should be doing. Nil when no
+    /// finger is down, which is the only time there is nothing to report.
+    @State private var pointer: CGPoint?
+    @State private var pointerState = GameSceneController.PetPointer(
+        onCat: false, canPet: false, overstimulated: false, intensity: 0)
+    @State private var viewSize: CGSize = .zero
+
     var body: some View {
         RealityView { content in
             // Non-AR: a virtual camera looking at a room, not the device's camera
@@ -66,6 +73,7 @@ struct SceneContainerView: View {
             DragGesture(minimumDistance: 0)
                 .targetedToAnyEntity()
                 .onChanged { value in
+                    track(value.location)
                     guard let previous = lastDrag else {
                         lastDrag = value.location
                         controller.beginPan(at: value.location, on: value.entity)
@@ -79,6 +87,7 @@ struct SceneContainerView: View {
                 }
                 .onEnded { _ in
                     lastDrag = nil
+                    pointer = nil
                     controller.endPan()
                 }
         )
@@ -87,6 +96,7 @@ struct SceneContainerView: View {
         .gesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { value in
+                    track(value.location)
                     guard controller.wandActive else { return }
                     let previous = lastDrag ?? value.location
                     lastDrag = value.location
@@ -95,7 +105,59 @@ struct SceneContainerView: View {
                                                                    y: value.location.y - previous.y),
                                          on: nil)
                 }
-                .onEnded { _ in lastDrag = nil }
+                .onEnded { _ in
+                    lastDrag = nil
+                    pointer = nil
+                }
         )
+        // The hand rides above the scene, offset up and to the right of the touch
+        // so the finger covering it is not the thing it is trying to show.
+        .overlay(alignment: .topLeading) {
+            if let pointer = pointer ?? parkedPointer, !controller.wandActive {
+                PetHandView(onCat: pointerState.onCat,
+                            canPet: pointerState.canPet,
+                            overstimulated: pointerState.overstimulated,
+                            intensity: pointerState.intensity)
+                    .frame(width: 44, height: 44)
+                    .position(handPosition(for: pointer))
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
+        }
+        .background {
+            // Measured rather than assumed: the hit box is computed in the same
+            // points the gesture reports, and the scene view is not the screen.
+            GeometryReader { proxy in
+                Color.clear.onAppear { viewSize = proxy.size }
+                    .onChange(of: proxy.size) { viewSize = $1 }
+            }
+        }
+    }
+
+    /// Where to park the hand when there is no finger, so that a screenshot can
+    /// show it. A simulator cannot be sent a drag — `simctl` has no way to
+    /// synthesise one — so without this the hand is a drawing nobody has looked
+    /// at, and this project has now shipped three of those.
+    private var parkedPointer: CGPoint? {
+        #if DEBUG
+        guard ProcessInfo.processInfo.environment["MEOW_SHOW_HAND"]?.isEmpty == false,
+              let rect = controller.catScreenRect(in: viewSize) else { return nil }
+        return CGPoint(x: rect.midX, y: rect.midY)
+        #else
+        return nil
+        #endif
+    }
+
+    /// Keeps the hand beside the finger and inside the view.
+    private func handPosition(for point: CGPoint) -> CGPoint {
+        let offset = CGPoint(x: point.x + 30, y: point.y - 34)
+        guard viewSize.width > 0 else { return offset }
+        return CGPoint(x: min(max(offset.x, 24), viewSize.width - 24),
+                       y: min(max(offset.y, 24), viewSize.height - 24))
+    }
+
+    private func track(_ point: CGPoint) {
+        pointer = point
+        pointerState = controller.petPointer(at: point, in: viewSize)
     }
 }
