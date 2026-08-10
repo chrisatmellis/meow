@@ -229,7 +229,12 @@ final class LightingRig {
     ///
     /// It only applies while the moon is up. In daylight the ratio is larger and
     /// wins outright, so noon and dawn are untouched by it.
-    private static let moonlitEnvironmentLift: Float = 16
+    /// Measured rather than guessed, on the simulator screenshots the `verify`
+    /// workflow takes: at 16 the room came out a mean pixel value of 37 against
+    /// dawn's 47, which reads as evening rather than night. At this it sits around
+    /// 24 — a stop under dawn, two under noon — which is dark enough to be night
+    /// and light enough that the cat can be found in it.
+    private static let moonlitEnvironmentLift: Float = 6.5
 
     /// What `budget.sky` reaches at full daylight, which is the anchor the
     /// environment map's intensity is expressed against.

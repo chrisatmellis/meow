@@ -138,6 +138,20 @@ strength, and the only thing casting a shadow while it is up — which lands the
 room about three stops under noon, dark enough to read as night and light
 enough to still read as a room.
 
+There is one directional light, not two. It is the sun by day and the moon by
+night, crossfading through dusk and dawn, because two directional lights in one
+RealityKit scene did not work: the moon had an entity, a correct aim and an
+intensity, and contributed nothing to any frame — the sun's light, sitting at
+zero all night, was the one being honoured.
+
+Measured on the simulator screenshots the `verify` workflow takes, as a mean
+pixel value over the 3D part of the frame: **midday 94, golden hour 54, dawn
+47, night 24**. Those are the numbers to check against after touching anything
+here, and the reason the file carries a light budget in lux at all — the two
+times this has gone wrong, night came out brighter than noon, and neither a
+screenshot of one hour nor an assertion about any single light could have said
+so.
+
 The cat notices too — it's crepuscular, so it's liveliest around dawn and dusk
 and sleeps through the middle of the day and the small hours.
 
