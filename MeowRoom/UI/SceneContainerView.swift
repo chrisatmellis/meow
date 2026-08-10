@@ -113,13 +113,14 @@ struct SceneContainerView: View {
         // The hand rides above the scene, offset up and to the right of the touch
         // so the finger covering it is not the thing it is trying to show.
         .overlay(alignment: .topLeading) {
-            if let pointer = pointer ?? parkedPointer, !controller.wandActive {
-                PetHandView(onCat: pointerState.onCat,
-                            canPet: pointerState.canPet,
-                            overstimulated: pointerState.overstimulated,
-                            intensity: pointerState.intensity)
+            let posed = pointer == nil && parkedPointer != nil
+            if let at = pointer ?? parkedPointer, !controller.wandActive {
+                PetHandView(onCat: posed || pointerState.onCat,
+                            canPet: posed || pointerState.canPet,
+                            overstimulated: !posed && pointerState.overstimulated,
+                            intensity: posed ? 0.6 : pointerState.intensity)
                     .frame(width: 44, height: 44)
-                    .position(handPosition(for: pointer))
+                    .position(handPosition(for: at))
                     .allowsHitTesting(false)
                     .transition(.opacity)
             }
@@ -135,17 +136,34 @@ struct SceneContainerView: View {
     }
 
     /// Where to park the hand when there is no finger, so that a screenshot can
-    /// show it. A simulator cannot be sent a drag — `simctl` has no way to
-    /// synthesise one — so without this the hand is a drawing nobody has looked
-    /// at, and this project has now shipped three of those.
+    /// show it.
+    ///
+    /// A simulator cannot be sent a drag — `simctl` has no way to synthesise one —
+    /// so without this the hand is a drawing nobody has ever looked at, and this
+    /// project has now shipped three of those. It is parked at a fixed place in
+    /// the frame and forced into its landed state, which is the state worth
+    /// looking at.
+    ///
+    /// It proves the drawing and nothing else. Whether the hit box is *on* the cat
+    /// is a separate claim, and one this could not make honestly: SwiftUI would
+    /// have to re-evaluate the overlay as the cat walked, and nothing here asks it
+    /// to. That claim is the assertion suite's, which projects a posed cat and
+    /// checks the box is centred, bigger than a thumb, contains its own middle,
+    /// excludes the corners, and shrinks as the cat crosses the room.
     private var parkedPointer: CGPoint? {
         #if DEBUG
         guard ProcessInfo.processInfo.environment["MEOW_SHOW_HAND"]?.isEmpty == false,
-              let rect = controller.catScreenRect(in: viewSize) else { return nil }
-        return CGPoint(x: rect.midX, y: rect.midY)
+              viewSize.width > 1 else { return nil }
+        return parked
         #else
         return nil
         #endif
+    }
+
+    /// The parked position, as its own value so the overlay can tell a parked
+    /// hand from a real one and show the landed state for the picture.
+    private var parked: CGPoint? {
+        viewSize.width > 1 ? CGPoint(x: viewSize.width * 0.44, y: viewSize.height * 0.56) : nil
     }
 
     /// Keeps the hand beside the finger and inside the view.

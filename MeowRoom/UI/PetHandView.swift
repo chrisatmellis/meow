@@ -83,36 +83,44 @@ struct PetHandView: View {
     }
 }
 
-/// A cartoon glove: rounded palm, three folded fingers, a pointing index and a
-/// thumb, with a cuff. Built from arcs rather than a font or an image so it stays
-/// crisp at any size and needs nothing in the bundle.
+/// A cartoon glove, palm down, of the sort that would rest on a cat's back:
+/// the back of the hand, four fingers hanging off the front edge, a thumb along
+/// the near side, and a cuff where the wrist leaves toward the arm.
+///
+/// Palm down and fingers together, deliberately. The first version had one finger
+/// standing proud of two shorter ones — meant as an index finger doing the
+/// stroking, and unmistakable as something else entirely the moment it was
+/// rendered. Four fingers of near-equal length hanging in a row cannot be read
+/// that way, and it is also simply what a hand petting a cat looks like.
+///
+/// Built from rounded rectangles rather than a font or an image so it stays crisp
+/// at any size and needs nothing in the bundle.
 private struct GlovedHand: Shape {
     func path(in rect: CGRect) -> Path {
         let w = rect.width, h = rect.height
         var p = Path()
 
-        // Palm.
-        p.addRoundedRect(in: CGRect(x: w * 0.16, y: h * 0.40, width: w * 0.66, height: h * 0.42),
-                         cornerSize: CGSize(width: w * 0.24, height: w * 0.24))
-
-        // Index finger, pointing up and slightly in — the one doing the stroking.
-        p.addRoundedRect(in: CGRect(x: w * 0.40, y: h * 0.06, width: w * 0.20, height: h * 0.44),
-                         cornerSize: CGSize(width: w * 0.10, height: w * 0.10))
-
-        // Two more knuckles beside it, shorter, so the hand reads as a hand rather
-        // than as a mitten.
-        p.addRoundedRect(in: CGRect(x: w * 0.60, y: h * 0.22, width: w * 0.18, height: h * 0.30),
-                         cornerSize: CGSize(width: w * 0.09, height: w * 0.09))
-        p.addRoundedRect(in: CGRect(x: w * 0.22, y: h * 0.26, width: w * 0.18, height: h * 0.26),
-                         cornerSize: CGSize(width: w * 0.09, height: w * 0.09))
-
-        // Thumb, tucked along the left edge.
-        p.addRoundedRect(in: CGRect(x: w * 0.02, y: h * 0.50, width: w * 0.26, height: h * 0.16),
+        // Cuff, at the back, where the wrist would carry on to an arm.
+        p.addRoundedRect(in: CGRect(x: w * 0.30, y: h * 0.02, width: w * 0.52, height: h * 0.20),
                          cornerSize: CGSize(width: w * 0.08, height: w * 0.08))
 
-        // Cuff.
-        p.addRoundedRect(in: CGRect(x: w * 0.20, y: h * 0.78, width: w * 0.58, height: h * 0.18),
-                         cornerSize: CGSize(width: w * 0.07, height: w * 0.07))
+        // The back of the hand.
+        p.addRoundedRect(in: CGRect(x: w * 0.14, y: h * 0.16, width: w * 0.72, height: h * 0.46),
+                         cornerSize: CGSize(width: w * 0.22, height: w * 0.22))
+
+        // Four fingers along the front edge, hanging toward the cat. Graduated a
+        // little so it is a hand rather than a comb, and never by enough for one
+        // to stand out from the others.
+        let lengths: [CGFloat] = [0.20, 0.25, 0.24, 0.19]
+        for (i, length) in lengths.enumerated() {
+            let x = w * (0.16 + CGFloat(i) * 0.18)
+            p.addRoundedRect(in: CGRect(x: x, y: h * 0.54, width: w * 0.155, height: h * length),
+                             cornerSize: CGSize(width: w * 0.077, height: w * 0.077))
+        }
+
+        // Thumb, tucked along the near side.
+        p.addRoundedRect(in: CGRect(x: w * 0.02, y: h * 0.34, width: w * 0.24, height: h * 0.15),
+                         cornerSize: CGSize(width: w * 0.075, height: w * 0.075))
         return p
     }
 }
