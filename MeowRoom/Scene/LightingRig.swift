@@ -212,6 +212,15 @@ final class LightingRig {
     /// to read as night and little enough that it still reads as a room.
     private static let intensityGamma: Float = 0.65
 
+    /// The least of the drawn sky the environment is allowed to contribute.
+    ///
+    /// Not a brightness — a guard against saying the same thing twice. The sky
+    /// image is redrawn for the hour, so it is already dark at night; scaling it
+    /// by the night's share of noon's light on top of that darkens it twice and
+    /// leaves the room with no fill at all. Below this the ratio is telling the
+    /// renderer something the picture has already told it.
+    private static let minEnvironmentShare: Float = 0.5
+
     /// What `budget.sky` reaches at full daylight, which is the anchor the
     /// environment map's intensity is expressed against.
     private static let noonSkyLux: Float = 663
@@ -385,7 +394,19 @@ final class LightingRig {
             // what is left for this to say is how much of the day's light is
             // arriving compared to noon — which makes an overcast dusk dimmer than
             // a clear noon without redrawing anything.
-            let relative = max(0.004, lastBudget.sky / LightingRig.noonSkyLux) * exposure
+            //
+            // The floor is there because below it the two are the same statement.
+            // A night sky is drawn dark — that is what makes it a night sky — and
+            // then this scaled it to two per cent of that, so the environment
+            // contributed nothing at all and the only fill in the room at night
+            // was a directional light through a window aimed at the floor. Every
+            // surface facing away from it went to pure black: night measured a
+            // mean pixel value of 0.8 out of 255, with 98% of the frame below 8.
+            //
+            // Above the floor nothing changes — dawn sits at 0.57 and noon at 1 —
+            // so this is a correction to the night end and only the night end.
+            let ratio = lastBudget.sky / LightingRig.noonSkyLux
+            let relative = max(LightingRig.minEnvironmentShare, ratio) * exposure
             environment.components.set(ImageBasedLightComponent(
                 source: .single(resource),
                 intensityExponent: log2f(relative)))
