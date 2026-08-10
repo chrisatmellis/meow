@@ -29,30 +29,54 @@ Status as of 2026-08-10.
       - **MCP servers only load at session start.** After registering or
         changing the server, restart the session before expecting its tools
         to show up in `ToolSearch`.
-- [ ] Swift toolchain installed locally. Still missing as of the last check
-      (`where swiftc` empty). Windows installer is at swift.org — no proxy
-      issue here since this is the user's own network, unlike the cloud
-      sandbox this work started in.
-- [ ] Confirm `Tools/linux-verify/verify.sh` runs end to end once Swift is
-      installed, as a baseline before making any Swift changes.
+- [x] Swift toolchain installed locally via `winget install --id
+      Swift.Toolchain` (6.3.3, official, downloaded straight from
+      download.swift.org — no proxy issue on the user's own network). Needs
+      **both** dirs on `PATH` to run, not just the toolchain bin — the
+      runtime DLLs are in a separate directory and `swift.exe`/`swiftc.exe`
+      fail with an opaque "cannot open shared object file" error without it:
+      ```
+      C:\Users\oru20\AppData\Local\Programs\Swift\Toolchains\6.3.3+Asserts\usr\bin
+      C:\Users\oru20\AppData\Local\Programs\Swift\Runtimes\6.3.3\usr\bin
+      ```
+      Neither is on PATH by default in a shell that was already open when
+      winget installed it — export explicitly per session, or open a fresh
+      shell after install.
+- [ ] `Tools/linux-verify/verify.sh` does **not** run on native Windows Swift
+      — confirmed, not just untested. It fails at the first `emit-module`
+      with "unable to load standard library for target
+      'x86_64-unknown-windows-msvc'", and even past that, the framework
+      stand-ins are linked as `.so` shared libraries, which is a Unix ABI
+      convention with no Windows equivalent — this isn't a flag or path fix,
+      it's a different linking model. `python3` is also not on PATH by
+      default on Windows (only `python`); worked around locally with a
+      `python3 -> python` shim at `C:\Users\oru20\bin`, since editing the
+      tracked script would diverge from what Linux CI runs.
+      **Decision: install WSL2** rather than porting the harness to native
+      Windows. Requires an elevated terminal (`wsl --install`, admin
+      approval, likely a reboot) — has to be run by the user, not from here.
+      Once WSL is up: install a Linux Swift toolchain inside it and run
+      `verify.sh` there unmodified, matching what the harness was actually
+      written for.
 
-## Immediate: the leg-role bug (no Swift needed)
+## Done: the leg-role bug (no Swift needed)
 
-`cat.catmesh`'s role table has 8 of 16 leg-joint roles swapped between the
-left-hind and right-front leg — a diagonal pair. Confirmed independently two
-ways: the joint parent chain matches the source `.blend`'s bone order, and the
-raw coordinates put `shoulderR`/`upperArmR`/`lowerArmR`/`pawR` at `x < 0`
-(behind the hips), which is anatomically the hind leg. See the chat history
-for the full table.
+`cat.catmesh`'s role table had 8 of 16 leg-joint roles swapped between the
+left-hind and right-front leg — a diagonal pair, from `infer_roles` guessing
+wrong on two of the eight leg chains.
 
-- [ ] Write a small Python patch script (`Tools/usd/fix-leg-roles.py` or
-      similar) that rewrites the 8 role-table entries in `cat.catmesh` in
-      place, matching the corrected mapping already worked out.
-- [ ] Verify the patch in Python: re-read the role table and assert every leg
-      role's joint has `x` sign matching `front`/`hind` and `z` sign matching
-      `L`/`R`. This is the check that would have caught the original bug.
-- [ ] Commit the patched `cat.catmesh` with a clear message explaining the bug
-      it fixes.
+- [x] `Tools/usd/fix-leg-roles.py` written and applied. It doesn't hardcode
+      which joints are wrong — it derives the body's own front/hind and
+      left/right sign convention from the two leg chains that were *not*
+      mislabelled (`shoulderL`, `hipR`), then checks the other two
+      (`shoulderR`, `hipL`) against that convention and swaps only what fails.
+      If a future export has no swap at all, it makes no changes.
+- [x] Verified: dry-run on a copy first, then applied to the real file
+      (`git diff --stat` confirms same byte count, i.e. only the 8 role
+      entries changed), then re-parsed the patched file fresh and confirmed
+      all four leg groups satisfy the convention. Second run is a no-op
+      ("already match the convention"), confirming idempotence.
+- [ ] Commit the patched `cat.catmesh` alongside the script.
 
 ## Next: re-export with joint names, via Blender MCP
 
