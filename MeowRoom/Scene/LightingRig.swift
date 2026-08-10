@@ -2,7 +2,8 @@ import Foundation
 import RealityKit
 import UIKit
 
-/// One sun outside the room, one moon behind it, and sky. Nothing else.
+/// One sun outside the room, one moon on the same arc twelve hours behind it,
+/// and sky. Nothing else.
 ///
 /// There used to be two omni lights floating *inside* the room as well — a
 /// "bounce" about a metre above the tatami and a "window glow" beside the shoji —
@@ -71,9 +72,22 @@ final class LightingRig {
         sunEntity.components.set(DirectionalLightComponent.Shadow(maximumDistance: 22,
                                                                   depthBias: 1.2))
 
-        // The moon is cool, soft, and casts nothing.
+        // The moon is cool and casts a shadow of its own.
+        //
+        // Cool because moonlight is not actually blue — it is sunlight, and a
+        // shade *warmer* than daylight — but a dark-adapted eye loses colour from
+        // the red end first and reports it blue, which is why every night scene
+        // ever filmed is graded that way and why a neutral moon reads as an
+        // overcast afternoon.
+        //
+        // It shadows because it is now the only thing lighting the room at night,
+        // and a directional light with no shadow does not make a window an
+        // aperture: it pours through the walls and lights the far side of every
+        // object in the room. The range is the sun's, which covers the room.
         moonEntity.components.set(DirectionalLightComponent(
-            color: UIColor(red: 0.62, green: 0.72, blue: 0.95, alpha: 1), intensity: 0))
+            color: UIColor(red: 0.60, green: 0.71, blue: 0.97, alpha: 1), intensity: 0))
+        moonEntity.components.set(DirectionalLightComponent.Shadow(maximumDistance: 22,
+                                                                   depthBias: 1.2))
     }
 
     /// The baked sky, for anyone who wants it as a background as well as a light.
@@ -115,15 +129,37 @@ final class LightingRig {
         var key: Float { max(0.05, sun + sky + moon + lantern) }
     }
 
-    /// Lux by path, for the current sky. Daylight is overwhelmingly the sun and
-    /// the sky through the opening; at night a paper lantern is worth far more
-    /// than the moon, which is why a room with the lamp off really is dim.
+    /// Lux by path, for the current sky.
+    ///
+    /// Daylight is overwhelmingly the sun and the sky through the opening. At
+    /// night the moon is the key and the lantern is the fill — the other way round
+    /// from how this read for most of the project, because the moon was below the
+    /// horizon every night and contributed nothing at all.
     static func budget(sky: SkyState, lanternOn: Bool) -> LightBudget {
         let above = smoothstep(-0.06, 0.12, sky.sunElevation)
         let moonUp = smoothstep(-0.05, 0.25, sky.moonElevation)
+        let night = 1 - sky.daylight
+        // The moon, deliberately unphysical.
+        //
+        // Real moonlight is about a quarter of a lux against noon's hundred
+        // thousand — four hundred thousand to one, which no screen has ever shown
+        // and no eye reads as a room. Every night scene anyone has filmed is lit
+        // far above that and colour-shifted blue, because that is what a dark-
+        // adapted eye reports rather than what a meter does.
+        //
+        // So this is the one entry in the budget that is a choice rather than a
+        // measurement, and it is written here rather than hidden in a coefficient
+        // downstream: the moon is worth about a fortieth of the sun, which lands
+        // the room three and a half stops under noon. It was worth a two-hundredth
+        // before, and a room lit that way is a black rectangle.
         return LightBudget(sun: above * powf(max(0, sky.daylight), 1.5) * 1900,
-                           sky: 3 + 660 * sky.daylight,
-                           moon: moonUp * 9 * (1 - sky.daylight),
+                           // The sky keeps a moonlit floor of its own, so the
+                           // environment map has something to fill the shadows
+                           // with. Without it the only night light in the room is
+                           // one hard directional and everything facing away from
+                           // the window is pure black.
+                           sky: 3 + 660 * sky.daylight + moonUp * 12 * night,
+                           moon: moonUp * 46 * night,
                            // Raised with the exposure cut, not independently of
                            // it. A lamp is the only source that exists solely at
                            // night, so it is the one place night can be paid back
@@ -373,8 +409,19 @@ final class LightingRig {
         }
 
         moonEntity.components.set(DirectionalLightComponent(
-            color: UIColor(red: 0.62, green: 0.72, blue: 0.95, alpha: 1),
+            color: UIColor(red: 0.60, green: 0.71, blue: 0.97, alpha: 1),
             intensity: lit.moon * e))
+        // The same bargain as the sun's, with one extra condition: the moon casts
+        // only while it is the brighter of the two. It is genuinely up for an hour
+        // either side of dawn and dusk, and a shadow it throws then is worth
+        // nothing against a sun eight times its strength — and would be a second
+        // shadow map rendered to draw it.
+        if budget.moon > 8, budget.moon > budget.sun {
+            moonEntity.components.set(DirectionalLightComponent.Shadow(maximumDistance: 22,
+                                                                       depthBias: 1.2))
+        } else {
+            moonEntity.components.remove(DirectionalLightComponent.Shadow.self)
+        }
 
         // --- Backlit shoji paper. Its brightness is the sky outside and nothing
         // else: the flat floor this used to carry was what left the paper — and

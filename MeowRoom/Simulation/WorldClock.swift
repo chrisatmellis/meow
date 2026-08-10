@@ -162,11 +162,35 @@ enum WorldClock {
         var azimuth = acos(clampD(cosAz, -1, 1))
         if hourAngle > 0 { azimuth = 2 * Double.pi - azimuth }   // afternoon → west
 
-        // The moon simply runs a lazy counter-arc so nights are never pitch black.
-        let moonAngle = (solarTime + 12.0 - 12.0) * 15.0 * .pi / 180.0
-        let moonSinEl = sin(lat) * sin(-declination * 0.6) + cos(lat) * cos(declination * 0.6) * cos(moonAngle + .pi)
+        // The moon runs the sun's own arc, half a day out of step with it.
+        //
+        // Which is what a full moon does, and a full moon is the right
+        // idealisation for a game: it rises about as the sun sets, is highest at
+        // solar midnight, and sets about as the sun rises, tracing the same path
+        // across the same window. Modelling the real thing would mean the moon
+        // spending a fortnight of every month absent or up in daylight, which
+        // costs a night sky and buys nothing anyone can see from a bedroom.
+        //
+        // What was here before was not that. It ran `cos(moonAngle + π)` against
+        // an hour angle that was `solarTime` rather than `solarTime - 12`, which
+        // put the moon *below* the horizon all night and high overhead at noon —
+        // so the one source that exists to keep night from being black was
+        // switched off exactly when it was needed. Night measured a mean pixel
+        // value of 0.8 out of 255.
+        var moonHourAngle = hourAngle + .pi
+        if moonHourAngle > .pi { moonHourAngle -= 2 * .pi }
+        // Leaning the other way from the sun's, and less: it keeps the moon's arc
+        // from tracking the sun's exactly, so summer nights sit a little lower
+        // than summer days rather than mirroring them.
+        let moonDeclination = -declination * 0.5
+
+        let moonSinEl = sin(lat) * sin(moonDeclination)
+            + cos(lat) * cos(moonDeclination) * cos(moonHourAngle)
         let moonEl = asin(clampD(moonSinEl, -1, 1))
-        let moonAz = (azimuth + Double.pi).truncatingRemainder(dividingBy: 2 * Double.pi)
+        let cosMoonAz = (sin(moonDeclination) - sin(moonEl) * sin(lat))
+            / max(0.0001, cos(moonEl) * cos(lat))
+        var moonAz = acos(clampD(cosMoonAz, -1, 1))
+        if moonHourAngle > 0 { moonAz = 2 * Double.pi - moonAz }   // past its zenith → west
 
         let el = Float(elevation)
         let phase: DayPhase

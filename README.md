@@ -131,7 +131,12 @@ moment you open the app. Everything downstream follows: the colour and intensity
 of the light raking through the shoji, how strongly the paper glows, the sky and
 garden seen through the open half of the window, the sun patch sliding across the
 tatami, whether the paper lantern comes on, and the ambient bounce off the floor.
-Night gets a soft moon so the room is never black.
+Night gets a moon, and it runs the sun's own arc half a day out of step: it
+rises across the window about as the sun sets, is highest at solar midnight,
+and sets about as the sun rises. Cool rather than warm, a fortieth of the sun's
+strength, and the only thing casting a shadow while it is up — which lands the
+room about three stops under noon, dark enough to read as night and light
+enough to still read as a room.
 
 The cat notices too — it's crepuscular, so it's liveliest around dawn and dusk
 and sleeps through the middle of the day and the small hours.

@@ -1903,6 +1903,80 @@ section("sun arc") {
                "the sun travels east to west in month \(month) (\(morning.dir.x) → \(evening.dir.x))")
     }
 
+    // The moon runs the same arc, half a day out of step.
+    //
+    // This is the whole of what makes a night readable, and it was inverted: the
+    // moon was below the horizon all night and high overhead at noon, so the one
+    // light that exists to keep the room from going black was switched off
+    // exactly when it was needed. Nothing noticed, because every check on the
+    // moon was about finiteness and none was about whether it was up.
+    for month in [1, 4, 6, 9, 12] {
+        for hour in [0, 1, 2, 3, 22, 23] {
+            var comps = DateComponents()
+            comps.year = 2026; comps.month = month; comps.day = 21; comps.hour = hour
+            let sky = WorldClock.sky(at: cal.date(from: comps)!,
+                                     timeZone: TimeZone(identifier: "UTC")!)
+            expect(sky.moonElevation > 0.05,
+                   "the moon is up at \(month)/\(hour):00 (elevation \(sky.moonElevation))")
+            expect(finite(LightingRig.arcDirection(azimuth: sky.moonAzimuth)),
+                   "the moon has a finite direction at \(month)/\(hour):00")
+        }
+        for hour in [11, 12, 13] {
+            var comps = DateComponents()
+            comps.year = 2026; comps.month = month; comps.day = 21; comps.hour = hour
+            let sky = WorldClock.sky(at: cal.date(from: comps)!,
+                                     timeZone: TimeZone(identifier: "UTC")!)
+            expect(sky.moonElevation < 0,
+                   "the moon is down at midday in month \(month) (elevation \(sky.moonElevation))")
+        }
+        // ...and travels the same way the sun does, rising in the east after dusk
+        // and setting in the west before dawn.
+        func moonX(_ hour: Int) -> Float {
+            var comps = DateComponents()
+            comps.year = 2026; comps.month = month; comps.day = 21; comps.hour = hour
+            let sky = WorldClock.sky(at: cal.date(from: comps)!,
+                                     timeZone: TimeZone(identifier: "UTC")!)
+            return LightingRig.arcDirection(azimuth: sky.moonAzimuth).x
+        }
+        expect(moonX(21) > moonX(3),
+               "the moon travels east to west in month \(month) (\(moonX(21)) → \(moonX(3)))")
+    }
+
+    // What the room is actually lit by, across a whole day. The ordering is the
+    // point: this has been inverted before, with midnight rendering brighter than
+    // midday, and it is not something a screenshot of any single hour can show.
+    do {
+        func lit(_ hour: Int, lantern: Bool = false) -> Float {
+            var comps = DateComponents()
+            comps.year = 2026; comps.month = 6; comps.day = 21; comps.hour = hour
+            let sky = WorldClock.sky(at: cal.date(from: comps)!,
+                                     timeZone: TimeZone(identifier: "UTC")!)
+            return LightingRig.intensities(for: LightingRig.budget(sky: sky, lanternOn: lantern)).total
+        }
+        let midnight = lit(0), dawn = lit(5), noon = lit(12), dusk = lit(19)
+        expect(midnight < dawn && dawn < noon, "the room brightens from midnight to noon")
+        expect(dusk < noon, "dusk is dimmer than noon")
+        // Night reads as night, and as a room. Both ends are named because the
+        // failure has gone both ways: unmeasured physics gave a black rectangle,
+        // and hand-fitting a screenshot once made night brighter than day.
+        let stops = log2(noon / max(1e-3, midnight))
+        expect(stops > 2.5 && stops < 5,
+               "night is a few stops under noon, not a black rectangle (\(stops) stops)")
+        expect(lit(0, lantern: true) > midnight, "the lantern helps")
+
+        // One shadow map at a time. Both lights carry a shadow only while they are
+        // worth one, and the two windows never overlap.
+        for hour in 0..<24 {
+            var comps = DateComponents()
+            comps.year = 2026; comps.month = 6; comps.day = 21; comps.hour = hour
+            let sky = WorldClock.sky(at: cal.date(from: comps)!,
+                                     timeZone: TimeZone(identifier: "UTC")!)
+            let b = LightingRig.budget(sky: sky, lanternOn: false)
+            expect(!(b.sun > 30 && b.moon > 8 && b.moon > b.sun),
+                   "the sun and the moon never both cast at \(hour):00")
+        }
+    }
+
     // Every light left in the room is either outside it or has no position at all,
     // which is what stops any of them putting a bright patch on a nearby surface.
     let rig = LightingRig()
