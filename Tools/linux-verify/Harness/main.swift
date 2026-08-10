@@ -1964,6 +1964,22 @@ section("sun arc") {
                "night is a few stops under noon, not a black rectangle (\(stops) stops)")
         expect(lit(0, lantern: true) > midnight, "the lantern helps")
 
+        // The lantern is the only source measured in lumens, and it is the only
+        // one that needs converting. A paper lantern asked to deliver 38 lux at a
+        // metre costs about 480 lumens; set to 38 it is a seventh of a candle.
+        expect(abs(LightingRig.lumensPerLuxAtOneMetre - 12.566) < 0.01,
+               "lux buys lumens at 4 pi (\(LightingRig.lumensPerLuxAtOneMetre))")
+        do {
+            var comps = DateComponents()
+            comps.year = 2026; comps.month = 6; comps.day = 21; comps.hour = 0
+            let sky = WorldClock.sky(at: cal.date(from: comps)!,
+                                     timeZone: TimeZone(identifier: "UTC")!)
+            let lit = LightingRig.intensities(for: LightingRig.budget(sky: sky, lanternOn: true))
+            let lumens = lit.lantern * LightingRig.lumensPerLuxAtOneMetre
+            expect(lumens > 400 && lumens < 2500,
+                   "the lantern is a lamp rather than a nightlight (\(lumens) lumens)")
+        }
+
         // One shadow map at a time. Both lights carry a shadow only while they are
         // worth one, and the two windows never overlap.
         for hour in 0..<24 {

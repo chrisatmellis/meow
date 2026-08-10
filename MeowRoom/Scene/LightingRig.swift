@@ -212,6 +212,14 @@ final class LightingRig {
     /// to read as night and little enough that it still reads as a room.
     private static let intensityGamma: Float = 0.65
 
+    /// Lumens per lux at one metre, for the one light that is measured in lumens.
+    ///
+    /// `4π`, because a point source spreading its lumens over the sphere around it
+    /// delivers `lumens / 4πr²` lux at distance r. Named rather than inlined
+    /// because a bare 12.57 in a lighting file reads as a fudge factor, and this
+    /// is the one number here that is not one.
+    static let lumensPerLuxAtOneMetre: Float = 4 * .pi
+
     /// The least of the drawn sky the environment is allowed to contribute.
     ///
     /// Not a brightness — a guard against saying the same thing twice. The sky
@@ -477,11 +485,23 @@ final class LightingRig {
             }
         }
 
-        // --- Paper lantern.
+        // --- Paper lantern, in lumens rather than lux.
+        //
+        // The two are not the same unit and RealityKit does not use the same one
+        // for both kinds of light: a directional light's intensity is lux, a point
+        // light's is lumens. The budget is in lux throughout — it has to be, since
+        // its whole purpose is that the sources are comparable — so the point light
+        // is the one place a conversion is owed, and it was not being paid. The
+        // lantern was set to 89 *lumens* where the budget meant 38 lux: about a
+        // seventh of a candle's worth of light, in a four-metre room, as the only
+        // thing lit at night.
+        //
+        // A point source radiating uniformly puts `lumens / 4πr²` lux on a surface
+        // r away, so the lux the budget asks for at a metre costs 4π lumens.
         if let light = room.lanternLight {
             light.components.set(PointLightComponent(
                 color: UIColor(red: 1.0, green: 0.82, blue: 0.56, alpha: 1),
-                intensity: lit.lantern * e,
+                intensity: lit.lantern * e * LightingRig.lumensPerLuxAtOneMetre,
                 attenuationRadius: 2.8))
         }
         // A lit lamp has a fixed luminance, so this does not track the sky.
