@@ -55,6 +55,9 @@ final class LightingRig {
     private var exposure: Float = 1
     private var lastRoom: RoomNode?
     private var lastSky: SkyState = WorldClock.sky()
+    /// How much of the key the moon is, kept so a change of exposure alone can
+    /// re-light the environment without recomputing the sky.
+    private var lastMoonShare: Float = 0
 
     /// Points a subtree at the environment map.
     ///
@@ -210,14 +213,23 @@ final class LightingRig {
     /// is the one number here that is not one.
     static let lumensPerLuxAtOneMetre: Float = 4 * .pi
 
-    /// The least of the drawn sky the environment is allowed to contribute.
+    /// How far the environment is lifted above the drawn sky at night.
     ///
-    /// Not a brightness — a guard against saying the same thing twice. The sky
-    /// image is redrawn for the hour, so it is already dark at night; scaling it
-    /// by the night's share of noon's light on top of that darkens it twice and
-    /// leaves the room with no fill at all. Below this the ratio is telling the
-    /// renderer something the picture has already told it.
-    private static let minEnvironmentShare: Float = 0.5
+    /// The sky image is a picture, and a picture of a night sky is authored to
+    /// *look* like night on a screen — which makes it very nearly black. As a
+    /// light source that is a different claim, and a wrong one: a moonlit room is
+    /// not lit at one three-hundredth of a dawn one. Using the picture's own level
+    /// as the light level says the same thing the picture already said, and says
+    /// it far too strongly.
+    ///
+    /// So at night the environment is lifted off the picture. This is the second
+    /// of the two numbers in this file that are choices rather than measurements —
+    /// the moon's share of the sun being the first — and it is here, next to the
+    /// reason, rather than folded into a coefficient somewhere downstream.
+    ///
+    /// It only applies while the moon is up. In daylight the ratio is larger and
+    /// wins outright, so noon and dawn are untouched by it.
+    private static let moonlitEnvironmentLift: Float = 16
 
     /// What `budget.sky` reaches at full daylight, which is the anchor the
     /// environment map's intensity is expressed against.
@@ -390,6 +402,7 @@ final class LightingRig {
         // --- Key placement. A directional light shines along its own -Z, so
         // aiming it is the whole of placing it; its position is decorative.
         lastBudget = LightingRig.budget(sky: sky, lanternOn: lanternOn)
+        lastMoonShare = LightingRig.moonShare(sky)
         let d = LightingRig.keyDirection(sky: sky)
         keyEntity.look(at: SIMD3<Float>(0, 0.6, -0.2),
                        from: SIMD3<Float>(x: d.x * 9, y: max(0.2, d.y * 9), z: d.z * 9),
@@ -450,7 +463,7 @@ final class LightingRig {
             // Above the floor nothing changes — dawn sits at 0.57 and noon at 1 —
             // so this is a correction to the night end and only the night end.
             let ratio = lastBudget.sky / LightingRig.noonSkyLux
-            let relative = max(LightingRig.minEnvironmentShare, ratio) * exposure
+            let relative = max(LightingRig.moonlitEnvironmentLift * lastMoonShare, ratio) * exposure
             environment.components.set(ImageBasedLightComponent(
                 source: .single(resource),
                 intensityExponent: log2f(relative)))
