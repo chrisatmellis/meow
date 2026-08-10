@@ -18,7 +18,30 @@ What ships today, measured from `MeowRoom/Resources/cat.catmesh`:
 | UVs | Generated, per-bone cylindrical | Not authored; stretch measured but never gated |
 | Blendshapes | **None** | Pipeline has no support anywhere |
 | Baked maps | **None** | All relief comes from procedural fur-stroke height fields |
-| Mouth | **None** | Head is a closed surface; opening the jaw stretches skin |
+| Mouth | Geometry exists, undriven | 241 verts on the jaw bone, 73 more on two tongue bones |
+
+## What the source .blend still holds
+
+The bought `.blend` was inspected with `Tools/usd/blend-inspect.py`. It is the same
+animal — 60.56 × 30.00 × 10.13 Blender units against the shipped 0.606 × 0.300 × 0.107 m,
+exactly 100×, same counts — but a good deal survives in it that the export drops:
+
+- **55 named bones**, including `Bip01_R_Clavicle`, `Bip01_R_Toe0`, `BN_Thouge_01`. The
+  FBX→USDZ conversion stripped the names, which is the sole reason `infer_roles` exists.
+- **A hand-painted 1024² atlas** (`cat texture.jpg`, packed into the .blend), fully inside
+  0–1, non-overlapping, with a dedicated face island, an eye, paw pads, claws, and a mouth
+  with teeth. This is the bake atlas — it does not need authoring.
+- **Geometry with no role**: tongue (73 verts), toes (`Finger0`, 252 verts across both),
+  clavicles (150 verts, present but carrying no dominant weight), `Bip01_Spine1` (237).
+- **Five walk / slow-walk actions.**
+
+Not in it: any high-poly version, any shape keys, any quads. `uvset2` is empty, and
+`texmap0/1/2` are lion textures left over from another asset in the same pack.
+
+Measured stretch, for the record: the artist's `uvset1` scores p90/p10 = 3.57, `unwrap.py`'s
+generated set scores 3.90. Near enough identical — the generator is not the problem. The
+artist's set is worth having because it is packed and non-overlapping, which is what baking
+requires and what a tiling coordinate system cannot give.
 
 The assembled cat clears the harness's `tris > 3_000` floor once the generated eyes, lids,
 whiskers, collar and fur shells are added — but the body itself, the thing every pattern is
@@ -47,10 +70,11 @@ nose sits between the eyes and there is no muzzle projection. A Siamese is a str
 profile wedge. Neither is reachable by inflating a moggy skull. **This is why 18 breeds
 read as one cat with different fur colours,** and it is the highest-value new asset.
 
-**3. The face is primitives stuck on a closed head.** Eyes are `sphere(segments: 16)`
+**3. The face is primitives stuck on the head.** Eyes are `sphere(segments: 16)`
 intersecting the skull; lids are `cap(74°)` and `cap(66°)` cones (`CatBuilder.swift:233-252`).
-No socket, no brow, no inner canthus, no nose bridge, no lip line, no mouth interior. The
-eyes are the first thing anyone looks at.
+No socket, no brow, no inner canthus, no nose bridge, no lip line. The eyes are the first
+thing anyone looks at. The mouth is the one part that is *not* missing — the source mesh has
+a jaw and tongue, painted with teeth in the atlas — it is simply never driven.
 
 **4. No baked anatomy.** Every normal/roughness/occlusion map comes from a height field of
 *fur strokes* (`SurfaceMaps.catCoat:404`). Nothing in the pipeline knows where the
@@ -63,8 +87,11 @@ under the runtime-painted albedo, so "everything is generated" stays true for co
 and silhouette is geometry. Today `tailFluff` is radial inflation, so a plumed tail is a fat
 cylinder.
 
-Secondary but cheap: the rig has one `spine` entity (`CatRig.swift:45`), 4 tail joints, and
-no scapula — a sliding shoulder blade is most of why a cat's walk looks like a cat's.
+Secondary but cheap: the rig has one `spine` entity (`CatRig.swift:45`) and 4 tail joints.
+The shoulder blades are not missing — `Bip01_L/R_Clavicle` are in the source rig and survive
+into `cat.catmesh` — but they carry no dominant weight and `CatMeshAsset.Role` gives them no
+role, so nothing drives them. A sliding shoulder blade is most of why a cat's walk looks like
+a cat's.
 
 ---
 
@@ -73,6 +100,12 @@ no scapula — a sliding shoulder blade is most of why a cat's walk looks like a
 Do these first; they're days, not months, and they raise the floor while the modelling
 work is underway.
 
+- **Re-export from the source `.blend` with joint names intact.** This is now the largest
+  single win available and it involves no modelling. Export USD straight out of Blender
+  rather than via the FBX path that stripped the names, then teach `export-cat.py` to read
+  them. That alone retires `infer_roles`, and gives roles to the tongue, the toes, the
+  clavicles and the third spine joint — geometry that already ships and currently deforms
+  as dead weight.
 - **Drive pupil dilation from `WorldClock`.** `TextureFactory.iris` takes a `dilation`
   parameter that is hard-coded to `0.5` at both call sites (`Materials.swift:115`,
   `Harness/main.swift:800`). The machinery, including the cache key, already exists. A cat
@@ -101,11 +134,13 @@ work is underway.
   eye, ×3 around the mouth, ×2 at the nostril, ×2 at the ear base.
 - Poles kept out of deforming areas.
 - **Symmetric across X** — morphs mirror, and the seam-split logic stays predictable.
-- **A mouth bag**: inner lips, gums, tongue, four canines. Transforms yawning, meowing,
-  hissing and grooming, none of which currently work.
+- **A deeper mouth bag**: rebuild the inner lips, gums, tongue and canines the source
+  already has, at a density that can deform. Yawning, meowing, hissing and grooming all
+  depend on it and none currently work — but this is a rebuild, not an invention.
 - **Real eye sockets**, with lids as part of the same surface skinned to lid joints —
-  replacing the cone caps.
-- **Separated toes** (4 hind, 5 fore). Cheap in polys, very readable when the cat kneads.
+  replacing the cone caps. This one genuinely does not exist yet.
+- **Separated toes** (4 hind, 5 fore). The source has one toe joint per foot with 126 verts
+  behind it; splitting them properly is cheap and very readable when the cat kneads.
 
 ### B. `cat_high.blend` — high-poly sculpt, for baking only
 

@@ -11,11 +11,17 @@ out in an afternoon rather than in month three.
 
 ## 0. Get something to retopologise over
 
-The source USDZ is not in this repository — only the derived `cat.catmesh`. Look
-for your original purchase first; it will have better normals and possibly a
-higher-density variant.
+**Use the source `.blend`.** It has been inspected (`Tools/usd/blend-inspect.py`)
+and it is the same animal as the shipped mesh at 100× scale — no higher-density
+variant exists — but it carries named bones, a hand-painted 1024² atlas, mouth
+and tongue geometry, toe joints, clavicles and five walk cycles, all of which the
+FBX→USDZ conversion dropped. Open that, not an export of an export.
 
-Failing that, unpack the shipped mesh:
+Two consequences for the plan below: the **bake atlas already exists** as
+`uvset1`, so §2's authoring step is mostly a check rather than a job; and the
+mouth is a **rebuild at usable density**, not something to invent.
+
+If you only have the shipped file, unpack it:
 
 ```sh
 python3 Tools/usd/catmesh-to-obj.py MeowRoom/Resources/cat.catmesh /tmp/cat
@@ -130,10 +136,12 @@ then slow right down for the head.
 
 ### The parts that don't exist yet
 
-**Mouth bag.** From the lip loop, extrude *inward*. It needs to be a closed bag,
-not a hole — 2–3 cm deep is plenty. Add a flattened tube for the tongue (skinned
-to `tongue1`/`tongue2`) and four canines, eight quads each. Without this, opening
-the jaw stretches skin, which is what happens today.
+**Mouth bag.** The source already has one — 241 verts on `BN_Mouth`, 73 on the two
+`BN_Thouge` bones, and teeth painted into the atlas. It is simply too coarse to
+deform and your pipeline never drives it. Rebuild it at usable density: from the
+lip loop, extrude *inward* into a closed bag 2–3 cm deep, a flattened tube for the
+tongue, four canines at eight quads each. Keep the source's bone names so the
+existing weights transfer.
 
 **Eye sockets.** Build the lid rings, then extrude inward and back to form an
 actual recess. The eyeball stays a **separate sphere object** sitting inside the
@@ -190,7 +198,15 @@ So:
 
 ### Authoring UV1 (the atlas)
 
-This is ordinary game-art UV work, and it is the *only* unwrapping you do by hand.
+**Check before you start: you may already have this.** The source `.blend` carries
+`uvset1` — packed, non-overlapping, 100% inside 0–1, with a dedicated face island,
+and a matching hand-painted texture. Measured stretch is p90/p10 = 3.57 against
+`unwrap.py`'s 3.90, so it is a good layout. New topology means re-unwrapping, but
+you have a proven layout to copy rather than a blank page: match its island
+placement and the painted texture keeps lining up.
+
+The rest of this section is ordinary game-art UV work, and it is the *only*
+unwrapping you do by hand.
 
 1. In Edit mode, edge select. Mark seams with **Ctrl+E ▸ Mark Seam** along:
    - the belly midline, nose to tail base
