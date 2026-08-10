@@ -108,9 +108,10 @@ def build(path_in):
     jw = api.GetPrimvar('skel:jointWeights')
     skel = UsdSkel.Skeleton(skel_prim) if skel_prim else None
 
-    joint_pos, parent, bind = [], [], []
+    joint_pos, parent, bind, names = [], [], [], []
     if skel:
         paths = [str(j) for j in (skel.GetJointsAttr().Get() or [])]
+        names = [p.rsplit('/', 1)[-1] for p in paths]
         binds = skel.GetBindTransformsAttr().Get() or []
         joint_pos = [tuple(b.ExtractTranslation()) for b in binds]
         # The whole matrix, not just where the joint is. This skeleton's bind pose
@@ -162,7 +163,7 @@ def build(path_in):
 
     return dict(points=points, tris=tris, normals=normals, scale=scale,
                 joint_pos=joint_pos, parent=parent, direction=direction, bind=bind,
-                length=length, chain=chain,
+                length=length, chain=chain, joint_names=names,
                 ji=list(ji.Get()) if ji else None, ji_n=ji.GetElementSize() if ji else 0,
                 jw=list(jw.Get()) if jw else None)
 

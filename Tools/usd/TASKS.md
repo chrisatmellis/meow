@@ -74,6 +74,10 @@ Status as of 2026-08-10.
       Once WSL is up: install a Linux Swift toolchain inside it and run
       `verify.sh` there unmodified, matching what the harness was actually
       written for.
+- [x] `pip install usd-core` run locally (2026-08-10) — `Tools/usd`'s scripts
+      import `pxr` and it wasn't installed on this machine yet, per the note
+      in `ASSETS.md`. User-site install (`pip install --user`, since the
+      system site-packages isn't writeable); nothing else needed.
 
 ## Done: the leg-role bug (no Swift needed)
 
@@ -103,21 +107,80 @@ Goal: stop `export-cat.py` guessing roles from rest-pose geometry
 mesh but currently has no role: the tongue (`BN_Thouge_01/02`), the toe
 joints (`Finger0` ×2), the clavicles, and `Bip01_Spine1`.
 
-- [ ] Use Blender MCP to open/inspect the source `.blend` (find its current
-      path on this machine — it was uploaded earlier in this conversation)
-      and confirm the bone names and hierarchy match what `blend-inspect.py`
-      reported.
-- [ ] Export USD from Blender with the armature and bone names intact (not via
-      the FBX path that stripped them originally).
-- [ ] Update `Tools/usd/export-cat.py` to read joint names from the USD
-      skeleton directly, falling back to `infer_roles` only when names are
-      absent (keeps the tool working for other users' unnamed exports).
-- [ ] Add roles for tongue, toes, clavicles, and the third spine joint to
-      `CatMeshAsset.Role` (Swift) and wire them into `CatShape`/`CatRig`/
-      `CatSkin` — this part needs the Swift toolchain to verify.
-- [ ] Re-run `export-cat.py` and `unwrap.py` against the new export, diff the
-      resulting `cat.catmesh` against the current one, and sanity-check with
-      `Tools/usd/preview.py`.
+- [x] Use Blender MCP to open/inspect the source `.blend` (path on this
+      machine: `C:\Users\oru20\Downloads\cat.blend`, already open in the
+      connected Blender instance) and confirm the bone names and hierarchy
+      match what `blend-inspect.py` reported: 55 bones, same names/parents
+      (`Hips` root, `BN_Tail_01..04`, `Bip01_*` limbs/spine/clavicles,
+      `BN_Thouge_01/02` tongue, `BN_Beard_L/R`, `BN_Ear_L/R`, toe `*_Finger0`).
+- [x] Export USD from Blender with the armature and bone names intact (not via
+      the FBX path that stripped them originally). Done via
+      `bpy.ops.wm.usd_export` through the Blender MCP `execute_blender_code`
+      tool, selecting only `Armature` + `U3DMesh` (`export_armatures=True,
+      only_deform_bones=False` — all 55 bones are deform bones anyway —
+      `export_uvmaps=True, export_animation=False, export_materials=False`).
+      Wrote to the session scratchpad as `cat-blender-export.usdc` (not
+      committed — it's a build input, `export-cat.py`'s job is to consume it,
+      not to carry it). Verified with `pxr` (had to `pip install usd-core`
+      locally first, per `ASSETS.md`'s note — not yet installed on this
+      machine): joint paths are full real names
+      (`Hips/Bip01_Pelvis/BN_Tail_01/...`), 55 joints, 1518 points,
+      `skel:jointIndices`/`skel:jointWeights` primvars present (element size
+      12), and a `st` UV primvar already exists (the source `uvset1`
+      survived — a bonus, though `export-cat.py` still generates its own via
+      `unwrap.py` for the per-bone cylindrical convention).
+- [ ] Update `Tools/usd/unwrap.py`'s `build()` to also return the joint
+      **names** (currently it only keeps the USD paths locally, inside
+      `build()`, to derive `parent` indices — the path list itself is
+      discarded). Then update `Tools/usd/export-cat.py` to map role names
+      directly from those joint names instead of `infer_roles`'s geometric
+      guessing, falling back to `infer_roles` only when names are absent
+      (keeps the tool working for other users' unnamed exports). Name ->
+      role mapping is now known exactly from the bone dump above (e.g.
+      `Hips` -> `hips`, `Bip01_R_Thigh` -> `foreHipR`/`hindHipR` depending on
+      which pair, `BN_Ear_L` -> `earL`, etc.) — write it as an explicit table,
+      not another inference pass.
+- [ ] Add roles for tongue, toes, clavicles, and the third spine joint (`BN_
+      Thouge_01/02`, `*_Finger0Nub`/toe nubs, `Bip01_*_Clavicle`, `Bip01_
+      Neck`) to `CatMeshAsset.Role` (Swift) and wire them into `CatShape`/
+      `CatRig`/`CatSkin` — needs the Swift toolchain (or WSL, see
+      Environment) to verify. Not done yet: this step only mapped the roles
+      the Role enum *already has* (29/29 resolved by name); the format and
+      enum are otherwise untouched, so no Swift changes were needed for it.
+- [x] Re-ran `export-cat.py` and `unwrap.py` against the new Blender export
+      (`cat-blender-export.usdc` in the session scratchpad — not committed,
+      see above), diffed against the current `cat.catmesh`, sanity-checked
+      with `Tools/usd/preview.py`, and **replaced the shipped
+      `MeowRoom/Resources/cat.catmesh`** with the result. Header comparison
+      (`MEOWCAT2`, same 29-entry role table, same struct layout — a
+      data-only change, no format change):
+      | | old (FBX path) | new (named Blender export) |
+      |---|---|---|
+      | vertices (pre/post seam-split) | ? / 1976 | 1518 / 1694 |
+      | triangles | 2804 | 2798 |
+      | joints | 36 | 55 |
+      | influences/vertex | 4 | 12 |
+
+      Notes on the diffs, so a future session doesn't mistake either for a
+      regression:
+      - **Triangle count (2804 -> 2798):** the new count exactly matches the
+        source `.blend` mesh's own polygon count (checked directly in
+        Blender: 2798 triangles, no ngons/quads). The old FBX-path number was
+        the one that didn't match the source — likely a triangulation
+        artifact of that conversion, not a Blender-export bug.
+      - **Influences per vertex (4 -> 12):** also matches the source directly
+        — Blender's vertex groups genuinely go up to 12 per vertex (checked:
+        343 verts have 1, tapering up to 4 verts with 12), and the old
+        4-influence cap was the FBX path silently discarding real weight
+        data, not a size optimisation worth keeping. `CatMeshAsset.swift`
+        reads `influencesPerVertex` from the file header rather than
+        assuming 4, so nothing downstream needed to change. File size grew
+        (~296 KB vs the doc comment's stale "141 KB" figure) accordingly;
+        worth revisiting only if load time or memory actually becomes a
+        problem, not preemptively.
+      - Texel density (p10/median/p90 0.02/0.04/0.06) and the `uv-tabby.png`
+        / `uv-checker.png` previews both look right: stripes ring the body
+        cleanly, checker squares stay roughly square, no seam collapse.
 
 ## Tier 0 fixes from ASSETS.md (small, independent, no modelling)
 

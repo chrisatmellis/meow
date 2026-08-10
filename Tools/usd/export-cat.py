@@ -4,22 +4,28 @@
 Runs `unwrap.py`'s logic for texture coordinates, then adds the two things the
 game needs to animate the result: the skeleton, and which bone is which.
 
-## The joints have no names
+## Roles: by name if we have them, by rest-pose shape if we don't
 
-The FBX to USD conversion stripped them — all thirty-six are called `n8` through
-`n49`. So the roles are worked out from the rest pose, which is unambiguous once
-you look at it: the cat faces +X, up is +Y, and the skeleton is a textbook
-quadruped. The root is the pelvis; the chain running backwards and down is the
-tail; the two chains that descend to y ~= 0.013 behind the root are the hind legs,
-the two in front of it the forelegs, split left and right by the sign of z; the
-chain running forward along y ~= 0.2 is the spine, ending at the neck and skull;
-above the skull sit two symmetric leaves, which are ears; below and forward of it
-a short chain, which is the jaw.
+Exported straight from the source `.blend` via Blender's own USD exporter, the
+skeleton carries its real bone names (`Hips`, `Bip01_R_Thigh`, `BN_Tail_01`, ...),
+and `NAME_TO_ROLE` maps those directly.
 
-Inferred rather than hard-coded so that swapping the model for another one does
-not silently produce a cat whose head is its left hind foot — and then checked
-against what the shape of the skeleton says it must be, so a bad inference fails
-here rather than on device.
+The older path — a USDZ that went through FBX first — strips them: all thirty-six
+joints come out called `n8` through `n49`. For that case (or any other unnamed
+export) `infer_roles` works the roles out from the rest pose instead, which is
+unambiguous once you look at it: the cat faces +X, up is +Y, and the skeleton is a
+textbook quadruped. The root is the pelvis; the chain running backwards and down is
+the tail; the two chains that descend to y ~= 0.013 behind the root are the hind
+legs, the two in front of it the forelegs, split left and right by the sign of z;
+the chain running forward along y ~= 0.2 is the spine, ending at the neck and
+skull; above the skull sit two symmetric leaves, which are ears; below and forward
+of it a short chain, which is the jaw.
+
+`infer_roles` earns its keep rather than being deleted now that names exist: it's
+the fallback for anyone else's unnamed export. `roles_from_names` only trusts the
+name table when most of `ROLES` actually resolves (see `NAME_MATCH_THRESHOLD`), so
+an unrelated rig with coincidentally similar bone names doesn't silently produce a
+mostly-empty role table instead of falling back.
 
     Tools/usd/export-cat.py <in.usdz> <out.catmesh>
 """
@@ -41,6 +47,48 @@ for side in ('L', 'R'):
     for limb in ('fore', 'hind'):
         for seg in ('Hip', 'Knee', 'Ankle', 'Paw'):
             ROLES.append(f'{limb}{seg}{side}')
+
+# The real bone names in the source `.blend`'s armature, for the export path that
+# carries them (Blender's own USD exporter, not the FBX round-trip that stripped
+# them). Segment names within a limb chain (Hip/Knee/Ankle/Paw) follow the same
+# convention `infer_roles` derives geometrically: the first four joints of the
+# chain starting at the leg root, in order — which is why a forePaw* lands on a
+# `Finger0` bone and a hindPaw* lands on a `Foot` bone, not a mismatch.
+NAME_TO_ROLE = {
+    'Hips': 'hips',
+    'Bip01_Spine': 'spineBase',
+    'Bip01_Spine1': 'spineMid',
+    'Bip01_Spine2': 'chest',
+    'Bip01_Neck1': 'neck',
+    'Bip01_Head': 'head',
+    'BN_Mouth': 'jaw',
+    'BN_Ear_L': 'earL',
+    'BN_Ear_R': 'earR',
+    'BN_Tail_01': 'tail0',
+    'BN_Tail_02': 'tail1',
+    'BN_Tail_03': 'tail2',
+    'BN_Tail_04': 'tail3',
+}
+for side in ('L', 'R'):
+    for limb, bones in (('fore', ('UpperArm', 'Forearm', 'Hand', 'Finger0')),
+                         ('hind', ('Thigh', 'Calf', 'HorseLink', 'Foot'))):
+        for seg, bone in zip(('Hip', 'Knee', 'Ankle', 'Paw'), bones):
+            NAME_TO_ROLE[f'Bip01_{side}_{bone}'] = f'{limb}{seg}{side}'
+
+# Below this fraction of ROLES actually found among the joint names, the names are
+# probably not this skeleton's real ones (or are FBX-stripped placeholders like
+# `n8`) — trust the geometric inference instead rather than emitting a mesh with
+# most roles unresolved.
+NAME_MATCH_THRESHOLD = 0.8
+
+
+def roles_from_names(names):
+    """Maps joint index -> role name, from real bone names. None if too few match
+    to be trustworthy (see NAME_MATCH_THRESHOLD)."""
+    roles = {i: NAME_TO_ROLE[n] for i, n in enumerate(names) if n in NAME_TO_ROLE}
+    if len(roles) < len(ROLES) * NAME_MATCH_THRESHOLD:
+        return None
+    return roles
 
 
 def infer_roles(pos, parent, children):
@@ -179,7 +227,9 @@ def main():
     for i, p in enumerate(par):
         if p >= 0:
             children[p].append(i)
-    roles = infer_roles(jp, par, children)
+    roles = roles_from_names(model['joint_names'])
+    if roles is None:
+        roles = infer_roles(jp, par, children)
 
     # The seam duplicates inherit their original's skin weights, or half the cat
     # would come unstuck from the skeleton down one line.
