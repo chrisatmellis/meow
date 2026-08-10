@@ -8,6 +8,44 @@ and see what changed.
 
 Status as of 2026-08-10.
 
+## BLOCKER: the re-exported mesh's skin weights point at the wrong joints
+
+`MeowRoom/Resources/cat.catmesh` as re-exported in 33cfcdd does not render. The
+cat draws as a fan of flat shards with the head roughly intact — the signature
+of vertices being dragged toward bones they do not belong to. It is not a scale
+problem (fixed separately, see below) and not the influence count.
+
+Measured, per joint, as the distance from a joint to the weighted centroid of
+the vertices bound to it:
+
+| mesh | median | max | joints >0.10 m off |
+| --- | --- | --- | --- |
+| pre-re-export (36 joints, renders correctly) | 0.031 m | 0.085 m | 0 of 36 |
+| re-export (55 joints) | 0.142 m | 0.409 m | 26 of 36 |
+
+A cluster 0.41 m from its own joint on a cat 0.6 m long is not a near miss. The
+skeleton itself is fine — one root, no bad parents, all 38 roles resolved, no
+role claimed twice, L/R positions symmetric — so what is wrong is the mapping
+from per-vertex joint indices into the new 55-joint ordering, not the ordering
+itself.
+
+Confirmed against the offline rasteriser (`verify.sh --render`, which draws the
+same buffers the phone does):
+
+- old mesh + current code -> a correct cat. So the loader, `CatShape` and
+  `CatSkin` are not implicated; the asset is.
+- new mesh + 12 influences, scale fixed, no pruning -> still shredded. So the
+  influence cap is not implicated either.
+
+Reverting the mesh is a real fallback but not a free one: the old skeleton fails
+exactly nine assertions, all of them `the skeleton has a <role>` for the roles
+e30a43e added (`foreToeL/R`, `hindToeL/R`, `tongueBase/Tip`, `clavicleL/R`,
+`shoulder`), and `cat-walk.catanim` is baked against the 55-joint skeleton.
+
+Fixing it properly needs the source `.blend`, which is not in the repository —
+re-export with the joint indices remapped into the same ordering the bind
+matrices are written in, and check this table before committing the result.
+
 ## Environment
 
 - [x] Local session running on the user's own Windows machine (not the cloud
