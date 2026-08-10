@@ -25,8 +25,16 @@ import UIKit
 final class LightingRig {
     let root = Entity()
 
-    private let sunEntity = Entity()
-    private let moonEntity = Entity()
+    /// The one directional light: the sun by day, the moon by night, and a
+    /// crossfade of the two through dusk and dawn.
+    ///
+    /// One rather than two because only one of them is ever the key — they are
+    /// twelve hours apart on the same arc — and because two never worked. The moon
+    /// had an entity and a light component of its own, correctly aimed and with an
+    /// intensity in it, and contributed nothing to any frame the renderer ever
+    /// produced: the sun's light, sitting at intensity zero all night, was the one
+    /// being honoured. One light cannot be shadowed by another one.
+    private let keyEntity = Entity()
     /// The entity carrying the environment. Everything that receives image-based
     /// light has to point at it, which is easy to miss because the scene still
     /// renders without it — just flat.
@@ -60,34 +68,16 @@ final class LightingRig {
     }
 
     init() {
-        root.addChild(sunEntity)
-        root.addChild(moonEntity)
+        root.addChild(keyEntity)
         root.addChild(environment)
 
-        // The sun is the only shadow caster that matters. With no interior fills,
-        // its shadow is what makes the window an aperture: the walls block it, and
-        // the light reaching the floor is the light that came through the opening.
-        // That only works if the whole room is inside the shadow's range.
-        sunEntity.components.set(DirectionalLightComponent(color: .white, intensity: 0))
-        sunEntity.components.set(DirectionalLightComponent.Shadow(maximumDistance: 22,
+        // The key light is the only shadow caster there is. With no interior
+        // fills, its shadow is what makes the window an aperture: the walls block
+        // it, and the light reaching the floor is the light that came through the
+        // opening. That only works if the whole room is inside the shadow's range.
+        keyEntity.components.set(DirectionalLightComponent(color: .white, intensity: 0))
+        keyEntity.components.set(DirectionalLightComponent.Shadow(maximumDistance: 22,
                                                                   depthBias: 1.2))
-
-        // The moon is cool and casts a shadow of its own.
-        //
-        // Cool because moonlight is not actually blue — it is sunlight, and a
-        // shade *warmer* than daylight — but a dark-adapted eye loses colour from
-        // the red end first and reports it blue, which is why every night scene
-        // ever filmed is graded that way and why a neutral moon reads as an
-        // overcast afternoon.
-        //
-        // It shadows because it is now the only thing lighting the room at night,
-        // and a directional light with no shadow does not make a window an
-        // aperture: it pours through the walls and lights the far side of every
-        // object in the room. The range is the sun's, which covers the room.
-        moonEntity.components.set(DirectionalLightComponent(
-            color: UIColor(red: 0.60, green: 0.71, blue: 0.97, alpha: 1), intensity: 0))
-        moonEntity.components.set(DirectionalLightComponent.Shadow(maximumDistance: 22,
-                                                                   depthBias: 1.2))
     }
 
     /// The baked sky, for anyone who wants it as a background as well as a light.
@@ -334,31 +324,77 @@ final class LightingRig {
     /// the floor, which is worth more here than the seasonal accuracy of an object
     /// the player can never actually see.
     static func arcDirection(azimuth: Float) -> SIMD3<Float> {
-        // Real azimuth is 0 at north and increases eastward, so a southern sun runs
-        // from roughly 90 degrees at sunrise to 270 at sunset. Clamped, because in
-        // midsummer at this latitude it begins and ends outside that.
-        let p = clamp(remap(azimuth, deg(90), deg(270), 0, 1))
-        let theta = p * .pi
+        direction(alongArc: arcParameter(azimuth: azimuth))
+    }
+
+    /// Where along the arc an azimuth falls: 1 at the eastern end, 0 at the western.
+    ///
+    /// Real azimuth is 0 at north and increases eastward, so a southern sun runs
+    /// from roughly 90 degrees at sunrise to 270 at sunset. Clamped, because in
+    /// midsummer at this latitude it begins and ends outside that.
+    static func arcParameter(azimuth: Float) -> Float {
+        clamp(remap(azimuth, deg(90), deg(270), 0, 1))
+    }
+
+    /// A point on the arc. Z is the same at every point on it by construction,
+    /// which is the whole guarantee: there is no position from which the key can
+    /// shine down the length of the room.
+    static func direction(alongArc p: Float) -> SIMD3<Float> {
+        let theta = clamp(p) * .pi
         return SIMD3<Float>(x: cosf(theta), y: sinf(theta), z: -windowOffset).normalized
+    }
+
+    /// Moonlight, cool rather than warm.
+    ///
+    /// Moonlight is really sunlight, and a shade *warmer* than daylight. It is the
+    /// dark-adapted eye that loses the red end first and reports it blue, which is
+    /// why every night scene ever filmed is graded this way and why a physically
+    /// neutral moon reads as an overcast afternoon.
+    static let moonColor = RGBColor(0.60, 0.71, 0.97)
+
+    /// How much of the key is the moon, 0 by day and 1 by night.
+    ///
+    /// Taken from the sun's elevation rather than from the ratio of the two
+    /// budgets. The budgets cross very fast — the sun's carries a `smoothstep` and
+    /// a power of one and a half, so it collapses over about twenty minutes — and
+    /// the key has the whole width of the window to travel during the handover.
+    /// Elevation moves at fifteen degrees an hour whatever the budget does, so
+    /// this hands over across roughly fifty minutes, every time, in every season.
+    static func moonShare(_ sky: SkyState) -> Float {
+        1 - smoothstep(-0.16, 0.06, sky.sunElevation)
+    }
+
+    /// Where the key light is: the sun's place, the moon's, or a point between.
+    ///
+    /// Blended *along the arc* rather than between the two directions. The sun and
+    /// the moon sit at opposite ends of it, so averaging their vectors cancels the
+    /// across-the-window component and leaves one pointing straight down the room —
+    /// the one thing the arc exists to prevent, and it happened exactly at dusk,
+    /// in view. Interpolating the position along the arc instead keeps Z fixed by
+    /// construction, so every intermediate is a legal place for the key to be.
+    ///
+    /// The handover takes about an hour either side of dusk and dawn, which is
+    /// when the sun and moon budgets cross. The key sweeps back across the window
+    /// over that hour while the room is at its dimmest, so the shadows it drags
+    /// with it are the faintest of the day.
+    static func keyDirection(sky: SkyState) -> SIMD3<Float> {
+        let share = moonShare(sky)
+        return direction(alongArc: arcParameter(azimuth: sky.sunAzimuth) * (1 - share)
+                                 + arcParameter(azimuth: sky.moonAzimuth) * share)
     }
 
     func apply(sky: SkyState, room: RoomNode, lanternOn: Bool) {
         lastRoom = room
         lastSky = sky
 
-        // --- Sun placement. A directional light shines along its own -Z, so
+        // --- Key placement. A directional light shines along its own -Z, so
         // aiming it is the whole of placing it; its position is decorative.
-        let d = LightingRig.arcDirection(azimuth: sky.sunAzimuth)
-        let sunPos = SIMD3<Float>(x: d.x * 9, y: max(0.2, d.y * 9), z: d.z * 9)
-        sunEntity.look(at: SIMD3<Float>(0, 0.6, -0.2), from: sunPos,
+        lastBudget = LightingRig.budget(sky: sky, lanternOn: lanternOn)
+        let d = LightingRig.keyDirection(sky: sky)
+        keyEntity.look(at: SIMD3<Float>(0, 0.6, -0.2),
+                       from: SIMD3<Float>(x: d.x * 9, y: max(0.2, d.y * 9), z: d.z * 9),
                        upVector: SIMD3<Float>(0, 1, 0), relativeTo: nil)
 
-        let m = LightingRig.arcDirection(azimuth: sky.moonAzimuth)
-        moonEntity.look(at: SIMD3<Float>(0, 0.6, -0.2),
-                        from: SIMD3<Float>(x: m.x * 9, y: max(0.2, m.y * 9), z: m.z * 9),
-                        upVector: SIMD3<Float>(0, 1, 0), relativeTo: nil)
-
-        lastBudget = LightingRig.budget(sky: sky, lanternOn: lanternOn)
         applyIntensities(budget: lastBudget, sky: sky, room: room)
 
         // --- Image-based lighting, which is now the only fill there is.
@@ -427,29 +463,20 @@ final class LightingRig {
         let lit = LightingRig.intensities(for: budget)
         let e = exposure
 
-        sunEntity.components.set(DirectionalLightComponent(color: UIColor(sky.sunColor),
-                                                          intensity: lit.sun * e))
-        // Shadows are worth their cost only when there is a sun to cast them.
-        if budget.sun > 30 {
-            sunEntity.components.set(DirectionalLightComponent.Shadow(maximumDistance: 22,
+        // One light, carrying whichever of the two is up. Their intensities add
+        // because at dusk both genuinely are, and their colours cross over on the
+        // same fraction that aims it, so the room warms into evening and cools
+        // into night rather than switching.
+        let share = LightingRig.moonShare(sky)
+        keyEntity.components.set(DirectionalLightComponent(
+            color: UIColor(sky.sunColor.mixed(with: LightingRig.moonColor, share)),
+            intensity: (lit.sun + lit.moon) * e))
+        // Shadows are worth their cost only when there is something to cast them.
+        if budget.sun + budget.moon > 30 {
+            keyEntity.components.set(DirectionalLightComponent.Shadow(maximumDistance: 22,
                                                                       depthBias: 1.2))
         } else {
-            sunEntity.components.remove(DirectionalLightComponent.Shadow.self)
-        }
-
-        moonEntity.components.set(DirectionalLightComponent(
-            color: UIColor(red: 0.60, green: 0.71, blue: 0.97, alpha: 1),
-            intensity: lit.moon * e))
-        // The same bargain as the sun's, with one extra condition: the moon casts
-        // only while it is the brighter of the two. It is genuinely up for an hour
-        // either side of dawn and dusk, and a shadow it throws then is worth
-        // nothing against a sun eight times its strength — and would be a second
-        // shadow map rendered to draw it.
-        if budget.moon > 8, budget.moon > budget.sun {
-            moonEntity.components.set(DirectionalLightComponent.Shadow(maximumDistance: 22,
-                                                                       depthBias: 1.2))
-        } else {
-            moonEntity.components.remove(DirectionalLightComponent.Shadow.self)
+            keyEntity.components.remove(DirectionalLightComponent.Shadow.self)
         }
 
         // --- Backlit shoji paper. Its brightness is the sky outside and nothing

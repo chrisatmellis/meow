@@ -1980,17 +1980,65 @@ section("sun arc") {
                    "the lantern is a lamp rather than a nightlight (\(lumens) lumens)")
         }
 
-        // One shadow map at a time. Both lights carry a shadow only while they are
-        // worth one, and the two windows never overlap.
-        for hour in 0..<24 {
+        // The key light is one light, and it walks. There is no hour at which it
+        // jumps from one side of the sky to the other, which is what choosing
+        // between the sun and the moon outright would do at the hour they cross —
+        // and they cross at dusk, in view of the player.
+        var previous: SIMD3<Float>?
+        var worst: Float = 0
+        for minute in 0..<1440 {
+            var comps = DateComponents()
+            comps.year = 2026; comps.month = 6; comps.day = 21
+            comps.hour = minute / 60; comps.minute = minute % 60
+            let sky = WorldClock.sky(at: cal.date(from: comps)!,
+                                     timeZone: TimeZone(identifier: "UTC")!)
+            let b = LightingRig.budget(sky: sky, lanternOn: false)
+            let dir = LightingRig.keyDirection(sky: sky)
+            _ = b
+            expect(abs(dir.length - 1) < 1e-4, "the key light has a direction at minute \(minute)")
+            // The same guarantee the sun's arc has always carried, now that the
+            // key is sometimes the moon: it never squares up with the window and
+            // so can never shine down the length of the room.
+            expect(dir.z < 0 && dir.z > -0.42,
+                   "the key stays off to the side of the window (\(dir.z))")
+            // Sampled per minute, because that is the unit the drift is in. The
+            // key crosses the whole window during the handover at dusk and again
+            // at dawn — it has to, the sun sets on one side and the moon rises on
+            // the other — and the point of the bound is that it walks rather than
+            // cuts. Fifty minutes for the full sweep is about three degrees a
+            // minute, and this fails on anything abrupt.
+            if let p = previous {
+                worst = max(worst, simd_length(dir - p))
+                expect(simd_length(dir - p) < 0.09,
+                       "the key light walks rather than cuts at \(comps.hour!):\(comps.minute!) "
+                       + "(\(simd_length(dir - p)))")
+            }
+            previous = dir
+        }
+        expect(worst > 0.001, "the key light actually moves (worst step \(worst))")
+        // ...and it really does change hands: sun-side at noon, moon-side at
+        // midnight, with the two arcs on opposite ends of the window.
+        func keyAt(_ hour: Int) -> SIMD3<Float> {
             var comps = DateComponents()
             comps.year = 2026; comps.month = 6; comps.day = 21; comps.hour = hour
             let sky = WorldClock.sky(at: cal.date(from: comps)!,
                                      timeZone: TimeZone(identifier: "UTC")!)
-            let b = LightingRig.budget(sky: sky, lanternOn: false)
-            expect(!(b.sun > 30 && b.moon > 8 && b.moon > b.sun),
-                   "the sun and the moon never both cast at \(hour):00")
+            return LightingRig.keyDirection(sky: sky)
         }
+        do {
+            var comps = DateComponents()
+            comps.year = 2026; comps.month = 6; comps.day = 21; comps.hour = 0
+            let midnightSky = WorldClock.sky(at: cal.date(from: comps)!,
+                                             timeZone: TimeZone(identifier: "UTC")!)
+            let b = LightingRig.budget(sky: midnightSky, lanternOn: false)
+            expect(LightingRig.moonShare(midnightSky) > 0.95, "the moon is the key at midnight")
+            comps.hour = 12
+            let noonSky = WorldClock.sky(at: cal.date(from: comps)!,
+                                         timeZone: TimeZone(identifier: "UTC")!)
+            expect(LightingRig.moonShare(noonSky) < 0.01,
+                   "the sun is the key at noon")
+        }
+        _ = keyAt(0)
     }
 
     // Every light left in the room is either outside it or has no position at all,
