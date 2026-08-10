@@ -171,7 +171,7 @@ enum CatShape {
     static func region(of joint: Int, in asset: CatMeshAsset) -> Region {
         func isRole(_ r: CatMeshAsset.Role) -> Bool { asset.joint(r) == joint }
         if isRole(.head) { return .head }
-        if isRole(.jaw) { return .jaw }
+        if isRole(.jaw) || isRole(.tongueBase) || isRole(.tongueTip) { return .jaw }
         if isRole(.earL) || isRole(.earR) { return .ear }
         if isRole(.neck) { return .neck }
         for r in [CatMeshAsset.Role.tail0, .tail1, .tail2, .tail3] where isRole(r) { return .tail }
@@ -181,8 +181,11 @@ enum CatShape {
         }
         for r in [CatMeshAsset.Role.foreAnkleL, .foreAnkleR,
                   .hindAnkleL, .hindAnkleR] where isRole(r) { return .legLower }
-        for r in [CatMeshAsset.Role.forePawL, .forePawR,
-                  .hindPawL, .hindPawR] where isRole(r) { return .paw }
+        for r in [CatMeshAsset.Role.forePawL, .forePawR, .hindPawL, .hindPawR,
+                  .foreToeL, .foreToeR, .hindToeL, .hindToeR] where isRole(r) { return .paw }
+        // Clavicles and the shoulder joint fall through to .torso, same as every
+        // other named-but-unparameterised joint (see CatMeshAsset.Role) — nothing
+        // currently sculpts them differently from the chest they sit on.
         return .torso
     }
 

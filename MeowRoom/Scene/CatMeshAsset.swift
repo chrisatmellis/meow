@@ -16,12 +16,11 @@ import RealityKit
 /// without them and give back one grey cat.
 ///
 /// The format is deliberately dull: counts, then plain arrays, little-endian, no
-/// compression. It is 141 KB and parses in a couple of milliseconds, which is
-/// less than the room's textures take to draw.
+/// compression. It parses in a couple of milliseconds, which is less than the
+/// room's textures take to draw.
 struct CatMeshAsset {
 
-    /// The joints the animator knows how to drive. The exported skeleton has
-    /// thirty-six; these are the twenty-nine that mean something to a cat.
+    /// The joints the animator knows how to drive.
     ///
     /// Order is the file format. Appending is safe, reordering is not.
     enum Role: Int, CaseIterable {
@@ -31,6 +30,14 @@ struct CatMeshAsset {
         case hindHipL, hindKneeL, hindAnkleL, hindPawL
         case foreHipR, foreKneeR, foreAnkleR, forePawR
         case hindHipR, hindKneeR, hindAnkleR, hindPawR
+        // Added once the export carried real bone names instead of guessing roles
+        // from rest-pose geometry (see `Tools/usd/export-cat.py`). One joint
+        // further out than the paw on each leg, the tongue, the clavicles, and
+        // the shoulder-girdle spine joint the clavicles attach to.
+        case foreToeL, foreToeR, hindToeL, hindToeR
+        case tongueBase, tongueTip
+        case clavicleL, clavicleR
+        case shoulder
     }
 
     /// Geometry, in the game's renderer-free form, so everything downstream — the

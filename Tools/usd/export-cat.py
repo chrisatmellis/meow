@@ -47,6 +47,15 @@ for side in ('L', 'R'):
     for limb in ('fore', 'hind'):
         for seg in ('Hip', 'Knee', 'Ankle', 'Paw'):
             ROLES.append(f'{limb}{seg}{side}')
+# Only resolvable from real bone names (see NAME_TO_ROLE below) — infer_roles has
+# no geometric test for "one joint past the paw" or "the tongue", so these come out
+# -1 on the FBX-stripped-name fallback path. That is fine: the format already
+# allows any role to be absent, and appending new roles at the end is the one
+# change to this list that never breaks an older `cat.catmesh`.
+for limb in ('fore', 'hind'):
+    for side in ('L', 'R'):
+        ROLES.append(f'{limb}Toe{side}')
+ROLES += ['tongueBase', 'tongueTip', 'clavicleL', 'clavicleR', 'shoulder']
 
 # The real bone names in the source `.blend`'s armature, for the export path that
 # carries them (Blender's own USD exporter, not the FBX round-trip that stripped
@@ -74,6 +83,19 @@ for side in ('L', 'R'):
                          ('hind', ('Thigh', 'Calf', 'HorseLink', 'Foot'))):
         for seg, bone in zip(('Hip', 'Knee', 'Ankle', 'Paw'), bones):
             NAME_TO_ROLE[f'Bip01_{side}_{bone}'] = f'{limb}{seg}{side}'
+    # One joint past the paw. `Finger0Nub` is the fore paw's own toe/nail bone;
+    # the hind leg's equivalent is `Toe0` itself, one segment earlier, because
+    # `Foot` (hindPaw) already precedes it — the hind chain has one more named
+    # segment between ankle and toe-tip than the fore chain does.
+    NAME_TO_ROLE[f'Bip01_{side}_Finger0Nub'] = f'foreToe{side}'
+    NAME_TO_ROLE[f'Bip01_{side}_Toe0'] = f'hindToe{side}'
+    NAME_TO_ROLE[f'Bip01_{side}_Clavicle'] = f'clavicle{side}'
+NAME_TO_ROLE['BN_Thouge_01'] = 'tongueBase'
+NAME_TO_ROLE['BN_Thouge_02'] = 'tongueTip'
+# Where the clavicles attach — anatomically the shoulder girdle, and the fourth
+# spine-chain joint the old geometric inference never separated out (it only
+# ever produced spineBase/spineMid/chest before names existed).
+NAME_TO_ROLE['Bip01_Neck'] = 'shoulder'
 
 # Below this fraction of ROLES actually found among the joint names, the names are
 # probably not this skeleton's real ones (or are FBX-stripped placeholders like

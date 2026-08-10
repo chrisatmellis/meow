@@ -104,8 +104,9 @@ wrong on two of the eight leg chains.
 Goal: stop `export-cat.py` guessing roles from rest-pose geometry
 (`infer_roles`, ~109 lines) and read the 55 real bone names from the source
 `.blend` instead. This also recovers geometry that already exists in the
-mesh but currently has no role: the tongue (`BN_Thouge_01/02`), the toe
-joints (`Finger0` ×2), the clavicles, and `Bip01_Spine1`.
+mesh but previously had no role: the tongue, the toe joints, the clavicles,
+and the shoulder-girdle spine joint. **Done** — see the checked-off items
+below.
 
 - [x] Use Blender MCP to open/inspect the source `.blend` (path on this
       machine: `C:\Users\oru20\Downloads\cat.blend`, already open in the
@@ -129,24 +130,57 @@ joints (`Finger0` ×2), the clavicles, and `Bip01_Spine1`.
       12), and a `st` UV primvar already exists (the source `uvset1`
       survived — a bonus, though `export-cat.py` still generates its own via
       `unwrap.py` for the per-bone cylindrical convention).
-- [ ] Update `Tools/usd/unwrap.py`'s `build()` to also return the joint
-      **names** (currently it only keeps the USD paths locally, inside
-      `build()`, to derive `parent` indices — the path list itself is
-      discarded). Then update `Tools/usd/export-cat.py` to map role names
-      directly from those joint names instead of `infer_roles`'s geometric
-      guessing, falling back to `infer_roles` only when names are absent
-      (keeps the tool working for other users' unnamed exports). Name ->
-      role mapping is now known exactly from the bone dump above (e.g.
-      `Hips` -> `hips`, `Bip01_R_Thigh` -> `foreHipR`/`hindHipR` depending on
-      which pair, `BN_Ear_L` -> `earL`, etc.) — write it as an explicit table,
-      not another inference pass.
-- [ ] Add roles for tongue, toes, clavicles, and the third spine joint (`BN_
-      Thouge_01/02`, `*_Finger0Nub`/toe nubs, `Bip01_*_Clavicle`, `Bip01_
-      Neck`) to `CatMeshAsset.Role` (Swift) and wire them into `CatShape`/
-      `CatRig`/`CatSkin` — needs the Swift toolchain (or WSL, see
-      Environment) to verify. Not done yet: this step only mapped the roles
-      the Role enum *already has* (29/29 resolved by name); the format and
-      enum are otherwise untouched, so no Swift changes were needed for it.
+- [x] Update `Tools/usd/unwrap.py`'s `build()` to also return the joint
+      **names** (it now returns `joint_names`, the last path segment of each
+      USD skeleton joint). `Tools/usd/export-cat.py` maps role names directly
+      from those via a new `NAME_TO_ROLE` table + `roles_from_names()`,
+      falling back to `infer_roles` when fewer than `NAME_MATCH_THRESHOLD`
+      (80%) of `ROLES` resolve by name — keeps the tool working for other
+      users' unnamed exports.
+- [x] Added roles for the tongue, toes, clavicles, and the shoulder-girdle
+      spine joint (`BN_Thouge_01/02` -> `tongueBase/tongueTip`,
+      `*_Finger0Nub`/`*_Toe0` -> `foreToe*`/`hindToe*`, `Bip01_*_Clavicle` ->
+      `clavicle*`, `Bip01_Neck` -> `shoulder`) to `CatMeshAsset.Role` (Swift,
+      appended after the existing 29 cases — append-only, per the enum's own
+      doc comment) and the matching `ROLES`/`NAME_TO_ROLE` entries in
+      `export-cat.py`, **in the same order** (the file format is positional:
+      role index *i* in the binary is `Role(rawValue: i)`, so the Python list
+      and the Swift enum must list new cases in lockstep). Re-ran the export;
+      all 38/38 roles now resolve by name, all at plausible, left/right- and
+      fore/hind-symmetric positions.
+
+      Wired into `CatShape.region(of:)`: toes join `.paw` (same swelling/IK
+      treatment as the paw they extend), tongue joins `.jaw`. Clavicles and
+      `shoulder` fall through to the `.torso` default deliberately — nothing
+      in `CatShape`/`CatAnimator` currently treats the shoulder girdle
+      differently from the chest it sits on, and grepping confirmed neither
+      `CatRig.swift` nor `CatSkin.swift` reference `CatMeshAsset.Role` at
+      all (both are already joint-index-generic), so there was nothing
+      further to "wire in" there for this step — extending `region()` was
+      the only per-role logic that existed to extend. No exhaustive `switch`
+      over `Role` exists anywhere, so appending cases can't break a build by
+      making a switch non-exhaustive.
+
+      **Not verified by compiling** — see the WSL2/native-Windows entries
+      under Environment. This is a data-only, append-only, well-precedented
+      change (same shape as the roles added in the previous step, which
+      *did* get end-to-end tested through the Python pipeline), and
+      `roles[i] = -1` for any role a skeleton lacks was already exercised
+      by the pre-existing 29-role table, but flag it for extra scrutiny the
+      first time a Swift toolchain is available here.
+      **New environment finding (2026-08-10):** tried to unblock verification
+      by pointing native Windows `swiftc` at the installed VS 2019
+      BuildTools (`vswhere.exe` -> `VsDevCmd.bat` -> `INCLUDE`/`LIB`) instead
+      of waiting on WSL2. Got past the earlier "unable to load standard
+      library for target x86_64-unknown-windows-msvc" error, but hit a
+      different, more fundamental one: `stdnoreturn.h` (a C11 header
+      `ucrt.modulemap` needs to build `SwiftOverlayShims`) does not exist
+      anywhere under either the MSVC toolset's `include` dir or the Windows
+      10 SDK's — confirmed by `find`, not just a bad `INCLUDE` path. This
+      looks like a genuinely incomplete/minimal BuildTools install, not
+      something fixable by env vars alone. Doesn't change the WSL2 decision;
+      recorded so a future session doesn't re-spend the time reaching the
+      same dead end.
 - [x] Re-ran `export-cat.py` and `unwrap.py` against the new Blender export
       (`cat-blender-export.usdc` in the session scratchpad — not committed,
       see above), diffed against the current `cat.catmesh`, sanity-checked
