@@ -146,7 +146,7 @@ zero all night, was the one being honoured.
 
 Measured on the simulator screenshots the `verify` workflow takes, as a mean
 pixel value over the 3D part of the frame: **midday 94, golden hour 54, dawn
-47, night 24**. Those are the numbers to check against after touching anything
+47, night 19.5**. Those are the numbers to check against after touching anything
 here, and the reason the file carries a light budget in lux at all — the two
 times this has gone wrong, night came out brighter than noon, and neither a
 screenshot of one hour nor an assertion about any single light could have said

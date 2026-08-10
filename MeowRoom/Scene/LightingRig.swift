@@ -231,9 +231,9 @@ final class LightingRig {
     /// wins outright, so noon and dawn are untouched by it.
     /// Measured rather than guessed, on the simulator screenshots the `verify`
     /// workflow takes: at 16 the room came out a mean pixel value of 37 against
-    /// dawn's 47, which reads as evening rather than night. At this it sits around
-    /// 24 — a stop under dawn, two under noon — which is dark enough to be night
-    /// and light enough that the cat can be found in it.
+    /// dawn's 47, which reads as evening rather than night. At this it measures
+    /// 19.5 — a stop and a third under dawn, two and a third under noon — which is
+    /// dark enough to be night and light enough to find the cat in.
     private static let moonlitEnvironmentLift: Float = 6.5
 
     /// What `budget.sky` reaches at full daylight, which is the anchor the
