@@ -254,12 +254,10 @@ Decision (2026-08-10): rather than wait for retopology, use the source
 real painted fur instead of `TextureFactory`'s procedural approximation.
 Traded away deliberately: per-cat recoloring/breed patterns (every cat looks
 like this one cat) until the mesh work catches up and a second UV set can
-carry both. Baked animation clips were considered too and **rejected** — the
-`.blend`'s two walk cycles (see below) are locomotion-only, and the app has
-no clip-playback code at all today, so wiring them in is new infrastructure,
-not a shortcut, for a system (`CatAnimator`'s two-bone IK) that already
-works and already adapts to any breed's leg proportions. Not revisited unless
-the procedural walk specifically looks bad after the texture change lands.
+carry both. Baked animation clips were considered too and initially set aside
+as new infrastructure rather than a shortcut — **revisited below** once the
+user confirmed the procedural walk specifically was the thing that looked
+rushed, which is exactly the condition under which this was worth doing.
 
 - [x] Found the mesh's two UV sets in the `.blend`: `uvset1` (active/render,
       mapped to a real painted image, `cat texture.jpg`, 1024², packed into
@@ -325,6 +323,116 @@ the procedural walk specifically looks bad after the texture change lands.
       artifacting at 1024² reads as acceptable up close on-screen (it looked
       fine in a flat-shaded software rasterizer preview, which is not the
       same as the game's actual lit PBR material).
+
+## Prototype tradeoff: baked walk-cycle playback for legs, procedural for everything else
+
+Decision (2026-08-10): the user confirmed the procedural leg IK specifically
+reads as rushed next to the source `.blend`'s own motion, so built playback
+for real, is not a shortcut but is worth the cost. Scope was deliberately
+narrowed twice, both to keep this reviewable without a working compiler on
+this machine (see Environment) and because the source data itself only
+supports a narrow scope cleanly:
+
+- **Only one of the `.blend`'s five action entries is actually usable.** The
+  three "SlowWalk" variants reference bone names (`BN_Eyebrow_L`, `BN_Fur_01`,
+  `Saddle`, `Handle`, `C_ctrl`, ...) that don't exist anywhere in this
+  skeleton — leftovers from a richer/different rig version, not something to
+  retarget. A second "Walk" variant is a near-miss (31/32 bones match). The
+  one clean fit — 44/44 bones match by name, and it's the action already
+  assigned active on the Armature — is
+  `Armature|Armature|Armature|Walk|Walk:BaseAnimation`, 90 frames at 30fps
+  (3s), lateral-sequence gait. Its Hips motion is a small in-place bob
+  (~0.02-0.1 units of oscillation), not a room-crossing drift, so it loops
+  without needing separate root-motion handling.
+- **Only legs + hips are clip-driven, not the whole 44-bone action.** Spine,
+  tail and ear motion the clip also carries were deliberately dropped at
+  export time (`export-anim.py`'s default `--joints` filter, *not* a Swift
+  conditional) — driving those from the clip would fight the procedural
+  systems already handling them well (look-at, idle tail sway, ear twitch)
+  for no benefit, since legs were the specific complaint. This also means
+  `CatWalkClip`'s Swift consumer never has to make that judgment call itself:
+  it just applies whatever the file contains.
+
+New tool: `Tools/usd/export-anim.py <in.usdz|usdc> <out.catanim>` (`--joints=all`
+to keep everything instead of the legs+hips default).
+
+- [x] Identified the one usable action (above) via Blender MCP — checked each
+      action's animated bone names against the armature's real names directly
+      (`arm.data.bones`), not by name pattern-matching alone.
+- [x] Re-exported from Blender with `export_animation=True`, scene frame range
+      set to 1-90 to match the action, same `Armature`+`U3DMesh` selection as
+      the earlier joint-name export. Produces a `SkelAnimation` prim with 90
+      time samples, one 55-entry rotation/translation/scale array per sample.
+- [x] **Critical correctness issue caught before it reached Swift**: a
+      `SkelAnimation`'s rotations are local-to-parent *in the source file's
+      own bind pose* — but `CatShape`/`CatBuilder` deliberately discard rest
+      *rotations* when building the rig (a joint entity starts at identity;
+      see `CatShape.swift`'s own doc comment about a past bug where applying
+      a file's raw bind-relative rotations "folded the skeleton into a heap"
+      because every bone's rest orientation sits on a different,
+      exporter-chosen axis). Writing the clip's raw rotations straight onto a
+      `CatMeshAsset` joint would have been exactly that bug again. Fixed by
+      re-expressing every frame's rotation as a delta from *this skeleton's
+      own* bind-local rotation (`delta = restLocal.inverse() * frameLocal`,
+      both computed with `pxr`'s own `Gf.Matrix4d`/`Gf.Quatd` operators to
+      avoid hand-deriving row/column-convention matrix math a second time).
+      Verified three independent ways before trusting it: (1) a round-trip
+      check that `restLocal * delta` reproduces `frameLocal` exactly: passed;
+      (2) delta rotation *angles* are small and physically sensible for a
+      walking gait (thigh 5-36°, calf 0-27°, paw/toe up to ~100° through the
+      swing phase) rather than huge or nonsensical: confirmed; (3) read back
+      the actual written `.catanim` binary (not the intermediate Python
+      values) and checked every quaternion is unit-length, no NaNs, and no
+      frame-to-frame jump exceeds ~11° across all 90 frames at 30fps: passed,
+      zero NaNs, max jump 10.7°.
+      **This is the one part of this whole session most worth an actual human
+      look once Xcode is available** — it's a derivation, not a transcription,
+      and the verification above is numerical self-consistency, not a picture
+      of a cat walking.
+- [x] `export-anim.py`'s joint filter defaults to hips + each leg's
+      hip/knee/ankle/paw chain (17 of 55 joints), verified to produce exactly
+      the same 17 raw joint indices already established by `export-cat.py`'s
+      independent role-resolution (`hips`=0, `hindHip/Knee/Ankle/PawL/R`,
+      `foreHip/Knee/Ankle/PawL/R`) — two independently-computed paths agreeing
+      on indices is good evidence neither has a joint-order bug.
+      `MeowRoom/Resources/cat-walk.catanim`, 42.9 KB.
+- [x] New `MeowRoom/Scene/CatWalkClip.swift`: loads the binary (same
+      hand-rolled little-endian reader pattern as `CatMeshAsset`), samples at
+      an arbitrary time with slerp/lerp between the two nearest baked frames
+      and loops. Mirrors `TextureFactory.catCoatBaked`'s graceful-absence
+      design — `try?` on load, nil is a valid, silent state.
+- [x] Wired into `CatAnimator.solveLegs`: when `motion.pose == .walking` (the
+      one gait the clip's lateral-sequence pattern actually matches — trot,
+      run and pounce keep the existing IK, which already has the right foot
+      pattern for each) and the cat is actually moving, sample the clip at
+      `gait * clip.duration` — reusing the *existing* speed-scaled `gait`
+      accumulator rather than wall-clock time, so clip playback speeds up and
+      slows down with the cat exactly like the procedural stride already did
+      — and write only `.orientation` per driven joint, then return early
+      (skipping the procedural leg loop entirely for that frame). **Position
+      is deliberately not applied even though the clip has it** — every other
+      joint write in this file is rotation-only, joint *positions* are fixed
+      once at build time (`CatShape.Shaped`'s "a joint is a point" contract),
+      and the procedural fallback path never writes `.position` either — so a
+      joint left at a clip-sampled translation would stay there, silently
+      wrong, for as long as the cat then stood still or trotted afterward.
+      The existing sine-wave body bob supplies vertical bounce on the same
+      `gait` phase instead.
+- [x] Known, accepted limitation, not fixed here: switching between
+      clip-driven and IK-driven legs at the `moving`/`.walking` threshold is
+      an instant swap, not a crossfade, so there may be a visible pop at that
+      exact transition. Matches the existing code's own threshold-based
+      gating style (`if moving { ... }` already works this way for the
+      procedural stride), so not a new category of rough edge — but worth
+      knowing about before spending time hunting for why a walk-start looks
+      slightly off.
+- [x] **Not verified by compiling** — same WSL2/firmware-virtualization
+      blocker as the rest of this session's Swift work. Unlike the texture
+      change, there is no way to sanity-check this one *without* running it
+      (a rotation delta being "smooth and small" doesn't prove it's applied
+      about the right axis in RealityKit's actual composition — see the
+      correctness-issue note above). Treat this as the least-trusted change
+      in this session until it has actually been seen animating a cat.
 
 ## Tier 0 fixes from ASSETS.md (small, independent, no modelling)
 

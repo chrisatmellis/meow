@@ -62,10 +62,16 @@ final class CatAnimator {
     private var tailFlickImpulse: Float = 0
     private var earTwitch: Float = 0
     private var earTwitchTimer: Float = 2
+    /// A baked walk cycle, if the bundle carries one — see `CatWalkClip`. Absent
+    /// on a target that doesn't bundle `cat-walk.catanim`, same graceful-absence
+    /// pattern as `TextureFactory.catCoatBaked`: `solveLegs` just falls back to
+    /// the procedural IK it always used.
+    private let walkClip: CatWalkClip?
 
     init(rig: CatRig) {
         self.rig = rig
         self.noise = ValueNoise(seed: rig.appearance.seed &+ 1234)
+        self.walkClip = try? CatWalkClip.load("cat-walk")
     }
 
     /// Called when the cat vocalises so the jaw actually moves.
@@ -149,8 +155,38 @@ final class CatAnimator {
     // MARK: - Legs
 
     private func solveLegs(dt: Float, motion: CatMotion, bodyY: Float, strideLength: Float) {
-        let phases = phaseOffsets(for: motion.pose)
         let moving = motion.speed > 0.03
+
+        // A plain walk is the one gait the baked clip was authored for
+        // (`phaseOffsets`' lateral-sequence default) — trot/run/pounce keep the
+        // procedural IK below, which already has the right foot pattern for
+        // each. `gait` is already speed-scaled (advanced by
+        // `dt * motion.speed / strideLength` above), so multiplying it by the
+        // clip's own duration keeps clip playback locked to the same stride
+        // rate the procedural path would have used, rather than running the
+        // clip at its own authored speed regardless of how fast the cat is
+        // actually moving.
+        if moving, motion.pose == .walking, let clip = walkClip, clip.jointCount == rig.skinJoints.count {
+            // Rotation only, matching every other joint write in this file
+            // (see `CatShape.Shaped`'s doc comment: a joint's *position* is
+            // fixed at build time — "the offset from its parent and nothing
+            // else" — and all motion is expressed as rotation about that fixed
+            // point). The clip also carries translation (mostly a small hip
+            // bob), but applying it here would leave that position stale once
+            // the cat leaves this branch — the procedural fallback below never
+            // writes `.position`, only `.eulerAngles`, so a joint left at a
+            // clip-sampled translation would stay there, pivoting around the
+            // wrong point, for as long as the cat then stands still or trots.
+            // The existing `bob` term a few lines up (`rig.body.position`)
+            // already supplies a vertical bounce on the same `gait` phase, so
+            // dropping the clip's own translation loses little.
+            clip.sample(time: gait * clip.duration) { joint, rotation, _ in
+                rig.skinJoints[joint].orientation = rotation
+            }
+            return
+        }
+
+        let phases = phaseOffsets(for: motion.pose)
         let lift = min(0.045, 0.018 + motion.speed * 0.020)
         let stride = min(strideLength * 0.5, 0.02 + motion.speed * 0.055)
 
