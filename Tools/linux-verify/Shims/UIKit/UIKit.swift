@@ -32,6 +32,18 @@ open class UIImage {
     private let backing: CGImage?
     public init() { backing = nil }
     public init(cgImage: CGImage) { backing = cgImage }
+
+    /// Failable, because UIKit's is.
+    ///
+    /// The optionality is the whole point rather than a detail. A non-failable
+    /// version here infers `() -> UIImage` for a caller's decoding closure, and
+    /// its `guard ... else { return nil }` then fails to typecheck — a shim gap
+    /// reported as an error in application code that is perfectly correct.
+    public init?(data: Data) {
+        guard !data.isEmpty else { return nil }
+        backing = CGImage()
+    }
+
     open var cgImage: CGImage? { backing ?? CGImage() }
 }
 

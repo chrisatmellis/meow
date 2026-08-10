@@ -284,6 +284,36 @@ public func simd_cross(_ a: SIMD3<Float>, _ b: SIMD3<Float>) -> SIMD3<Float> { c
 public func simd_act(_ q: simd_quatf, _ v: SIMD3<Float>) -> SIMD3<Float> { q.act(v) }
 public func simd_mul(_ a: simd_float4x4, _ b: simd_float4x4) -> simd_float4x4 { a * b }
 
+public func simd_mix(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ t: SIMD3<Float>) -> SIMD3<Float> {
+    a + (b - a) * t
+}
+
+/// Shortest-arc spherical interpolation, matching simd's behaviour.
+///
+/// Two details the obvious implementation gets wrong, and which a walk cycle
+/// shows immediately. A quaternion and its negation are the same rotation, so
+/// without the sign flip half the frame pairs interpolate the long way round and
+/// the leg snaps backwards through the hip. And when the two poses are nearly
+/// equal the sine denominator collapses, so that case falls back to a linear
+/// blend rather than dividing by ~0.
+public func simd_slerp(_ a: simd_quatf, _ b: simd_quatf, _ t: Float) -> simd_quatf {
+    let qa = a.normalized.vector
+    var qb = b.normalized.vector
+
+    var cosine = qa.x * qb.x + qa.y * qb.y + qa.z * qb.z + qa.w * qb.w
+    if cosine < 0 { qb = -qb; cosine = -cosine }
+
+    if cosine > 0.9995 {
+        return simd_quatf(vector: qa + (qb - qa) * t).normalized
+    }
+
+    let theta = acosf(max(-1, min(1, cosine)))
+    let sinTheta = sinf(theta)
+    let wa = sinf((1 - t) * theta) / sinTheta
+    let wb = sinf(t * theta) / sinTheta
+    return simd_quatf(vector: qa * wa + qb * wb).normalized
+}
+
 // MARK: - Transform
 
 public struct Transform {

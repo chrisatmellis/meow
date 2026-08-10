@@ -1,5 +1,5 @@
 import Foundation
-import simd
+import RealityKit
 
 /// A baked skeletal animation clip — one specific walk cycle, sampled dense
 /// (one recorded pose per frame, not sparse keyframes) because that's what the
