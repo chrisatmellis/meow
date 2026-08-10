@@ -114,22 +114,33 @@ bridge, ear cartilage ridges, pad separation, nose leather, claw sheaths. Two ba
 variants minimum: **furred** and **hairless** (Sphynx wrinkles — better than the 900
 procedural wrinkle strokes at `SurfaceMaps.swift:408-426`).
 
-### C. UV layout — authored, honouring the existing convention
+### C. UV layout — two sets, only one of them authored
 
-**Critical constraint:** all 17 coat-pattern generators in `TextureFactory.drawPattern` are
-written against `unwrap.py`'s contract — *u runs once around the part, u=0.25 is the spine,
-u=0.75 is the belly; v runs along the body, one repeat per torso length*
-(`unwrap.py:12-19`). Do **not** author a conventional game UV layout and rewrite the
-generators. Author a manual unwrap that *honours the same convention*: torso+neck as one
-cylinder seamed on the belly midline, legs as cylinders seamed on the inner leg, tail
-seamed underneath.
+`unwrap.py` does not produce an atlas. It produces a **coordinate system**: `u` is the angle
+around whichever bone owns the vertex (0.25 = spine, 0.75 = belly), `v` is distance along the
+bone chain — **unbounded, not normalised** — and parts **overlap deliberately**. Both front
+legs occupy the same UV region; the texture tiles. That is the point: it is why a mackerel
+tabby's rings are bands of constant `v` running unbroken from shoulder to hip and on down the
+legs, and all 17 generators in `TextureFactory` are written against it.
 
-The one place the convention must break: **the face gets its own flat island**, placed in
-the v-range the head occupies. A cat's face is a disc, not a tube, and forcing it round a
-cylinder is why the muzzle textures badly today.
+Two consequences. **You cannot bake into this set** — all four legs bake into the same
+texels. And hand-authoring it in Blender means fighting every tool Blender has to reproduce
+what the algorithm already does correctly.
 
-Payoff: far less stretch, a paintable face, and every existing Core Graphics generator
-keeps working unchanged.
+So the mesh carries two:
+
+| Set | Made by | Used for |
+|---|---|---|
+| **UV0** `pattern` | `unwrap.py`, at export | Runtime-painted coat, markings, material maps |
+| **UV1** `bake` | Authored in Blender | Baked normal, AO, curvature, cavity, thickness |
+
+Clean topology and named joints improve UV0 substantially with no algorithm change. The one
+place it genuinely breaks down is the face — a cat's face is a disc, not a tube, and forcing
+it round a cylinder is why the muzzle textures badly. Fix that with a `face_flat` vertex
+group that `unwrap.py` projects planar instead of cylindrically.
+
+This means a second UV array in `MEOWCAT3` and a material change to sample the baked maps
+through UV1. See `RETOPO.md` for the step-by-step.
 
 ### D. The skeleton — ~60 joints, **named**
 
@@ -218,6 +229,7 @@ existing harness.
 nothing breaks mid-migration, and append:
 
 ```
+  uv1           : vertexCount × 2×f32, the bake atlas (UV0 stays where it is)
   jointNames    : u32 count, then per joint (u32 len, utf8 bytes)
   submeshes     : u32 count, then per submesh (u32 firstIndex, u32 indexCount, u16 materialId)
   morphs        : u32 count, then per morph
