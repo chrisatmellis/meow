@@ -76,7 +76,8 @@ wrong on two of the eight leg chains.
       entries changed), then re-parsed the patched file fresh and confirmed
       all four leg groups satisfy the convention. Second run is a no-op
       ("already match the convention"), confirming idempotence.
-- [ ] Commit the patched `cat.catmesh` alongside the script.
+- [x] Commit the patched `cat.catmesh` alongside the script (done in
+      `ba0221c`, same commit as the script).
 
 ## Next: re-export with joint names, via Blender MCP
 
