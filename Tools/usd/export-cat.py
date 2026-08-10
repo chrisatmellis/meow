@@ -27,7 +27,16 @@ name table when most of `ROLES` actually resolves (see `NAME_MATCH_THRESHOLD`), 
 an unrelated rig with coincidentally similar bone names doesn't silently produce a
 mostly-empty role table instead of falling back.
 
-    Tools/usd/export-cat.py <in.usdz> <out.catmesh>
+## Two sources of UVs
+
+By default this generates its own texture coordinates (`unwrap.py`'s per-bone
+cylindrical unwrap), because most exports have no usable UVs of their own to
+carry through. `--uvs=source` instead carries through the mesh's own `st`
+primvar untouched, for the one export that actually has a hand-painted atlas
+behind it — trading the coat texture's ability to be repainted per-breed at
+runtime for using that real artwork as-is.
+
+    Tools/usd/export-cat.py [--uvs=source] <in.usdz> <out.catmesh>
 """
 import math
 import os
@@ -35,7 +44,8 @@ import struct
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from unwrap import build, unwrap, split_seam, report, dot, sub, cross  # noqa: E402
+from unwrap import (build, unwrap, split_seam, split_by_source_uv, report,  # noqa: E402
+                     dot, sub, cross)
 
 MAGIC = b'MEOWCAT2'
 
@@ -230,19 +240,27 @@ def _sq(v):
 
 
 def main():
-    if len(sys.argv) < 3:
+    args = [a for a in sys.argv[1:] if not a.startswith('--')]
+    use_source_uvs = '--uvs=source' in sys.argv[1:]
+    if len(args) < 2:
         print(__doc__)
         return 1
-    src, dst = sys.argv[1], sys.argv[2]
+    src, dst = args[0], args[1]
     model = build(src)
     scale = model['scale']
 
-    torso = max(model['chain']) if model['chain'] else 1.0
-    v_per_metre = 1.0 / max(1e-6, torso * scale)
-
-    uvs = unwrap(model, v_per_metre)
-    pts, nrm, tris, uvs = split_seam(model['points'], model['normals'],
-                                     model['tris'], uvs)
+    if use_source_uvs:
+        if not model['source_uv']:
+            raise SystemExit("--uvs=source: no 'st' primvar on this mesh")
+        pts, nrm, tris, uvs = split_by_source_uv(
+            model['points'], model['normals'], model['tris'],
+            model['corners'], model['source_uv'])
+    else:
+        torso = max(model['chain']) if model['chain'] else 1.0
+        v_per_metre = 1.0 / max(1e-6, torso * scale)
+        uvs = unwrap(model, v_per_metre)
+        pts, nrm, tris, uvs = split_seam(model['points'], model['normals'],
+                                         model['tris'], uvs)
 
     jp, par = model['joint_pos'], model['parent']
     children = [[] for _ in jp]

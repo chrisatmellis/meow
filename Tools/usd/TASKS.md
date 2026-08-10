@@ -247,6 +247,85 @@ below.
         / `uv-checker.png` previews both look right: stripes ring the body
         cleanly, checker squares stay roughly square, no seam collapse.
 
+## Prototype tradeoff: real coat texture instead of procedural, while retopo is pending
+
+Decision (2026-08-10): rather than wait for retopology, use the source
+`.blend`'s own hand-painted coat for a prototype — same low-poly mesh, but
+real painted fur instead of `TextureFactory`'s procedural approximation.
+Traded away deliberately: per-cat recoloring/breed patterns (every cat looks
+like this one cat) until the mesh work catches up and a second UV set can
+carry both. Baked animation clips were considered too and **rejected** — the
+`.blend`'s two walk cycles (see below) are locomotion-only, and the app has
+no clip-playback code at all today, so wiring them in is new infrastructure,
+not a shortcut, for a system (`CatAnimator`'s two-bone IK) that already
+works and already adapts to any breed's leg proportions. Not revisited unless
+the procedural walk specifically looks bad after the texture change lands.
+
+- [x] Found the mesh's two UV sets in the `.blend`: `uvset1` (active/render,
+      mapped to a real painted image, `cat texture.jpg`, 1024², packed into
+      the file) and an unused `uvset2` (presumably meant for a future bake
+      pass, matching the `MEOWCAT3` "second UV array" plan). Also found
+      leftover, *unused* image references to a commercial rig library
+      ("Truebone Z-OO" lion rig/textures) — not part of our cat's material,
+      just orphaned data — that explain why the source animation looks
+      smoother than the procedural one: this skeleton was likely built by
+      retargeting onto a professional animal-rig template.
+- [x] Extracted `cat texture.jpg` (`bpy.data.images[...].save()` via Blender
+      MCP) to `MeowRoom/Resources/cat-coat.jpg`. It's a real painted/projected
+      atlas (visible face, eye, mouth interior, paw pads, ears, whiskers), not
+      a procedural material — confirmed by inspecting the image directly.
+- [x] Taught the export pipeline to carry a mesh's own UV seams through
+      instead of always generating `unwrap.py`'s cylindrical ones:
+      - `unwrap.py`'s `build()` now also reads the `st` primvar (the
+        USD/Blender convention for a mesh's active UV set) as flattened
+        per-face-corner values, plus a new `corners` list running parallel to
+        `tris` (the flat face-corner index for each triangle vertex — the only
+        way to look up a per-corner, not per-vertex, attribute).
+      - New `split_by_source_uv()`, a generalization of the existing
+        `split_seam()`: instead of guessing a seam from where a cylindrical
+        `u` wraps past 1.0, it splits a vertex wherever the mesh's *own*
+        authored UVs actually differ face-to-face — correct for any UV
+        layout, not just one cylindrical wrap.
+      - `export-cat.py --uvs=source` uses this path instead of
+        `unwrap()`/`split_seam()`; default behaviour (no flag) is unchanged,
+        so nothing about the previous two commits' output changed.
+      - Result: 1518 -> 1785 vertices (more than the cylindrical unwrap's 1694
+        — a hand-authored atlas has more islands/seams), still 2798 triangles,
+        still 38/38 roles. `git diff --stat` on `cat.catmesh` shows only the
+        vertex/UV/skin-weight arrays changed size accordingly.
+- [x] Verified visually **before touching any Swift**: wrote a throwaway
+      script (session scratchpad, not committed) that runs the same
+      `split_by_source_uv` path and rasterises the mesh sampling the real
+      `cat-coat.jpg` by UV, same rasteriser as `preview.py`. Front and side
+      renders both show correctly-placed markings, eye color, open mouth and
+      paw pads, no seam smearing or flipped islands. (One gotcha worth
+      remembering: USD/Blender's V=0 is the bottom of the image, an image
+      library's row 0 is the top — the preview script flips V on sample;
+      `Materials.swift`/RealityKit's own V convention should be checked the
+      same way once this can actually be seen running, not assumed.)
+      Replaced the shipped `cat.catmesh` with the `--uvs=source` export.
+- [x] Wired into Swift: `TextureFactory.catCoatBaked` loads
+      `cat-coat.jpg` from the bundle (nil if absent). `Materials.catFur`
+      prefers it over `TextureFactory.catCoat`/`catCoatPreview` when present,
+      and skips `catCoatMaps` (no baked normal/roughness/occlusion maps exist
+      for this texture yet — that's the later high-poly bake pass) in favour
+      of a flat roughness scalar. Falls back to the full procedural path
+      automatically if `cat-coat.jpg` is ever removed from the bundle — no
+      separate flag to keep in sync. `furShell`'s use of `catCoatPreview` for
+      the long-hair silhouette alpha mask was deliberately left alone: a
+      photo atlas doesn't tile and isn't the right thing there regardless.
+      **Not verified by compiling** — same WSL2/firmware-virtualization
+      blocker as the joint-role work above. This change is a larger, more
+      structural diff than that one (new bundled binary asset, a new public
+      `TextureFactory` entry point, a conditional in `catFur`), so give it
+      real scrutiny — ideally an actual run in Xcode, not just a compile —
+      the first time either becomes available. Specific things that can't be
+      confirmed without seeing it rendered: whether RealityKit's V convention
+      needs the same flip the preview script needed, and whether JPEG
+      artifacting at 1024² reads as acceptable up close on-screen (it looked
+      fine in a flat-shaded software rasterizer preview, which is not the
+      same as the game's actual lit PBR material).
+
 ## Tier 0 fixes from ASSETS.md (small, independent, no modelling)
 
 - [ ] Drive `dilation` in `Materials.swift:115` from `WorldClock`'s solar

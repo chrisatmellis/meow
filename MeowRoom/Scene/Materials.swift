@@ -65,11 +65,18 @@ enum Materials {
     // MARK: - The cat
 
     static func catFur(_ a: CatAppearance, preview: Bool = false) -> PhysicallyBasedMaterial {
-        let tex = preview ? TextureFactory.catCoatPreview(a) : TextureFactory.catCoat(a)
+        // The baked coat wins when present (see `TextureFactory.catCoatBaked`) —
+        // real painted fur instead of the procedural approximation, for the
+        // prototype cat. No baked normal/roughness/occlusion maps exist for it yet
+        // (that's the high-poly sculpt-and-bake pass in `Tools/usd/TASKS.md`'s
+        // longer-term list), so `maps` stays nil on this path: a flat roughness
+        // scalar rather than a mismatched procedural relief map.
+        let baked = TextureFactory.catCoatBaked
+        let tex = baked ?? (preview ? TextureFactory.catCoatPreview(a) : TextureFactory.catCoat(a))
         var m = pbr(diffuse: tex,
                     roughness: a.hairless ? 0.42 : (0.95 - 0.45 * a.furGloss),
                     metalness: 0.0,
-                    maps: TextureFactory.catCoatMaps(a, preview: preview))
+                    maps: baked == nil ? TextureFactory.catCoatMaps(a, preview: preview) : nil)
         // Gloss is carried by the coat's roughness map, which varies along each
         // hair, so light rakes across the fur instead of washing the whole cat
         // evenly. The `specular` line this replaced was ignored entirely under

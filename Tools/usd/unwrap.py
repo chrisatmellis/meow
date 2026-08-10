@@ -95,15 +95,27 @@ def build(path_in):
     normals = [tuple(n) for n in normals] if normals else None
 
     # Triangulate by fanning. Everything here is already triangles, but a quad
-    # would otherwise be dropped silently.
-    tris, at = [], 0
+    # would otherwise be dropped silently. `corners` runs parallel to `tris`:
+    # each entry is the *flat face-corner position* (an index into `indices`,
+    # and into any faceVarying primvar's values) for that triangle's three
+    # vertices — the only way to recover a per-corner attribute like a real,
+    # hand-authored UV set, where the same vertex legitimately carries a
+    # different value on each face that touches it.
+    tris, corners, at = [], [], 0
     for c in counts:
         for k in range(1, c - 1):
             tris.append((indices[at], indices[at + k], indices[at + k + 1]))
+            corners.append((at, at + k, at + k + 1))
         at += c
 
-    # --- Skeleton: world rest positions, parents, and a direction per bone.
+    # --- A hand-authored UV set, if the mesh carries one, alongside the tool's
+    # own per-bone unwrap. `st` is the convention both Blender's and most other
+    # USD exporters use for a mesh's primary/active UV set.
     api = UsdGeom.PrimvarsAPI(mesh_prim)
+    st = api.GetPrimvar('st')
+    source_uv = [tuple(uv) for uv in st.ComputeFlattened()] if st and st.HasValue() else None
+
+    # --- Skeleton: world rest positions, parents, and a direction per bone.
     ji = api.GetPrimvar('skel:jointIndices')
     jw = api.GetPrimvar('skel:jointWeights')
     skel = UsdSkel.Skeleton(skel_prim) if skel_prim else None
@@ -161,7 +173,8 @@ def build(path_in):
         if parent[i] >= 0:
             chain[i] = chain[parent[i]] + length[parent[i]]
 
-    return dict(points=points, tris=tris, normals=normals, scale=scale,
+    return dict(points=points, tris=tris, corners=corners, source_uv=source_uv,
+                normals=normals, scale=scale,
                 joint_pos=joint_pos, parent=parent, direction=direction, bind=bind,
                 length=length, chain=chain, joint_names=names,
                 ji=list(ji.Get()) if ji else None, ji_n=ji.GetElementSize() if ji else 0,
@@ -250,6 +263,37 @@ def split_seam(points, normals, tris, uvs):
                 new.append(i)
         out_tris.append(tuple(new))
     return out_p, (out_n if normals else None), out_tris, out_uv
+
+
+def split_by_source_uv(points, normals, tris, corners, source_uv):
+    """Same job as `split_seam` — duplicate a vertex everywhere its texture
+    coordinate needs to differ from face to face — but general rather than
+    specific to a single cylindrical wraparound, because a hand-authored UV
+    set can have any number of islands with seams anywhere.
+
+    The mesh already says exactly where its seams are: `source_uv` is one
+    value per *face corner*, not per vertex, so a vertex used by two faces on
+    opposite sides of a seam simply shows up here with two different values.
+    Splitting is then just deduplicating (vertex, uv) pairs instead of
+    guessing where a seam must be from the geometry.
+    """
+    out_p, out_n, out_uv = [], ([] if normals else None), []
+    made = {}
+    out_tris = []
+    for tri, corner in zip(tris, corners):
+        new = []
+        for vi, ci in zip(tri, corner):
+            uv = source_uv[ci]
+            key = (vi, uv)
+            if key not in made:
+                made[key] = len(out_p)
+                out_p.append(points[vi])
+                if normals:
+                    out_n.append(normals[vi])
+                out_uv.append(uv)
+            new.append(made[key])
+        out_tris.append(tuple(new))
+    return out_p, out_n, out_tris, out_uv
 
 
 def report(points, tris, uvs, scale):

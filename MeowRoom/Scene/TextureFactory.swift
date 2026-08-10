@@ -156,6 +156,26 @@ enum TextureFactory {
 
     // MARK: - Cat coat
 
+    /// The hand-painted coat baked into the source `.blend`, extracted to
+    /// `MeowRoom/Resources/cat-coat.jpg` and paired with `cat.catmesh`'s UVs when
+    /// it was exported with `export-cat.py --uvs=source` (see `Tools/usd/TASKS.md`).
+    ///
+    /// One fixed image, not a function of `CatAppearance` — this is a prototype
+    /// tradeoff while the mesh is mid-retopology: real, painted fur instead of the
+    /// procedural approximation `drawCoat` makes, at the cost of every cat looking
+    /// like this one cat. `Materials.catFur` falls back to `catCoat` when this is
+    /// absent, so removing the bundled file (or building for a target where it
+    /// isn't included) silently restores full recoloring rather than failing.
+    static var catCoatBaked: UIImage? {
+        cachedBakedCoat
+    }
+
+    private static let cachedBakedCoat: UIImage? = {
+        guard let url = Bundle.main.url(forResource: "cat-coat", withExtension: "jpg"),
+              let data = try? Data(contentsOf: url) else { return nil }
+        return UIImage(data: data)
+    }()
+
     static func catCoat(_ a: CatAppearance) -> UIImage {
         let key = "coat-\(coatKey(a))"
         return cached(key, bytes: textureBytes(1024)) { drawCoat(a, size: 1024) }
