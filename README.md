@@ -245,6 +245,12 @@ an afternoon away either way.
 The cat is a modelled mesh — the only art asset in the project — shaped at build
 time into whatever the player asked for.
 
+It is also the weakest thing in the project: a bought conversion of 2,804
+triangles against a 60,000 budget, with no authored UVs, no blendshapes and no
+baked maps. `Tools/usd/ASSETS.md` is the production plan for replacing it —
+what to model, how many cat variants are actually needed (one), and what the
+pipeline has to grow to receive them.
+
 `Tools/usd/export-cat.py` takes a skinned USDZ and produces `cat.catmesh`: the
 geometry untouched, plus the two things it was missing. Texture coordinates,
 because the file had none and every pattern, marking and material map in this
