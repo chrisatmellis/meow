@@ -249,6 +249,21 @@ def main():
     model = build(src)
     scale = model['scale']
 
+    # The stage's metres-per-unit is taken on trust, and a stage that declares
+    # metres while carrying centimetre geometry yields a cat a hundred times too
+    # large. Nothing downstream notices: the mesh parses, the skinning binds, the
+    # app builds, and the first sign of trouble is a cat clipping through the
+    # ceiling of a room 2.4 metres tall. Checked here because this is the last
+    # point at which the mistake is still one number rather than a baked asset.
+    ys = [p[1] for p in model['points']]
+    height_m = (max(ys) - min(ys)) * scale
+    if not 0.05 < height_m < 1.0:
+        raise SystemExit(
+            f'implausible cat: {height_m:.3f} m tall at metersPerUnit={scale}.\n'
+            f'The stage metadata and the geometry disagree. Fix the unit setting\n'
+            f'on the export from the source .blend — rescaling the baked file\n'
+            f'afterwards leaves the next re-export to make the same mistake.')
+
     if use_source_uvs:
         if not model['source_uv']:
             raise SystemExit("--uvs=source: no 'st' primvar on this mesh")
