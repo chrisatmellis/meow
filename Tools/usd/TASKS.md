@@ -74,6 +74,37 @@ Status as of 2026-08-10.
       Once WSL is up: install a Linux Swift toolchain inside it and run
       `verify.sh` there unmodified, matching what the harness was actually
       written for.
+      **Status (2026-08-10): still blocked, one step further than before.**
+      The user ran `wsl --install` and rebooted, which enabled the "Windows
+      Subsystem for Linux" feature — but installing an actual Linux distro
+      (`wsl --install -d Ubuntu`) now fails with
+      `HCS_E_HYPERV_NOT_INSTALLED`, because **virtualization is disabled in
+      this machine's BIOS/UEFI firmware** (confirmed via `systeminfo`:
+      "Virtualization Enabled In Firmware: No"). This is a hardware/firmware
+      setting — nothing an agent can flip; it needs the user to reboot into
+      BIOS/UEFI setup (key varies by manufacturer: Del, F2, F10, F12...) and
+      enable "Intel VT-x" / "AMD-V" / "SVM Mode" / "Virtualization", save,
+      reboot. **User decision (2026-08-10): skipped for now** — not worth
+      interrupting other work for. Once firmware virtualization is on, the
+      remaining steps are just `wsl --install -d Ubuntu` (no longer blocked)
+      then a Linux Swift toolchain install inside it.
+
+      A native-Windows alternative was also tried and independently
+      dead-ended (see the `pip install usd-core` entry below for the
+      unrelated fix that *did* work that day) — `swiftc` on native Windows
+      needs the VS Build Tools' C++ headers, and this machine's install is
+      missing `stdnoreturn.h` (only 60 of the normal 100+ UCRT headers are
+      present under `Windows Kits\10\include\10.0.19041.0\ucrt` — a
+      partial/broken SDK component, fixable via "Visual Studio Installer" →
+      Build Tools 2019 → Modify → ensure "Windows 10 SDK" is checked → Repair
+      — also needs the user, also not done). Either path fixes the same
+      underlying gap: no working Swift compiler on this machine yet.
+      **Net effect: two Swift-touching commits this session
+      (`33cfcdd`-era joint-role work and the tongue/toe/clavicle role
+      additions) have not been compiled or run against `verify.sh`.** They're
+      small, additive, and structurally similar to already-tested changes,
+      but treat them as unverified until one of the two paths above is
+      finished.
 - [x] `pip install usd-core` run locally (2026-08-10) — `Tools/usd`'s scripts
       import `pxr` and it wasn't installed on this machine yet, per the note
       in `ASSETS.md`. User-site install (`pip install --user`, since the
