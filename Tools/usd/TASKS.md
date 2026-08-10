@@ -29,6 +29,22 @@ Status as of 2026-08-10.
       - **MCP servers only load at session start.** After registering or
         changing the server, restart the session before expecting its tools
         to show up in `ToolSearch`.
+      - **Hit a second bug (2026-08-10): drive-letter casing splits the
+        project identity.** `~/.claude.json`'s `projects` map keys entries by
+        the *literal* cwd string, and `C:/Users/oru20/Documents/meow/meow` vs
+        `c:/Users/oru20/Documents/meow/meow` are tracked as two unrelated
+        projects with independent `mcpServers`. The VS Code native extension
+        session ran with a lowercase-`c:` cwd, whose project entry had *no*
+        `mcpServers` at all — so `blender`'s tools never appeared in
+        `ToolSearch`, even after a full extension reload — while a terminal
+        `claude mcp list`/`claude mcp add` (git-bash, which normalizes to
+        lowercase `c:` too but apparently still resolved differently) reported
+        it "Connected" the whole time. Fixed by copying the working `blender`
+        entry from the uppercase-`C:` project into the lowercase-`c:` one
+        directly in `~/.claude.json`. **If Blender MCP tools go missing again
+        after this**, suspect the same drive-letter split before re-debugging
+        from scratch — check `~/.claude.json`'s `projects` keys for duplicate
+        casing variants of this repo's path and diff their `mcpServers`.
 - [x] Swift toolchain installed locally via `winget install --id
       Swift.Toolchain` (6.3.3, official, downloaded straight from
       download.swift.org — no proxy issue on the user's own network). Needs
